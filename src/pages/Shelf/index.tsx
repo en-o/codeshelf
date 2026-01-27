@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ProjectCard, ScanResultDialog, ProjectDetailPanel, AddProjectDialog, AddCategoryDialog } from "@/components/project";
+import { FloatingCategoryBall } from "@/components/ui/FloatingCategoryBall";
 import { Minus, X, MoreVertical, Plus } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import type { Project, GitRepo } from "@/types";
@@ -27,10 +28,26 @@ export function ShelfPage() {
   const [onlyModified, setOnlyModified] = useState(false);
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
   const [showAddCategoryDialog, setShowAddCategoryDialog] = useState(false);
+  const [showFloatingBall, setShowFloatingBall] = useState(false);
   const { sidebarCollapsed, setSidebarCollapsed } = useAppStore();
+  const categoryBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProjects();
+  }, []);
+
+  // 监听滚动，显示/隐藏浮动分类球
+  useEffect(() => {
+    const handleScroll = () => {
+      if (categoryBarRef.current) {
+        const rect = categoryBarRef.current.getBoundingClientRect();
+        // 当分类栏滚出视口时显示浮动球
+        setShowFloatingBall(rect.bottom < 0);
+      }
+    };
+
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   // Extract unique categories (tags) from projects and stored categories
@@ -230,7 +247,7 @@ export function ShelfPage() {
       </header>
 
       {/* Category Bar */}
-      <div className="re-cat-bar">
+      <div ref={categoryBarRef} className="re-cat-bar">
         <span style={{ fontSize: "14px", color: "var(--text-light)" }}>分类：</span>
         <div className="re-cat-list">
           {["全部", ...categories].map((c) => (
@@ -244,6 +261,15 @@ export function ShelfPage() {
           ))}
         </div>
       </div>
+
+      {/* 浮动分类球 */}
+      {showFloatingBall && (
+        <FloatingCategoryBall
+          categories={categories}
+          activeCategory={activeCat}
+          onCategoryChange={(category) => setSelectedTags(category === "全部" ? [] : [category])}
+        />
+      )}
 
       {/* Content */}
       <div className="flex-1">
