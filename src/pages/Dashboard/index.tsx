@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import {
   FolderGit2,
   GitCommit,
-  GitBranch,
   ArrowUpCircle,
   Minus,
   X,

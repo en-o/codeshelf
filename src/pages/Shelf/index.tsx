@@ -126,7 +126,7 @@ export function ShelfPage() {
   });
 
   return (
-    <div className="re-main-wrap min-h-screen">
+    <div className="flex flex-col min-h-full">
       {/* Header with Drag Region and Window Controls integrated */}
       <header className="re-header sticky top-0 z-20" data-tauri-drag-region>
         <span
@@ -135,6 +135,10 @@ export function ShelfPage() {
         >
           ☰
         </span>
+
+        <div className="flex items-center gap-2 mr-4" data-tauri-drag-region>
+          <span className="text-lg font-semibold ml-2 whitespace-nowrap">📖 我的书架</span>
+        </div>
 
         <div className="re-search-center" data-tauri-drag-region>
           <div className="re-search-box">
