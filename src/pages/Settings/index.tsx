@@ -34,7 +34,7 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <div className="p-8 max-w-3xl flex flex-col gap-6">
+      <div className="p-5 mt-5 max-w-3xl flex flex-col gap-6">
         {/* Theme Settings */}
         <section className="re-card">
           <h2 className="text-[17px] font-semibold mb-6">外观</h2>
@@ -127,8 +127,8 @@ function ThemeOption({ icon: Icon, label, value, currentValue, onChange }: Theme
     <button
       onClick={() => onChange(value)}
       className={`flex items-center gap-3 px-6 py-3.5 rounded-lg border transition-all ${isSelected
-          ? "border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]"
-          : "border-[var(--border)] hover:border-[var(--primary)] text-[var(--text-light)] hover:bg-[var(--primary-light)] hover:text-[var(--primary)]"
+        ? "border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]"
+        : "border-[var(--border)] hover:border-[var(--primary)] text-[var(--text-light)] hover:bg-[var(--primary-light)] hover:text-[var(--primary)]"
         }`}
     >
       <Icon className="w-5 h-5" />
