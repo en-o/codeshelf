@@ -1,86 +1,113 @@
 import { Input } from "@/components/ui";
 import { useAppStore, Theme } from "@/stores/appStore";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, Minus, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function SettingsPage() {
   const { theme, setTheme } = useAppStore();
 
   return (
-    <div className="flex flex-col h-full p-10 max-w-3xl">
-      <h1 className="text-[var(--color-text-primary)] mb-10 text-2xl">设置</h1>
+    <div className="re-main-wrap">
+      {/* Header with Title and Integrated Window Controls */}
+      <header className="re-header sticky top-0 z-20" data-tauri-drag-region>
+        <div className="flex-1 flex items-center gap-3" data-tauri-drag-region>
+          <span className="text-lg font-semibold ml-2">⚙️ 设置</span>
+        </div>
 
-      {/* Theme Settings */}
-      <section className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded-xl p-7 mb-6 shadow-sm">
-        <h2 className="text-[var(--color-text-primary)] mb-6 text-lg">外观</h2>
-        <div className="space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-4">
-              主题模式
-            </label>
-            <div className="flex gap-4">
-              <ThemeOption
-                icon={Sun}
-                label="浅色"
-                value="light"
-                currentValue={theme}
-                onChange={setTheme}
-              />
-              <ThemeOption
-                icon={Moon}
-                label="深色"
-                value="dark"
-                currentValue={theme}
-                onChange={setTheme}
-              />
-            </div>
+        <div className="re-actions flex items-center">
+          <div className="flex items-center ml-4 border-l border-[var(--border)] pl-3 gap-1 h-6">
+            <button
+              onClick={() => getCurrentWindow()?.minimize()}
+              className="w-7 h-7 flex items-center justify-center hover:bg-[rgba(0,0,0,0.05)] rounded-md transition-colors text-[var(--text-light)] hover:text-[var(--text)]"
+              title="最小化"
+            >
+              <Minus size={14} />
+            </button>
+            <button
+              onClick={() => getCurrentWindow()?.close()}
+              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-[var(--text-light)]"
+              title="关闭"
+            >
+              <X size={14} />
+            </button>
           </div>
         </div>
-      </section>
+      </header>
 
-      {/* Editor Settings */}
-      <section className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded-xl p-7 mb-6 shadow-sm">
-        <h2 className="text-[var(--color-text-primary)] mb-6 text-lg">编辑器设置</h2>
-        <div className="space-y-5">
-          <Input
-            label="默认编辑器命令"
-            placeholder="code"
-            defaultValue="code"
-          />
-          <p className="text-sm text-[var(--color-text-muted)] leading-relaxed">
-            支持 VSCode (code)、IDEA (idea)、Sublime Text (subl) 等
-          </p>
-        </div>
-      </section>
+      <div className="p-8 max-w-3xl flex flex-col gap-6">
+        {/* Theme Settings */}
+        <section className="re-card">
+          <h2 className="text-[17px] font-semibold mb-6">外观</h2>
+          <div className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-[var(--text-light)] mb-4">
+                主题模式
+              </label>
+              <div className="flex gap-4">
+                <ThemeOption
+                  icon={Sun}
+                  label="浅色"
+                  value="light"
+                  currentValue={theme}
+                  onChange={setTheme}
+                />
+                <ThemeOption
+                  icon={Moon}
+                  label="深色"
+                  value="dark"
+                  currentValue={theme}
+                  onChange={setTheme}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
 
-      {/* Scan Settings */}
-      <section className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded-xl p-7 mb-6 shadow-sm">
-        <h2 className="text-[var(--color-text-primary)] mb-6 text-lg">扫描设置</h2>
-        <div className="space-y-5">
-          <Input
-            label="扫描深度"
-            type="number"
-            placeholder="3"
-            defaultValue="3"
-            min={1}
-            max={10}
-          />
-          <p className="text-sm text-[var(--color-text-muted)] leading-relaxed">
-            扫描目录时的最大递归深度
-          </p>
-        </div>
-      </section>
+        {/* Editor Settings */}
+        <section className="re-card">
+          <h2 className="text-[17px] font-semibold mb-6">编辑器设置</h2>
+          <div className="space-y-5">
+            <Input
+              label="默认编辑器命令"
+              placeholder="code"
+              defaultValue="code"
+            />
+            <p className="text-sm text-[var(--text-light)] leading-relaxed">
+              支持 VSCode (code)、IDEA (idea)、Sublime Text (subl) 等
+            </p>
+          </div>
+        </section>
 
-      {/* About */}
-      <section className="bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded-xl p-7 shadow-sm">
-        <h2 className="text-[var(--color-text-primary)] mb-6 text-lg">关于</h2>
-        <div className="text-[var(--color-text-secondary)] space-y-3">
-          <p className="font-medium text-base">CodeShelf v0.1.0</p>
-          <p className="leading-relaxed">代码书架 - 本地项目管理工具</p>
-          <p className="text-sm text-[var(--color-text-muted)] leading-relaxed">
-            基于 Tauri + React + TypeScript 构建
-          </p>
-        </div>
-      </section>
+        {/* Scan Settings */}
+        <section className="re-card">
+          <h2 className="text-[17px] font-semibold mb-6">扫描设置</h2>
+          <div className="space-y-5">
+            <Input
+              label="扫描深度"
+              type="number"
+              placeholder="3"
+              defaultValue="3"
+              min={1}
+              max={10}
+            />
+            <p className="text-sm text-[var(--text-light)] leading-relaxed">
+              扫描目录时的最大递归深度
+            </p>
+          </div>
+        </section>
+
+        {/* About */}
+        <section className="re-card">
+          <h2 className="text-[17px] font-semibold mb-6">关于</h2>
+          <div className="text-[var(--text-light)] space-y-3">
+            <p className="font-medium text-base text-[var(--text)]">CodeShelf v0.1.0</p>
+            <p className="leading-relaxed">代码书架 - 本地项目管理工具</p>
+            <p className="text-sm leading-relaxed">
+              基于 Tauri + React + TypeScript 构建
+            </p>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -99,11 +126,10 @@ function ThemeOption({ icon: Icon, label, value, currentValue, onChange }: Theme
   return (
     <button
       onClick={() => onChange(value)}
-      className={`flex items-center gap-3 px-6 py-3.5 rounded-lg border-2 transition-all ${
-        isSelected
-          ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
-          : "border-[var(--color-border)] hover:border-[var(--color-border-hover)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]"
-      }`}
+      className={`flex items-center gap-3 px-6 py-3.5 rounded-lg border transition-all ${isSelected
+          ? "border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]"
+          : "border-[var(--border)] hover:border-[var(--primary)] text-[var(--text-light)] hover:bg-[var(--primary-light)] hover:text-[var(--primary)]"
+        }`}
     >
       <Icon className="w-5 h-5" />
       <span className="font-medium">{label}</span>
