@@ -579,6 +579,7 @@ p {
   background-color: #f9fafb;
   display: flex;
   flex-direction: column;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .project-detail-header {
@@ -591,6 +592,7 @@ p {
   padding: 0 1rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
+  z-index: 20;
 }
 
 .project-detail-sidebar {
@@ -605,6 +607,24 @@ p {
   flex-direction: column;
   overflow-y: auto;
   z-index: 10;
+}
+
+/* 自定义滚动条 - 与 example 一致 */
+.project-detail-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.project-detail-sidebar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.project-detail-sidebar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.project-detail-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .project-detail-sidebar-section {
@@ -643,8 +663,36 @@ p {
   padding: 1rem; /* 16px */
 }
 
+/* 自定义滚动条 - 与 example 一致 */
+.project-detail-commits-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.project-detail-commits-list::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.project-detail-commits-list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.project-detail-commits-list::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 .project-detail-commits-list > * + * {
   margin-top: 0.5rem; /* 8px - 提交项之间的间距 */
+}
+
+/* 提交卡片悬停效果 - 与 example 一致 */
+.project-detail-commits-list .hover-card {
+  transition: all 0.3s ease;
+}
+
+.project-detail-commits-list .hover-card:hover {
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 /* 提交卡片样式 */

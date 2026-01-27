@@ -303,7 +303,8 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
               commits.map((commit, index) => (
                 <div
                   key={commit.hash}
-                  className="hover-card bg-white rounded-xl p-4 border border-gray-200 hover:border-blue-300 cursor-pointer group"
+                  className="hover-card bg-white rounded-xl p-4 border border-gray-200 hover:border-blue-300 cursor-pointer group animate-slide-up"
+                  style={{ animationDelay: `${index * 0.05}s` }}
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center self-stretch pt-1">
