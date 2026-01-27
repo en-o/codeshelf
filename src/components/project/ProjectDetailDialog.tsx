@@ -340,7 +340,7 @@ export function ProjectDetailDialog({ project, onClose, onUpdate }: ProjectDetai
                             {/* Commit Meta */}
                             <div className="flex items-center gap-3 text-xs text-[var(--text-light)]">
                               <code className="px-2 py-0.5 bg-[var(--card)] rounded font-mono">
-                                {commit.short_hash}
+                                {commit.shortHash}
                               </code>
                               <span>·</span>
                               <span>{commit.author}</span>

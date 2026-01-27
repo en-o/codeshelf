@@ -49,30 +49,6 @@ export function ShelfPage() {
     }
   }
 
-  async function handleAddProject() {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "选择项目文件夹",
-      });
-
-      if (selected) {
-        const path = selected as string;
-        const name = path.split(/[\\/]/).pop() || "Unknown";
-
-        const project = await addProject({
-          name,
-          path,
-          tags: [],
-        });
-
-        setProjects([...projects, project]);
-      }
-    } catch (error) {
-      console.error("Failed to add project:", error);
-    }
-  }
 
   async function handleScanDirectory() {
     try {

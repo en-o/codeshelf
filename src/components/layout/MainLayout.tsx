@@ -19,12 +19,14 @@ export function MainLayout({ children }: MainLayoutProps) {
     }
   }, [theme]);
 
+  const { sidebarCollapsed } = useAppStore();
+
   // Use the 1:1 classes from index.css
   return (
     <div className="flex w-full min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar currentPage={currentPage} onPageChange={setCurrentPage} />
 
-      <div className="re-main-wrap flex flex-col min-h-screen">
+      <div className={`re-main-wrap ${sidebarCollapsed ? 'expanded' : ''}`}>
         <main className="flex-1">
           {children(currentPage)}
         </main>

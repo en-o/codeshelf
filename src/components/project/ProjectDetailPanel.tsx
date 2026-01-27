@@ -100,9 +100,9 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col">
+    <div className="project-detail-panel">
       {/* Header - 完全按照 example-projectPanel.html */}
-      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 shadow-sm">
+      <header className="project-detail-header">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30">
             <GitBranch className="text-white" size={20} />
@@ -163,11 +163,11 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-64px)]">
-        {/* Sidebar - 完全按照 example-projectPanel.html */}
-        <aside className="w-72 bg-white border-r border-gray-200 flex flex-col">
+      <div className="flex" style={{ height: 'calc(100vh - 4rem)' }}>
+        {/* Sidebar - 完全按照 example-projectPanel.html，使用固定定位 */}
+        <aside className="project-detail-sidebar">
           {/* Branch Status - 完全按照示例 */}
-          <div className="p-4 border-b border-gray-100">
+          <div className="project-detail-sidebar-section">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">当前分支</span>
               <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] border border-green-200 font-medium">
@@ -190,7 +190,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           </div>
 
           {/* Remote Info - 完全按照示例，注意这里有 overflow-y-auto */}
-          <div className="p-4 flex-1 overflow-y-auto">
+          <div className="project-detail-sidebar-section flex-1">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">远程仓库</span>
             </div>
@@ -256,9 +256,9 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
         </aside>
 
         {/* Main Content - 完全按照示例 */}
-        <main className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
+        <main className="project-detail-main">
           {/* Commits Header - 完全按照示例 */}
-          <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4 bg-white">
+          <div className="project-detail-commits-header">
             <div className="flex items-center gap-2">
               <History size={16} className="text-gray-500" />
               <span className="font-semibold text-sm text-gray-900">最近提交</span>
@@ -276,7 +276,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           </div>
 
           {/* Commits List - 完全按照示例 */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          <div className="project-detail-commits-list">
             {loading ? (
               <div className="flex items-center justify-center h-64">
                 <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-600 border-t-transparent"></div>
@@ -316,7 +316,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                           </div>
                           <div className="flex items-center gap-3 text-xs text-gray-600">
                             <span className="font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded-md border border-gray-200">
-                              {commit.short_hash}
+                              {commit.shortHash}
                             </span>
                             <span className="flex items-center gap-1 text-gray-500">
                               <User size={12} className="text-gray-400" />
