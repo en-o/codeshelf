@@ -9,3 +9,8 @@
 /.idea/codeshelf.iml
 /.idea/misc.xml
 /.idea/modules.xml
+/.idea/git_toolbox_prj.xml
+/.claude/settings.local.json
+/node_modules/
+/package-lock.json
+/dist/

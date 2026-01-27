@@ -1,0 +1,48 @@
+{
+  "name": "codeshelf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "代码书架 - 本地项目管理工具",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/en-o/codeshelf.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/en-o/codeshelf/issues"
+  },
+  "homepage": "https://github.com/en-o/codeshelf#readme",
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.20",
+    "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
+    "@tauri-apps/plugin-shell": "^2.3.4",
+    "@tauri-apps/plugin-sql": "^2.3.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.563.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "simple-git": "^3.30.0",
+    "zustand": "^5.0.10"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/react": "^19.2.9",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "autoprefixer": "^10.4.23",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}
