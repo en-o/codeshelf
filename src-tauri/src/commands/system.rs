@@ -88,3 +88,24 @@ pub async fn open_url(url: String) -> Result<(), String> {
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn read_readme(path: String) -> Result<String, String> {
+    use std::path::PathBuf;
+    use std::fs;
+
+    let project_path = PathBuf::from(&path);
+
+    // Try different README file names
+    let readme_names = vec!["README.md", "readme.md", "Readme.md", "README.MD", "README", "readme"];
+
+    for name in readme_names {
+        let readme_path = project_path.join(name);
+        if readme_path.exists() {
+            return fs::read_to_string(readme_path)
+                .map_err(|e| format!("Failed to read README: {}", e));
+        }
+    }
+
+    Err("README file not found".to_string())
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ProjectCard, ScanResultDialog, ProjectDetailDialog, AddProjectDialog, AddCategoryDialog } from "@/components/project";
+import { ProjectCard, ScanResultDialog, ProjectDetailPanel, AddProjectDialog, AddCategoryDialog } from "@/components/project";
 import { Minus, X, MoreVertical, Plus } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import type { Project, GitRepo } from "@/types";
@@ -306,9 +306,9 @@ export function ShelfPage() {
         />
       )}
 
-      {/* Project Detail Dialog */}
+      {/* Project Detail Panel */}
       {selectedProject && (
-        <ProjectDetailDialog
+        <ProjectDetailPanel
           project={selectedProject}
           onClose={() => setSelectedProject(null)}
           onUpdate={handleProjectUpdate}

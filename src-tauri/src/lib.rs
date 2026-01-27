@@ -17,6 +17,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // Log window creation
+            println!("Tauri app setup completed");
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -43,6 +47,7 @@ pub fn run() {
             system::open_in_editor,
             system::open_in_terminal,
             system::open_url,
+            system::read_readme,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
