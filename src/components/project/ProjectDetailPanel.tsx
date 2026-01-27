@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, GitBranch, GitCommit, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, MoreVertical, FolderOpen, User, Clock, Edit2, Trash2, FileText } from "lucide-react";
+import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
 import type { Project, GitStatus, CommitInfo, RemoteInfo } from "@/types";
@@ -92,15 +92,6 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
     }
   }
 
-  const colorMap: Record<string, { bg: string; text: string; border: string; dot: string }> = {
-    blue: { bg: "bg-blue-100", text: "text-blue-700", border: "border-blue-200", dot: "bg-blue-500" },
-    green: { bg: "bg-green-100", text: "text-green-700", border: "border-green-200", dot: "bg-green-500" },
-    purple: { bg: "bg-purple-100", text: "text-purple-700", border: "border-purple-200", dot: "bg-purple-500" },
-    orange: { bg: "bg-orange-100", text: "text-orange-700", border: "border-orange-200", dot: "bg-orange-500" },
-    red: { bg: "bg-red-100", text: "text-red-700", border: "border-red-200", dot: "bg-red-500" },
-    gray: { bg: "bg-gray-100", text: "text-gray-700", border: "border-gray-200", dot: "bg-gray-500" },
-  };
-
   const getRemoteType = (url: string) => {
     if (url.includes("github.com")) return "GitHub";
     if (url.includes("gitee.com")) return "Gitee";
@@ -110,7 +101,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
 
   return (
     <div className="fixed inset-0 bg-gray-50 z-50 flex flex-col">
-      {/* Header */}
+      {/* Header - 完全按照 example-projectPanel.html */}
       <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 shadow-sm">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30">
@@ -173,9 +164,9 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
       </header>
 
       <div className="flex h-[calc(100vh-64px)]">
-        {/* Sidebar */}
-        <aside className="w-72 bg-white border-r border-gray-200 flex flex-col overflow-y-auto">
-          {/* Branch Status */}
+        {/* Sidebar - 完全按照 example-projectPanel.html */}
+        <aside className="w-72 bg-white border-r border-gray-200 flex flex-col">
+          {/* Branch Status - 完全按照示例 */}
           <div className="p-4 border-b border-gray-100">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">当前分支</span>
@@ -184,8 +175,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
               </span>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 shadow-sm relative">
-              <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-1 h-5 bg-blue-600 rounded-r"></div>
+            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 branch-active shadow-sm">
               <div className="flex items-center gap-2 mb-2">
                 <GitBranch size={16} className="text-blue-600" />
                 <span className="font-semibold text-gray-900">{gitStatus?.branch || "master"}</span>
@@ -199,8 +189,8 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
             </div>
           </div>
 
-          {/* Remote Info */}
-          <div className="p-4 flex-1">
+          {/* Remote Info - 完全按照示例，注意这里有 overflow-y-auto */}
+          <div className="p-4 flex-1 overflow-y-auto">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">远程仓库</span>
             </div>
@@ -210,7 +200,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                 {remotes.map((remote) => (
                   <div
                     key={remote.name}
-                    className="bg-white rounded-lg p-3 border border-blue-200 bg-blue-50/30 shadow-sm relative overflow-hidden"
+                    className="bg-white rounded-lg p-3 mb-3 border border-blue-200 bg-blue-50/30 shadow-sm relative overflow-hidden"
                   >
                     <div className="absolute top-0 right-0 w-16 h-16 bg-blue-100 rounded-full -mr-8 -mt-8 opacity-50"></div>
                     <div className="flex items-center gap-2 mb-2 relative z-10">
@@ -232,11 +222,13 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                 ))}
               </div>
             ) : (
-              <div className="text-center py-4 text-gray-400 text-xs">未配置远程仓库</div>
+              <div className="text-center py-8 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
+                <div className="text-xs font-medium">暂无远程仓库</div>
+              </div>
             )}
 
-            {/* Quick Actions */}
-            <div className="space-y-1 mt-6">
+            {/* Quick Actions - 完全按照示例 */}
+            <div className="space-y-1 mt-4">
               <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2 px-1">快捷操作</div>
               <button
                 onClick={loadReadme}
@@ -263,9 +255,9 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           </div>
         </aside>
 
-        {/* Main Content */}
+        {/* Main Content - 完全按照示例 */}
         <main className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
-          {/* Commits Header */}
+          {/* Commits Header - 完全按照示例 */}
           <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4 bg-white">
             <div className="flex items-center gap-2">
               <History size={16} className="text-gray-500" />
@@ -283,7 +275,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
             </button>
           </div>
 
-          {/* Commits List */}
+          {/* Commits List - 完全按照示例 */}
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {loading ? (
               <div className="flex items-center justify-center h-64">
@@ -298,7 +290,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
               commits.map((commit, index) => (
                 <div
                   key={commit.hash}
-                  className="bg-white rounded-xl p-4 border border-gray-200 hover:border-blue-300 cursor-pointer group transition-all"
+                  className="hover-card bg-white rounded-xl p-4 border border-gray-200 hover:border-blue-300 cursor-pointer group"
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center self-stretch pt-1">
