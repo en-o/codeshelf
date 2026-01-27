@@ -3,6 +3,7 @@
 代码书架 - 本地项目管理工具
 
 ## 技术栈
+> 注意该安装的需要安装比如  Tauri Rust
 
 - 桌面端框架：[Tauri 2.x](https://v2.tauri.app/zh-cn/) ([Rust](https://rust-lang.org/tools/install/) 后端 + Web 前端)
 - 前端框架：[React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)

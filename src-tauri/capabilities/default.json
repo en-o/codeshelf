@@ -20,7 +20,7 @@
     "fs:allow-mkdir",
     "fs:allow-remove",
     "fs:allow-rename",
-    "fs:allow-copy",
+    "fs:allow-copy-file",
     "sql:allow-load",
     "sql:allow-execute",
     "sql:allow-select",
