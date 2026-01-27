@@ -151,6 +151,7 @@ p {
   box-shadow: var(--shadow);
   transition: var(--transition);
   flex-shrink: 0;
+  min-height: 100vh;
 }
 
 .re-nav.collapsed {
@@ -204,6 +205,7 @@ p {
   flex-direction: column;
   transition: var(--transition);
   min-width: 0;
+  min-height: 100vh;
 }
 
 .re-header {

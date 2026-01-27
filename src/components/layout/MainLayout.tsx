@@ -21,7 +21,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   // Use the 1:1 classes from index.css
   return (
-    <div className="flex w-full bg-[var(--bg)] text-[var(--text)]">
+    <div className="flex w-full min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar currentPage={currentPage} onPageChange={setCurrentPage} />
 
       <div className="re-main-wrap">
