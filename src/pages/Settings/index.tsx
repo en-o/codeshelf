@@ -4,7 +4,7 @@ import { Sun, Moon, Minus, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function SettingsPage() {
-  const { theme, setTheme, sidebarCollapsed, setSidebarCollapsed } = useAppStore();
+  const { theme, setTheme, sidebarCollapsed, setSidebarCollapsed, scanDepth, setScanDepth } = useAppStore();
 
   return (
     <div className="flex flex-col min-h-full">
@@ -93,12 +93,18 @@ export function SettingsPage() {
               label="扫描深度"
               type="number"
               placeholder="3"
-              defaultValue="3"
+              value={scanDepth.toString()}
+              onChange={(e) => {
+                const value = parseInt(e.target.value);
+                if (value >= 1 && value <= 10) {
+                  setScanDepth(value);
+                }
+              }}
               min={1}
               max={10}
             />
             <p className="text-sm text-[var(--text-light)] leading-relaxed">
-              扫描目录时的最大递归深度
+              扫描目录时的最大递归深度（1-10层）
             </p>
           </div>
         </section>

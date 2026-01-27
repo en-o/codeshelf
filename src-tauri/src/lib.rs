@@ -34,6 +34,7 @@ pub fn run() {
             // Project commands
             project::add_project,
             project::remove_project,
+            project::delete_project_directory,
             project::get_projects,
             project::update_project,
             project::toggle_favorite,

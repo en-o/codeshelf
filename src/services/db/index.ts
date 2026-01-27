@@ -9,6 +9,10 @@ export async function removeProject(id: string): Promise<void> {
   return invoke("remove_project", { id });
 }
 
+export async function deleteProjectDirectory(id: string): Promise<void> {
+  return invoke("delete_project_directory", { id });
+}
+
 export async function getProjects(): Promise<Project[]> {
   return invoke("get_projects");
 }

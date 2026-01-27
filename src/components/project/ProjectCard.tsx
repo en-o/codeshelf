@@ -1,17 +1,20 @@
 import { useState, useEffect } from "react";
 import type { Project, GitStatus } from "@/types";
 import { getGitStatus, getRemotes } from "@/services/git";
-import { openInEditor, openInTerminal, toggleFavorite } from "@/services/db";
+import { openInEditor, openInTerminal, toggleFavorite, removeProject, deleteProjectDirectory } from "@/services/db";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
 interface ProjectCardProps {
   project: Project;
   onUpdate?: (project: Project) => void;
   onShowDetail?: (project: Project) => void;
+  onDelete?: (projectId: string) => void;
 }
 
-export function ProjectCard({ project, onUpdate, onShowDetail }: Omit<ProjectCardProps, "viewMode">) {
+export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<ProjectCardProps, "viewMode">) {
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [remoteType, setRemoteType] = useState<"github" | "gitee" | "gitlab" | "other" | "none">("none");
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
     loadGitInfo();
@@ -74,6 +77,21 @@ export function ProjectCard({ project, onUpdate, onShowDetail }: Omit<ProjectCar
     }
   }
 
+  async function handleDelete(deleteDirectory: boolean) {
+    try {
+      if (deleteDirectory) {
+        await deleteProjectDirectory(project.id);
+      } else {
+        await removeProject(project.id);
+      }
+      onDelete?.(project.id);
+      setShowDeleteDialog(false);
+    } catch (error) {
+      console.error("Failed to delete project:", error);
+      alert("删除失败：" + error);
+    }
+  }
+
   function getRemoteLabel() {
     switch (remoteType) {
       case "github":
@@ -91,55 +109,75 @@ export function ProjectCard({ project, onUpdate, onShowDetail }: Omit<ProjectCar
 
   // exact 1:1 reproduction from example.html CSS
   return (
-    <div
-      onClick={() => onShowDetail?.(project)}
-      className="re-card"
-    >
-      <div className="re-card-header">
-        <h4>{project.name}</h4>
-        <span
-          className="re-star"
-          title={project.isFavorite ? "取消收藏" : "收藏"}
-          onClick={handleToggleFavorite}
-        >
-          {project.isFavorite ? "★" : "☆"}
-        </span>
-      </div>
-
-      <div className="re-card-meta">
-        {getRemoteLabel()} {gitStatus?.branch ? `· ${gitStatus.branch}` : ""}
-      </div>
-
-      <div className="re-card-cat">
-        分类：{project.tags.length > 0 ? project.tags.join(", ") : "未分类"}
-      </div>
-
-      <div className="re-card-path">
-        {project.path}
-      </div>
-
-      <div className="re-card-footer">
-        <span className="re-status">
-          {gitStatus?.isClean === false ? "有修改" : "无修改"}
-        </span>
-
-        <div className="re-card-actions">
-          <button
-            className="re-icon-btn"
-            title="编辑器"
-            onClick={handleOpenEditor}
+    <>
+      <div
+        onClick={() => onShowDetail?.(project)}
+        className="re-card"
+      >
+        <div className="re-card-header">
+          <h4>{project.name}</h4>
+          <span
+            className="re-star"
+            title={project.isFavorite ? "取消收藏" : "收藏"}
+            onClick={handleToggleFavorite}
           >
-            📝
-          </button>
-          <button
-            className="re-icon-btn"
-            title="终端"
-            onClick={handleOpenTerminal}
-          >
-            💻
-          </button>
+            {project.isFavorite ? "★" : "☆"}
+          </span>
+        </div>
+
+        <div className="re-card-meta">
+          {getRemoteLabel()} {gitStatus?.branch ? `· ${gitStatus.branch}` : ""}
+        </div>
+
+        <div className="re-card-cat">
+          分类：{project.tags.length > 0 ? project.tags.join(", ") : "未分类"}
+        </div>
+
+        <div className="re-card-path">
+          {project.path}
+        </div>
+
+        <div className="re-card-footer">
+          <span className="re-status">
+            {gitStatus?.isClean === false ? "有修改" : "无修改"}
+          </span>
+
+          <div className="re-card-actions">
+            <button
+              className="re-icon-btn"
+              title="编辑器"
+              onClick={handleOpenEditor}
+            >
+              📝
+            </button>
+            <button
+              className="re-icon-btn"
+              title="终端"
+              onClick={handleOpenTerminal}
+            >
+              💻
+            </button>
+            <button
+              className="re-icon-btn"
+              title="删除"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDeleteDialog(true);
+              }}
+            >
+              🗑️
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      {showDeleteDialog && (
+        <DeleteConfirmDialog
+          projectName={project.name}
+          onConfirm={handleDelete}
+          onCancel={() => setShowDeleteDialog(false)}
+        />
+      )}
+    </>
   );
 }

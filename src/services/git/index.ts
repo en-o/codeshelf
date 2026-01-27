@@ -7,8 +7,8 @@ import type {
   GitRepo,
 } from "@/types";
 
-export async function scanDirectory(path: string): Promise<GitRepo[]> {
-  return invoke("scan_directory", { path });
+export async function scanDirectory(path: string, depth?: number): Promise<GitRepo[]> {
+  return invoke("scan_directory", { path, depth });
 }
 
 export async function getGitStatus(path: string): Promise<GitStatus> {

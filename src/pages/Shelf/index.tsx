@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { ProjectCard, ScanResultDialog, ProjectDetailDialog } from "@/components/project";
-import { Minus, X } from "lucide-react";
+import { Minus, X, MoreVertical, Plus } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import type { Project, GitRepo } from "@/types";
 import { getProjects, addProject } from "@/services/db";
+import { scanDirectory } from "@/services/git";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Dropdown, FilterPopover } from "@/components/ui";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -14,6 +16,7 @@ export function ShelfPage() {
     setProjects,
     searchQuery,
     setSearchQuery,
+    scanDepth,
   } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [scanResults, setScanResults] = useState<GitRepo[] | null>(null);
@@ -68,6 +71,37 @@ export function ShelfPage() {
     }
   }
 
+  async function handleScanDirectory() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "选择要扫描的目录",
+      });
+
+      if (selected) {
+        setLoading(true);
+        const path = selected as string;
+        const repos = await scanDirectory(path, scanDepth);
+
+        // Filter out already added projects
+        const existingPaths = new Set(projects.map(p => p.path));
+        const newRepos = repos.filter(repo => !existingPaths.has(repo.path));
+
+        if (newRepos.length === 0) {
+          alert("未发现新的 Git 项目");
+        } else {
+          setScanResults(newRepos);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to scan directory:", error);
+      alert("扫描失败：" + error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
 
   async function handleConfirmScan(selectedPaths: string[]) {
     try {
@@ -106,6 +140,10 @@ export function ShelfPage() {
     setProjects(projects.map((p) => (p.id === updated.id ? updated : p)));
   }
 
+  function handleProjectDelete(projectId: string) {
+    setProjects(projects.filter((p) => p.id !== projectId));
+  }
+
   // Filter projects
   const filteredProjects = projects.filter((p) => {
     const matchesSearch =
@@ -140,45 +178,62 @@ export function ShelfPage() {
           <span className="text-lg font-semibold ml-2 whitespace-nowrap">📖 我的书架</span>
         </div>
 
+        {/* Simplified Search Box */}
         <div className="re-search-center" data-tauri-drag-region>
           <div className="re-search-box">
             <input
               id="searchInput"
-              placeholder="搜索项目…"
+              placeholder="搜索项目名称或路径…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             <button>🔍</button>
           </div>
-
-          <div className="re-filter-chk">
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={onlyStarred}
-                onChange={(e) => setOnlyStarred(e.target.checked)}
-              />
-              只看收藏
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={onlyModified}
-                onChange={(e) => setOnlyModified(e.target.checked)}
-              />
-              只看待提交
-            </label>
-          </div>
         </div>
 
-        <div className="re-actions flex items-center">
-          <button className="re-btn">+ 分类</button>
-          <button className="re-btn re-btn-primary" onClick={handleAddProject}>
-            + 项目
+        {/* Actions - Reorganized */}
+        <div className="re-actions flex items-center gap-2">
+          {/* Filter Button */}
+          <FilterPopover
+            onlyStarred={onlyStarred}
+            onlyModified={onlyModified}
+            onStarredChange={setOnlyStarred}
+            onModifiedChange={setOnlyModified}
+          />
+
+          {/* More Menu */}
+          <Dropdown
+            trigger={
+              <button className="re-btn flex items-center gap-2" title="更多操作">
+                <MoreVertical size={16} />
+                <span>更多</span>
+              </button>
+            }
+            items={[
+              {
+                icon: "🔍",
+                label: "扫描目录",
+                onClick: handleScanDirectory,
+              },
+              {
+                icon: "🏷️",
+                label: "添加分类",
+                onClick: () => {
+                  // TODO: 实现添加分类功能
+                  alert("添加分类功能待实现");
+                },
+              },
+            ]}
+          />
+
+          {/* Primary Action */}
+          <button className="re-btn re-btn-primary flex items-center gap-2" onClick={handleAddProject}>
+            <Plus size={16} />
+            <span>项目</span>
           </button>
 
-          {/* Integrated Window Controls - Minimalist and high-end */}
-          <div className="flex items-center ml-4 border-l border-[var(--border)] pl-3 gap-1 h-6">
+          {/* Integrated Window Controls */}
+          <div className="flex items-center ml-2 border-l border-[var(--border)] pl-3 gap-1 h-6">
             <button
               onClick={() => getCurrentWindow()?.minimize()}
               className="w-7 h-7 flex items-center justify-center hover:bg-[rgba(0,0,0,0.05)] rounded-md transition-colors text-[var(--text-light)] hover:text-[var(--text)]"
@@ -234,6 +289,7 @@ export function ShelfPage() {
                 project={project}
                 onUpdate={handleProjectUpdate}
                 onShowDetail={setSelectedProject}
+                onDelete={handleProjectDelete}
               />
             ))}
           </div>

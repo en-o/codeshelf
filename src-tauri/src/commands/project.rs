@@ -81,6 +81,25 @@ pub async fn remove_project(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn delete_project_directory(id: String) -> Result<(), String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+
+    if let Some(pos) = projects.iter().position(|p| p.id == id) {
+        let project = &projects[pos];
+        let path = &project.path;
+
+        // Delete the directory
+        std::fs::remove_dir_all(path).map_err(|e| format!("Failed to delete directory: {}", e))?;
+
+        // Remove from projects list
+        projects.remove(pos);
+        Ok(())
+    } else {
+        Err("Project not found".to_string())
+    }
+}
+
+#[tauri::command]
 pub async fn get_projects() -> Result<Vec<Project>, String> {
     let projects = PROJECTS.lock().map_err(|e| e.to_string())?;
     Ok(projects.clone())

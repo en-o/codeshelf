@@ -29,6 +29,10 @@ interface AppState {
   // Sidebar
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
+
+  // Settings
+  scanDepth: number;
+  setScanDepth: (depth: number) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -67,6 +71,10 @@ export const useAppStore = create<AppState>()(
       // Sidebar
       sidebarCollapsed: false,
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+
+      // Settings
+      scanDepth: 3,
+      setScanDepth: (scanDepth) => set({ scanDepth }),
     }),
     {
       name: "codeshelf-storage",
@@ -74,6 +82,7 @@ export const useAppStore = create<AppState>()(
         viewMode: state.viewMode,
         sidebarCollapsed: state.sidebarCollapsed,
         theme: state.theme,
+        scanDepth: state.scanDepth,
       }),
     }
   )

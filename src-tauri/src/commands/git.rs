@@ -59,9 +59,10 @@ fn run_git_command(path: &str, args: &[&str]) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn scan_directory(path: String) -> Result<Vec<GitRepo>, String> {
+pub async fn scan_directory(path: String, depth: Option<u32>) -> Result<Vec<GitRepo>, String> {
     let mut repos = Vec::new();
-    scan_for_repos(&path, &mut repos, 3)?;
+    let scan_depth = depth.unwrap_or(3);
+    scan_for_repos(&path, &mut repos, scan_depth)?;
     Ok(repos)
 }
 

@@ -24,6 +24,7 @@
   --radius: 12px;
   --transition: 0.25s ease;
   --nav-width: 180px;
+  --bg-light: #f8f9fa;
 
   /* Map old variable names to new ones to avoid immediate breakage if I miss any */
   --color-bg-primary: var(--card);
@@ -50,6 +51,7 @@
   --border: #334155;
   --star: #fbbf24;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  --bg-light: #2d3139;
 
   --color-bg-primary: var(--card);
   --color-bg-secondary: var(--bg);
@@ -309,6 +311,18 @@ p {
 
 .re-btn-primary:hover {
   background: #0051d5;
+}
+
+.re-btn-active {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.re-btn-active:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .re-cat-bar {
