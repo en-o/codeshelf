@@ -30,9 +30,9 @@ export function MainLayout({ children }: MainLayoutProps) {
         </main>
 
         <footer className="re-footer">
-          <p className="v">CodeShelf v0.1.0</p>
-          <p>代码书架 - 本地项目管理工具</p>
-          <p style={{ opacity: 0.7 }}>基于 Tauri + React + TypeScript 构建</p>
+          <p>
+            <span className="v">CodeShelf v0.1.0</span> | 代码书架 - 本地项目管理工具 | <span style={{ opacity: 0.8 }}>by tan</span> | 基于 Tauri + React + TypeScript
+          </p>
         </footer>
       </div>
     </div>

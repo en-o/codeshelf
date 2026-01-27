@@ -450,4 +450,18 @@ p {
 .re-icon-btn:hover {
   border-color: var(--primary);
   color: var(--primary);
+}.re-footer {
+  padding: 24px 20px;
+  text-align: center;
+  color: var(--text-light);
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+  line-height: 1.8;
+}
+
+.re-footer .v {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
 }
