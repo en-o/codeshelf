@@ -4,6 +4,18 @@ import type { Project, ViewMode } from "@/types";
 
 export type Theme = "light" | "dark";
 
+export interface EditorConfig {
+  id: string;
+  name: string;
+  path: string;
+  icon?: string;
+}
+
+export interface TerminalConfig {
+  type: "default" | "powershell" | "cmd" | "terminal" | "iterm" | "custom";
+  customPath?: string;
+}
+
 interface AppState {
   // Projects
   projects: Project[];
@@ -38,6 +50,16 @@ interface AppState {
   categories: string[];
   addCategory: (category: string) => void;
   removeCategory: (category: string) => void;
+
+  // Editor Settings
+  editors: EditorConfig[];
+  addEditor: (editor: EditorConfig) => void;
+  removeEditor: (id: string) => void;
+  updateEditor: (id: string, updates: Partial<EditorConfig>) => void;
+
+  // Terminal Settings
+  terminalConfig: TerminalConfig;
+  setTerminalConfig: (config: TerminalConfig) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -98,6 +120,25 @@ export const useAppStore = create<AppState>()(
             tags: p.tags.filter((t) => t !== category),
           })),
         })),
+
+      // Editor Settings
+      editors: [],
+      addEditor: (editor) =>
+        set((state) => ({ editors: [...state.editors, editor] })),
+      removeEditor: (id) =>
+        set((state) => ({
+          editors: state.editors.filter((e) => e.id !== id),
+        })),
+      updateEditor: (id, updates) =>
+        set((state) => ({
+          editors: state.editors.map((e) =>
+            e.id === id ? { ...e, ...updates } : e
+          ),
+        })),
+
+      // Terminal Settings
+      terminalConfig: { type: "default" },
+      setTerminalConfig: (terminalConfig) => set({ terminalConfig }),
     }),
     {
       name: "codeshelf-storage",
@@ -107,6 +148,8 @@ export const useAppStore = create<AppState>()(
         theme: state.theme,
         scanDepth: state.scanDepth,
         categories: state.categories,
+        editors: state.editors,
+        terminalConfig: state.terminalConfig,
       }),
     }
   )

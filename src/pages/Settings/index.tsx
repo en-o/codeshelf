@@ -2,6 +2,8 @@ import { Input } from "@/components/ui";
 import { useAppStore, Theme } from "@/stores/appStore";
 import { Sun, Moon, Minus, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { EditorSettings } from "./EditorSettings";
+import { TerminalSettings } from "./TerminalSettings";
 
 export function SettingsPage() {
   const { theme, setTheme, sidebarCollapsed, setSidebarCollapsed, scanDepth, setScanDepth } = useAppStore();
@@ -71,19 +73,10 @@ export function SettingsPage() {
         </section>
 
         {/* Editor Settings */}
-        <section className="re-card">
-          <h2 className="text-[17px] font-semibold mb-6">编辑器设置</h2>
-          <div className="space-y-5">
-            <Input
-              label="默认编辑器命令"
-              placeholder="code"
-              defaultValue="code"
-            />
-            <p className="text-sm text-[var(--text-light)] leading-relaxed">
-              支持 VSCode (code)、IDEA (idea)、Sublime Text (subl) 等
-            </p>
-          </div>
-        </section>
+        <EditorSettings />
+
+        {/* Terminal Settings */}
+        <TerminalSettings />
 
         {/* Scan Settings */}
         <section className="re-card">

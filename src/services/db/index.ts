@@ -25,12 +25,16 @@ export async function toggleFavorite(id: string): Promise<Project> {
   return invoke("toggle_favorite", { id });
 }
 
-export async function openInEditor(path: string, editor?: string): Promise<void> {
-  return invoke("open_in_editor", { path, editor });
+export async function openInEditor(path: string, editorPath?: string): Promise<void> {
+  return invoke("open_in_editor", { path, editorPath });
 }
 
-export async function openInTerminal(path: string): Promise<void> {
-  return invoke("open_in_terminal", { path });
+export async function openInTerminal(
+  path: string,
+  terminalType?: string,
+  customPath?: string
+): Promise<void> {
+  return invoke("open_in_terminal", { path, terminalType, customPath });
 }
 
 export async function openUrl(url: string): Promise<void> {

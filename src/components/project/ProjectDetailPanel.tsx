@@ -3,10 +3,12 @@ import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, Fo
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
 import { SyncRemoteModal } from "./SyncRemoteModal";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 import type { Project, GitStatus, CommitInfo, RemoteInfo } from "@/types";
 import { getGitStatus, getCommitHistory, getRemotes, gitPull, gitPush } from "@/services/git";
 import { openInEditor, openInTerminal, updateProject } from "@/services/db";
 import { invoke } from "@tauri-apps/api/core";
+import { useAppStore } from "@/stores/appStore";
 
 interface ProjectDetailPanelProps {
   project: Project;
@@ -25,6 +27,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [readmeContent, setReadmeContent] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>(project.tags);
   const [selectedLabels, setSelectedLabels] = useState<string[]>(project.labels || []);
+  const { editors, terminalConfig } = useAppStore();
 
   useEffect(() => {
     loadProjectDetails();
@@ -251,14 +254,20 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                 查看 README
               </button>
               <button
-                onClick={() => openInEditor(project.path)}
+                onClick={() => {
+                  const editorPath = editors.length > 0 ? editors[0].path : undefined;
+                  openInEditor(project.path, editorPath);
+                }}
                 className="w-full text-left px-3 py-2 rounded-md hover:bg-gray-100 text-gray-700 text-xs flex items-center gap-2 transition-colors group"
               >
                 <Code size={14} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
                 在编辑器中打开
               </button>
               <button
-                onClick={() => openInTerminal(project.path)}
+                onClick={() => {
+                  const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
+                  openInTerminal(project.path, termType, terminalConfig.customPath);
+                }}
                 className="w-full text-left px-3 py-2 rounded-md hover:bg-gray-100 text-gray-700 text-xs flex items-center gap-2 transition-colors group"
               >
                 <TagIcon size={14} className="text-gray-400 group-hover:text-blue-600 transition-colors" />
@@ -412,7 +421,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
             </div>
 
             <div className="flex-1 overflow-y-auto p-6">
-              <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">{readmeContent}</pre>
+              <MarkdownRenderer content={readmeContent} />
             </div>
           </div>
         </div>
