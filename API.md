@@ -605,6 +605,19 @@ interface HeatmapProps {
 
 ## Tauri 命令 (Rust 后端)
 
+> **详细开发指南**: 请参考 [Tauri 命令开发指南](TAURI-COMMANDS.md) 了解如何编写和调用 Tauri 命令。
+
+### 命令调用方式
+
+所有 Tauri 命令通过 `invoke` 函数调用：
+
+```typescript
+import { invoke } from "@tauri-apps/api/core";
+
+// 调用命令
+const result = await invoke<ReturnType>("command_name", { param1, param2 });
+```
+
 ### 项目管理
 
 - `get_projects()` - 获取所有项目
@@ -627,6 +640,27 @@ interface HeatmapProps {
 - `git_push(path, remote, branch, force)` - 推送
 - `git_pull(path, remote, branch)` - 拉取
 - `git_fetch(path, remote)` - 获取更新
+
+### 命令示例
+
+```typescript
+// 获取项目列表
+const projects = await invoke<Project[]>("get_projects");
+
+// 添加项目
+const newProject = await invoke<Project>("add_project", {
+  input: {
+    name: "My Project",
+    path: "/path/to/project",
+    tags: ["react", "typescript"]
+  }
+});
+
+// 获取 Git 状态
+const status = await invoke<GitStatus>("get_git_status", {
+  path: "/path/to/project"
+});
+```
 
 ---
 

@@ -198,9 +198,29 @@ npm run tauri build
 3. 在需要的地方导入使用
 
 ### 5. 添加新的 Tauri 命令
+
+详细步骤请参考 [Tauri 命令开发指南](TAURI-COMMANDS.md)
+
+**快速步骤**:
 1. 在 `src-tauri/src/commands/` 添加 Rust 函数
 2. 在 `src-tauri/src/lib.rs` 注册命令
 3. 在前端 `src/services/` 添加对应的 TypeScript 函数
+
+**示例**:
+```rust
+// Rust 端
+#[tauri::command]
+pub async fn my_command(param: String) -> Result<String, String> {
+    Ok(format!("Hello, {}!", param))
+}
+```
+
+```typescript
+// TypeScript 端
+export async function myCommand(param: string): Promise<string> {
+  return invoke("my_command", { param });
+}
+```
 
 ### 6. 修改权限
 编辑 `src-tauri/capabilities/default.json`

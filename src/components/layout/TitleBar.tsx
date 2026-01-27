@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X, FolderGit2, Search, Settings as SettingsIcon } from "lucide-react";
+import { Minus, Square, X, Search, Settings as SettingsIcon } from "lucide-react";
 
 interface TitleBarProps {
   onNavigate?: (page: string) => void;
@@ -46,7 +46,7 @@ export function TitleBar({ onNavigate, currentPage }: TitleBarProps) {
         data-tauri-drag-region
         className="flex items-center gap-2 px-3 flex-1"
       >
-        <FolderGit2 className="w-4 h-4 text-blue-500" />
+        <img src="/favicon.svg" alt="CodeShelf" className="w-4 h-4" />
         <span className="text-xs font-medium text-[var(--color-text-primary)]">
           CodeShelf - 代码书架
         </span>

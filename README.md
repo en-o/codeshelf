@@ -148,8 +148,15 @@ codeshelf/
 
 ## 📚 文档
 
+### 核心文档
 - [开发文档](DEVELOPMENT.md) - 详细的开发指南和项目结构说明
 - [API 文档](API.md) - 完整的 API 接口文档
+- [Tauri 命令开发指南](TAURI-COMMANDS.md) - 前后端通信开发指南
+
+### 专题文档
+- [图标管理](ICONS.md) - 图标文件说明和更新指南
+- [图标配置](ICONS-SETUP.md) - 图标配置完整指南
+- [自定义标题栏](TITLEBAR.md) - 标题栏实现和扩展指南
 
 ## 🎯 功能特性
 
