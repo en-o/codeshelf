@@ -36,6 +36,7 @@ pub fn run() {
             git::git_pull,
             git::git_fetch,
             git::git_clone,
+            git::sync_to_remote,
             // Project commands
             project::add_project,
             project::remove_project,

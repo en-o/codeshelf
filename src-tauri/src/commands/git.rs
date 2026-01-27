@@ -321,3 +321,63 @@ pub async fn git_clone(url: String, target_dir: String, repo_name: String) -> Re
         Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
 }
+
+#[tauri::command]
+pub async fn sync_to_remote(
+    path: String,
+    source_remote: String,
+    target_remote: String,
+    sync_all_branches: bool,
+    force: bool,
+) -> Result<String, String> {
+    // First, fetch from source remote to ensure we have latest refs
+    run_git_command(&path, &["fetch", &source_remote])?;
+
+    if sync_all_branches {
+        // Get all branches from source remote
+        let branches_output = run_git_command(&path, &["branch", "-r"])?;
+        let branches: Vec<String> = branches_output
+            .lines()
+            .filter_map(|line| {
+                let branch = line.trim();
+                if branch.starts_with(&format!("{}/", source_remote)) && !branch.contains("HEAD") {
+                    Some(branch.trim_start_matches(&format!("{}/", source_remote)).to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if branches.is_empty() {
+            return Err("No branches found to sync".to_string());
+        }
+
+        // Push each branch to target remote
+        let mut results = Vec::new();
+        for branch in branches {
+            let branch_spec = format!("{}:{}", branch, branch);
+            let mut args = vec!["push", &target_remote, &branch_spec];
+            if force {
+                args.push("--force");
+            }
+
+            match run_git_command(&path, &args) {
+                Ok(_) => results.push(format!("✓ {}", branch)),
+                Err(e) => results.push(format!("✗ {}: {}", branch, e)),
+            }
+        }
+
+        Ok(results.join("\n"))
+    } else {
+        // Sync only current branch
+        let branch = run_git_command(&path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+
+        let mut args = vec!["push", &target_remote, &branch];
+        if force {
+            args.push("--force");
+        }
+
+        run_git_command(&path, &args)?;
+        Ok(format!("Successfully synced branch '{}' to '{}'", branch, target_remote))
+    }
+}

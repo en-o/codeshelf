@@ -7,3 +7,4 @@ export { AddCategoryDialog } from "./AddCategoryDialog";
 export { CategorySelector } from "./CategorySelector";
 export { LabelSelector } from "./LabelSelector";
 export { AddProjectDialog } from "./AddProjectDialog";
+export { SyncRemoteModal } from "./SyncRemoteModal";

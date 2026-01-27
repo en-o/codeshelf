@@ -65,3 +65,19 @@ export async function gitFetch(
 ): Promise<string> {
   return invoke("git_fetch", { path, remote });
 }
+
+export async function syncToRemote(
+  path: string,
+  sourceRemote: string,
+  targetRemote: string,
+  syncAllBranches: boolean,
+  force: boolean = false
+): Promise<string> {
+  return invoke("sync_to_remote", {
+    path,
+    sourceRemote,
+    targetRemote,
+    syncAllBranches,
+    force,
+  });
+}

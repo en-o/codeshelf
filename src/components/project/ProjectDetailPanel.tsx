@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText } from "lucide-react";
+import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
+import { SyncRemoteModal } from "./SyncRemoteModal";
 import type { Project, GitStatus, CommitInfo, RemoteInfo } from "@/types";
 import { getGitStatus, getCommitHistory, getRemotes, gitPull, gitPush } from "@/services/git";
 import { openInEditor, openInTerminal, updateProject } from "@/services/db";
@@ -20,6 +21,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [loading, setLoading] = useState(true);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showReadme, setShowReadme] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   const [readmeContent, setReadmeContent] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>(project.tags);
   const [selectedLabels, setSelectedLabels] = useState<string[]>(project.labels || []);
@@ -227,6 +229,17 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
               </div>
             )}
 
+            {/* 同步到其他远程按钮 */}
+            {remotes.length > 0 && (
+              <button
+                onClick={() => setShowSyncModal(true)}
+                className="w-full mb-4 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white text-xs font-medium flex items-center justify-center gap-2 transition-all shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transform hover:-translate-y-0.5"
+              >
+                <Database size={14} />
+                同步到其他远程库
+              </button>
+            )}
+
             {/* Quick Actions - 完全按照示例 */}
             <div className="space-y-1 mt-4">
               <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2 px-1">快捷操作</div>
@@ -402,6 +415,17 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
             </div>
           </div>
         </div>
+      )}
+
+      {/* Sync Remote Modal */}
+      {showSyncModal && remotes.length > 0 && (
+        <SyncRemoteModal
+          projectPath={project.path}
+          remotes={remotes}
+          sourceRemote={remotes[0].name}
+          onClose={() => setShowSyncModal(false)}
+          onSuccess={loadProjectDetails}
+        />
       )}
     </div>
   );
