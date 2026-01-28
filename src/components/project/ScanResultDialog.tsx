@@ -273,12 +273,12 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
           </button>
         </header>
 
-        {/* 主内容 */}
-        <div className="flex-1 overflow-hidden p-4 min-h-0">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
+        {/* 主内容 - 可滚动区域 */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* 左侧：项目列表 */}
-            <div className="lg:col-span-8 h-full min-h-0">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden h-full flex flex-col">
+            <div className="lg:col-span-8">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col" style={{ maxHeight: "calc(90vh - 220px)" }}>
                 {/* 工具栏 */}
                 <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-3">
@@ -314,7 +314,7 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
                 </div>
 
                 {/* 列表 */}
-                <div className="flex-1 overflow-y-auto scan-scrollbar divide-y divide-gray-50 min-h-0">
+                <div className="flex-1 overflow-y-auto scan-scrollbar divide-y divide-gray-50">
                   {filteredRepos.map(repo => {
                     const isSelected = selectedPaths.has(repo.path);
                     const hasCategory = !!assignedCategories[repo.path];
@@ -363,11 +363,9 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
             </div>
 
             {/* 右侧：操作面板 */}
-            <div className="lg:col-span-4 flex flex-col min-h-0">
-              {/* 可滚动区域 */}
-              <div className="flex-1 overflow-y-auto scan-scrollbar space-y-4 min-h-0">
+            <div className="lg:col-span-4 space-y-4">
               {/* 1. 选中状态 */}
-              <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl shadow-lg shadow-blue-500/30 p-5 text-white relative overflow-hidden shrink-0">
+              <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl shadow-lg shadow-blue-500/30 p-5 text-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
                 <div className="relative">
                   <div className="flex items-center justify-between mb-3">
@@ -388,7 +386,7 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
 
               {/* 2. 智能推荐区 */}
               {commonPrefix && selectedPaths.size >= 2 && (
-                <div className="scan-recommend-card rounded-xl p-4 relative shrink-0">
+                <div className="scan-recommend-card rounded-xl p-4 relative">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-lg">
                       <i className="fa-solid fa-bolt text-lg"></i>
@@ -441,7 +439,7 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
               )}
 
               {/* 3. 分类选择 */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 shrink-0">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold text-gray-900 text-sm">选择目标分类</h3>
                   <button onClick={createNewCategory} className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1">
@@ -510,15 +508,14 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
                   {canApply && selectedCategory ? `应用到「${categories[selectedCategory].name}」` : "应用归类"}
                 </button>
               </div>
-              </div>
 
-              {/* 4. 操作总结 - 固定在底部 */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 shrink-0 mt-4">
+              {/* 4. 操作记录 */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">本次操作记录</h3>
                   <span className="text-xs text-gray-400">{history.length} 次操作</span>
                 </div>
-                <div className="flex flex-wrap gap-2 content-start max-h-24 overflow-y-auto">
+                <div className="flex flex-wrap gap-2 content-start max-h-20 overflow-y-auto">
                   {history.length === 0 ? (
                     <div className="text-xs text-gray-400 italic py-2">暂无归类操作</div>
                   ) : (
@@ -540,41 +537,48 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
                     })
                   )}
                 </div>
-
-                <div className="h-px bg-gray-200 my-4"></div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
-                    <span>已归类: <strong className="text-gray-900">{assignedCount}</strong> 个</span>
-                    <span>待导入: <strong className="text-blue-600">{assignedCount}</strong> 个</span>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-2">
-                    <button
-                      onClick={resetAll}
-                      className="col-span-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm flex items-center justify-center"
-                      title="重置"
-                    >
-                      <i className="fa-solid fa-rotate-left"></i>
-                    </button>
-                    <button
-                      onClick={finishImport}
-                      disabled={assignedCount === 0}
-                      className={`col-span-3 py-2.5 rounded-lg font-semibold transition-all transform active:scale-95 text-sm flex items-center justify-center gap-2 ${
-                        assignedCount > 0
-                          ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/30"
-                          : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                      }`}
-                    >
-                      <i className="fa-solid fa-circle-check"></i>
-                      确认导入所有项目
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
         </div>
+
+        {/* 底部固定操作栏 */}
+        <footer className="bg-white border-t border-gray-200 px-6 py-4 shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4 text-sm text-gray-500">
+              <span>已归类: <strong className="text-gray-900">{assignedCount}</strong> 个</span>
+              <span>待导入: <strong className="text-blue-600">{assignedCount}</strong> 个</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={resetAll}
+                className="px-4 py-2.5 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm flex items-center gap-2"
+                title="重置"
+              >
+                <i className="fa-solid fa-rotate-left"></i>
+                重置
+              </button>
+              <button
+                onClick={onCancel}
+                className="px-4 py-2.5 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={finishImport}
+                disabled={assignedCount === 0}
+                className={`px-6 py-2.5 rounded-lg font-semibold transition-all text-sm flex items-center gap-2 ${
+                  assignedCount > 0
+                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/30"
+                    : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                }`}
+              >
+                <i className="fa-solid fa-circle-check"></i>
+                确认导入 {assignedCount > 0 ? `(${assignedCount})` : ""}
+              </button>
+            </div>
+          </div>
+        </footer>
       </div>
 
       <style>{`

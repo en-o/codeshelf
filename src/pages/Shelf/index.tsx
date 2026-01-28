@@ -129,14 +129,16 @@ export function ShelfPage() {
       setLoading(true);
       const newProjects: Project[] = [];
 
-      for (const path of selectedPaths) {
+      for (let i = 0; i < selectedPaths.length; i++) {
+        const path = selectedPaths[i];
+        const category = categories[i]; // 使用对应索引的分类
         const repo = scanResults?.find(r => r.path === path);
         if (repo) {
           try {
             const project = await addProject({
               name: repo.name,
               path: repo.path,
-              tags: categories,
+              tags: category ? [category] : [], // 单个分类作为数组
               labels: labels,
             });
             newProjects.push(project);
