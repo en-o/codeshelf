@@ -36,7 +36,16 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [readmeContent, setReadmeContent] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>(project.tags);
   const [selectedLabels, setSelectedLabels] = useState<string[]>(project.labels || []);
+  // 用于显示的本地项目数据（编辑后立即更新）
+  const [localProject, setLocalProject] = useState<Project>(project);
   const { editors, terminalConfig } = useAppStore();
+
+  // 当外部 project prop 改变时同步本地状态
+  useEffect(() => {
+    setLocalProject(project);
+    setSelectedCategories(project.tags);
+    setSelectedLabels(project.labels || []);
+  }, [project.id, project.tags, project.labels]);
 
   useEffect(() => {
     loadProjectDetails();
@@ -97,6 +106,8 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
         tags: selectedCategories,
         labels: selectedLabels,
       });
+      // 更新本地状态以立即反映变化
+      setLocalProject(updated);
       onUpdate?.(updated);
       setShowCategoryModal(false);
       showToast("success", "保存成功", "项目分类和标签已更新");
@@ -134,46 +145,64 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           <div className="project-icon">
             <GitBranch className="text-white" size={20} />
           </div>
-          
+
           <div className="flex flex-col gap-xs">
             <div className="flex items-center gap-md">
               {/* 项目名称 */}
-              <h1 className="font-bold text-gray-900 text-base tracking-tight">{project.name}</h1>
+              <h1 className="font-bold text-gray-900 text-base tracking-tight">{localProject.name}</h1>
 
-              {/* 分类标签区域 */}
-              <div className="flex items-center gap-sm flex-wrap">
-                {project.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="category-tag"
-                  >
-                    <span className="category-tag-dot"></span>
-                    <span>{tag}</span>
-                  </span>
-                ))}
+              {/* 分类标签区域 - 分类和标签分开显示 */}
+              <div className="flex items-center gap-md flex-wrap">
+                {/* 分类 */}
+                {localProject.tags.length > 0 && (
+                  <div className="flex items-center gap-sm">
+                    <span className="text-xs text-gray-400">分类:</span>
+                    {localProject.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="category-tag"
+                      >
+                        <span className="category-tag-dot"></span>
+                        <span>{tag}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 分隔符 */}
+                {localProject.tags.length > 0 && localProject.labels && localProject.labels.length > 0 && (
+                  <span className="text-gray-300">|</span>
+                )}
+
                 {/* 技术栈标签 */}
-                {project.labels && project.labels.map((label) => (
-                  <span
-                    key={label}
-                    className="label-tag"
-                  >
-                    {label}
-                  </span>
-                ))}
+                {localProject.labels && localProject.labels.length > 0 && (
+                  <div className="flex items-center gap-sm">
+                    <span className="text-xs text-gray-400">标签:</span>
+                    {localProject.labels.map((label) => (
+                      <span
+                        key={label}
+                        className="label-tag"
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <button
                   onClick={() => setShowCategoryModal(true)}
                   className="edit-category-btn"
                 >
                   <Edit2 size={10} className="opacity-70 group-hover:opacity-100" />
-                  <span>{project.tags.length > 0 || (project.labels && project.labels.length > 0) ? "编辑" : "设置分类"}</span>
+                  <span>{localProject.tags.length > 0 || (localProject.labels && localProject.labels.length > 0) ? "编辑" : "设置分类"}</span>
                 </button>
               </div>
             </div>
-            
+
             {/* 项目路径 */}
             <p className="project-path">
               <FolderOpen size={12} className="text-gray-400" />
-              {project.path}
+              {localProject.path}
             </p>
           </div>
         </div>

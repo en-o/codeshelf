@@ -1,6 +1,6 @@
 mod commands;
 
-use commands::{git, project, system};
+use commands::{git, project, stats, system};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -51,6 +51,10 @@ pub fn run() {
             project::get_projects,
             project::update_project,
             project::toggle_favorite,
+            // Stats commands
+            stats::refresh_dashboard_stats,
+            stats::get_dashboard_stats,
+            stats::refresh_project_stats,
             // System commands
             system::open_in_editor,
             system::open_in_terminal,

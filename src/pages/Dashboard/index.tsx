@@ -8,18 +8,13 @@ import {
   User,
   Clock,
   FolderOpen,
+  RefreshCw,
 } from "lucide-react";
 import { CommitHeatmap } from "@/components/ui";
 import { useAppStore } from "@/stores/appStore";
-import { getGitStatus, getCommitHistory } from "@/services/git";
-import type { DashboardStats, DailyActivity, CommitInfo } from "@/types";
+import { getDashboardStats, refreshDashboardStats, type RecentCommit, type CachedDashboardData } from "@/services/stats";
+import type { DashboardStats, DailyActivity } from "@/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-
-// Extended commit info with project name
-interface RecentActivity extends CommitInfo {
-  projectName: string;
-  projectPath: string;
-}
 
 export function DashboardPage() {
   const { projects, sidebarCollapsed, setSidebarCollapsed } = useAppStore();
@@ -31,86 +26,74 @@ export function DashboardPage() {
     unmergedBranches: 0,
   });
   const [heatmapData, setHeatmapData] = useState<DailyActivity[]>([]);
-  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+  const [recentActivity, setRecentActivity] = useState<RecentCommit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    loadDashboardData();
-  }, [projects]);
+    loadCachedStats();
+  }, []);
 
-  async function loadDashboardData() {
+  // When projects change, refresh stats
+  useEffect(() => {
+    if (projects.length > 0 && !loading) {
+      handleRefreshStats();
+    }
+  }, [projects.length]);
+
+  // Load cached stats (fast)
+  async function loadCachedStats() {
     try {
       setLoading(true);
+      const cached = await getDashboardStats();
 
-      const totalProjects = projects.length;
-      let unpushedCommits = 0;
-      const commitsByDate: Record<string, number> = {};
-      const allRecentCommits: RecentActivity[] = [];
-
-      await Promise.all(
-        projects.map(async (project) => {
-          try {
-            const [status, commits] = await Promise.all([
-              getGitStatus(project.path),
-              getCommitHistory(project.path, 365),
-            ]);
-
-            unpushedCommits += status.ahead;
-
-            commits.forEach((commit) => {
-              const date = new Date(commit.date).toISOString().split("T")[0];
-              commitsByDate[date] = (commitsByDate[date] || 0) + 1;
-            });
-
-            // Add recent commits (last 5 per project)
-            commits.slice(0, 5).forEach((commit) => {
-              allRecentCommits.push({
-                ...commit,
-                projectName: project.name,
-                projectPath: project.path,
-              });
-            });
-          } catch (error) {
-            console.error(`Failed to load data for ${project.name}:`, error);
-          }
-        })
-      );
-
-      // Sort all recent commits by date and take the most recent 10
-      const sortedRecentActivity = allRecentCommits
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 10);
-
-      const today = new Date().toISOString().split("T")[0];
-      const todayCommits = commitsByDate[today] || 0;
-
-      let weekCommits = 0;
-      for (let i = 0; i < 7; i++) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split("T")[0];
-        weekCommits += commitsByDate[dateStr] || 0;
+      // If cache is empty (first load), trigger a refresh
+      if (cached.stats.totalProjects === 0 && projects.length > 0) {
+        await handleRefreshStats();
+        return;
       }
 
-      const heatmap: DailyActivity[] = Object.entries(commitsByDate).map(
-        ([date, count]) => ({
-          date,
-          count,
-        })
-      );
+      setStats(cached.stats);
+      setHeatmapData(cached.heatmapData);
+      setRecentActivity(cached.recentCommits);
+    } catch (error) {
+      console.error("Failed to load cached stats:", error);
+      // Fallback to refresh if cache load fails
+      if (projects.length > 0) {
+        await handleRefreshStats();
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
 
+  // Refresh stats by analyzing all projects (slow)
+  async function handleRefreshStats() {
+    if (projects.length === 0) {
       setStats({
-        totalProjects,
-        todayCommits,
-        weekCommits,
-        unpushedCommits,
+        totalProjects: 0,
+        todayCommits: 0,
+        weekCommits: 0,
+        unpushedCommits: 0,
         unmergedBranches: 0,
       });
-      setHeatmapData(heatmap);
-      setRecentActivity(sortedRecentActivity);
+      setHeatmapData([]);
+      setRecentActivity([]);
+      return;
+    }
+
+    try {
+      setRefreshing(true);
+      const projectInfos = projects.map(p => ({ name: p.name, path: p.path }));
+      const data = await refreshDashboardStats(projectInfos);
+
+      setStats(data.stats);
+      setHeatmapData(data.heatmapData);
+      setRecentActivity(data.recentCommits);
     } catch (error) {
-      console.error("Failed to load dashboard data:", error);
+      console.error("Failed to refresh dashboard stats:", error);
     } finally {
+      setRefreshing(false);
       setLoading(false);
     }
   }
