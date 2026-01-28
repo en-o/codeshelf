@@ -372,10 +372,16 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                   <span>在编辑器中打开</span>
                 </button>
                 <button
-                  onClick={() => {
-                    const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
-                    const termPath = terminalConfig.paths?.[terminalConfig.type as keyof typeof terminalConfig.paths];
-                    openInTerminal(project.path, termType, terminalConfig.customPath, termPath);
+                  onClick={async () => {
+                    try {
+                      const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
+                      const termPath = terminalConfig.paths?.[terminalConfig.type as keyof typeof terminalConfig.paths];
+                      console.log("Opening terminal:", { path: project.path, termType, customPath: terminalConfig.customPath, termPath });
+                      await openInTerminal(project.path, termType, terminalConfig.customPath, termPath);
+                    } catch (error) {
+                      console.error("Failed to open terminal:", error);
+                      showToast("error", "打开终端失败", String(error));
+                    }
                   }}
                   className="quick-action-btn"
                 >

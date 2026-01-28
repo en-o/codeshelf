@@ -1,5 +1,12 @@
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+// Windows: CREATE_NEW_CONSOLE flag to open terminal in new window
+#[cfg(target_os = "windows")]
+const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
 #[tauri::command]
 pub async fn open_in_editor(path: String, editor_path: Option<String>) -> Result<(), String> {
     let editor = editor_path.unwrap_or_else(|| {
@@ -42,15 +49,20 @@ pub async fn open_in_terminal(path: String, terminal_type: Option<String>, custo
         match term_type.as_str() {
             "powershell" => {
                 let ps_path = terminal_path.as_deref().unwrap_or("powershell");
+                // Use Set-Location with -LiteralPath for paths with special characters
+                let escaped_path = path.replace("'", "''");
                 Command::new(ps_path)
-                    .args(["-NoExit", "-Command", &format!("cd '{}'", path)])
+                    .args(["-NoExit", "-Command", &format!("Set-Location -LiteralPath '{}'", escaped_path)])
+                    .creation_flags(CREATE_NEW_CONSOLE)
                     .spawn()
                     .map_err(|e| e.to_string())?;
             }
             "cmd" => {
                 let cmd_path = terminal_path.as_deref().unwrap_or("cmd");
+                // Use quotes around path for paths with spaces or special characters
                 Command::new(cmd_path)
-                    .args(["/k", &format!("cd /d {}", path)])
+                    .args(["/k", &format!("cd /d \"{}\"", path)])
+                    .creation_flags(CREATE_NEW_CONSOLE)
                     .spawn()
                     .map_err(|e| e.to_string())?;
             }
@@ -58,6 +70,7 @@ pub async fn open_in_terminal(path: String, terminal_type: Option<String>, custo
                 if let Some(custom) = custom_path {
                     Command::new(&custom)
                         .arg(&path)
+                        .creation_flags(CREATE_NEW_CONSOLE)
                         .spawn()
                         .map_err(|e| format!("Failed to open custom terminal '{}': {}", custom, e))?;
                 } else {
@@ -72,8 +85,10 @@ pub async fn open_in_terminal(path: String, terminal_type: Option<String>, custo
                     .spawn();
 
                 if wt_result.is_err() {
+                    let escaped_path = path.replace("'", "''");
                     Command::new("powershell")
-                        .args(["-NoExit", "-Command", &format!("cd '{}'", path)])
+                        .args(["-NoExit", "-Command", &format!("Set-Location -LiteralPath '{}'", escaped_path)])
+                        .creation_flags(CREATE_NEW_CONSOLE)
                         .spawn()
                         .map_err(|e| e.to_string())?;
                 }
@@ -130,7 +145,7 @@ pub async fn open_in_terminal(path: String, terminal_type: Option<String>, custo
                     .args(["-NoExit", "-Command", &format!("cd '{}'", path)])
                     .spawn();
                 if result.is_err() {
-                    // Fallback: native powershell
+                    // Fallback: native powershell with original path
                     Command::new("powershell")
                         .args(["-NoExit", "-Command", &format!("cd '{}'", path)])
                         .spawn()

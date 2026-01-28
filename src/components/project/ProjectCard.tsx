@@ -66,9 +66,11 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
     try {
       const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
       const termPath = terminalConfig.paths?.[terminalConfig.type as keyof typeof terminalConfig.paths];
+      console.log("Opening terminal:", { path: project.path, termType, customPath: terminalConfig.customPath, termPath });
       await openInTerminal(project.path, termType, terminalConfig.customPath, termPath);
     } catch (error) {
       console.error("Failed to open terminal:", error);
+      alert("打开终端失败：" + error);
     }
   }
 
