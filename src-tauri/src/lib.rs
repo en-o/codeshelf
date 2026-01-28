@@ -136,6 +136,8 @@ pub fn run() {
             system::test_terminal,
             system::check_git_version,
             system::check_node_version,
+            system::get_app_paths,
+            system::clear_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { CheckCircle, XCircle, Loader2, ExternalLink, Github, Heart } from "lucide-react";
+import { CheckCircle, XCircle, Loader2, ExternalLink, Github, Heart, FolderOpen, Copy, Check, Trash2 } from "lucide-react";
 
 interface DependencyStatus {
   name: string;
@@ -13,12 +13,24 @@ interface DependencyStatus {
   downloadUrl: string;
 }
 
+interface AppPaths {
+  data_dir: string;
+  config_dir: string;
+  cache_dir: string;
+  log_dir: string;
+  install_dir: string;
+}
+
 interface AboutSettingsProps {
   onClose?: () => void;
 }
 
 export function AboutSettings(_props: AboutSettingsProps) {
   const [appVersion, setAppVersion] = useState<string>("...");
+  const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
+  const [clearingLogs, setClearingLogs] = useState(false);
+  const [clearLogResult, setClearLogResult] = useState<string | null>(null);
   const [dependencies, setDependencies] = useState<DependencyStatus[]>([
     {
       name: "Git",
@@ -46,7 +58,19 @@ export function AboutSettings(_props: AboutSettingsProps) {
 
     // 检查依赖
     checkDependencies();
+
+    // 获取应用路径
+    loadAppPaths();
   }, []);
+
+  const loadAppPaths = async () => {
+    try {
+      const paths = await invoke<AppPaths>("get_app_paths");
+      setAppPaths(paths);
+    } catch (e) {
+      console.error("Failed to get app paths:", e);
+    }
+  };
 
   const checkDependencies = async () => {
     // 检查 Git
@@ -83,6 +107,44 @@ export function AboutSettings(_props: AboutSettingsProps) {
       console.error("Failed to open URL:", e);
     }
   };
+
+  const openFolder = async (path: string) => {
+    try {
+      await invoke("open_in_explorer", { path });
+    } catch (e) {
+      console.error("Failed to open folder:", e);
+    }
+  };
+
+  const copyToClipboard = async (path: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopiedPath(label);
+      setTimeout(() => setCopiedPath(null), 2000);
+    } catch (e) {
+      console.error("Failed to copy:", e);
+    }
+  };
+
+  const clearLogs = async () => {
+    setClearingLogs(true);
+    setClearLogResult(null);
+    try {
+      const result = await invoke<string>("clear_logs");
+      setClearLogResult(result);
+      setTimeout(() => setClearLogResult(null), 3000);
+    } catch (e) {
+      setClearLogResult(`清除失败: ${e}`);
+    } finally {
+      setClearingLogs(false);
+    }
+  };
+
+  const pathItems = appPaths ? [
+    { label: "数据目录", path: appPaths.data_dir, description: "存储项目数据和设置" },
+    { label: "日志目录", path: appPaths.log_dir, description: "存储应用运行日志", canClear: true },
+    { label: "安装目录", path: appPaths.install_dir, description: "应用程序安装位置" },
+  ] : [];
 
   return (
     <div className="space-y-6">
@@ -178,6 +240,74 @@ export function AboutSettings(_props: AboutSettingsProps) {
 
         <p className="text-xs text-gray-400">
           * 必需依赖未安装时，部分功能将无法使用
+        </p>
+      </div>
+
+      {/* 存储位置 */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">存储位置</h3>
+
+        <div className="space-y-2">
+          {pathItems.map((item) => (
+            <div
+              key={item.label}
+              className="re-card p-3 flex items-center justify-between group"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">{item.label}</span>
+                  <span className="text-xs text-gray-400">{item.description}</span>
+                </div>
+                <p className="text-xs text-gray-500 font-mono mt-1 truncate" title={item.path}>
+                  {item.path}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 ml-2">
+                {('canClear' in item && item.canClear) && (
+                  <button
+                    onClick={clearLogs}
+                    disabled={clearingLogs}
+                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                    title="清除日志"
+                  >
+                    {clearingLogs ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={16} />
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => copyToClipboard(item.path, item.label)}
+                  className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"
+                  title="复制路径"
+                >
+                  {copiedPath === item.label ? (
+                    <Check size={16} className="text-green-500" />
+                  ) : (
+                    <Copy size={16} />
+                  )}
+                </button>
+                <button
+                  onClick={() => openFolder(item.path)}
+                  className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"
+                  title="打开文件夹"
+                >
+                  <FolderOpen size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {clearLogResult && (
+          <p className="text-xs text-green-600 bg-green-50 px-3 py-2 rounded">
+            {clearLogResult}
+          </p>
+        )}
+
+        <p className="text-xs text-gray-400">
+          * 卸载应用不会自动删除数据目录，如需完全清除请手动删除
         </p>
       </div>
 

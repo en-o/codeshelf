@@ -624,3 +624,91 @@ pub async fn check_node_version() -> Result<String, String> {
         Err("Node.js not installed".to_string())
     }
 }
+
+#[derive(serde::Serialize)]
+pub struct AppPaths {
+    pub data_dir: String,
+    pub config_dir: String,
+    pub cache_dir: String,
+    pub log_dir: String,
+    pub install_dir: String,
+}
+
+#[tauri::command]
+pub async fn get_app_paths(app_handle: tauri::AppHandle) -> Result<AppPaths, String> {
+    use tauri::Manager;
+
+    let path_resolver = app_handle.path();
+
+    let data_dir = path_resolver.app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "未知".to_string());
+
+    let config_dir = path_resolver.app_config_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "未知".to_string());
+
+    let cache_dir = path_resolver.app_cache_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "未知".to_string());
+
+    let log_dir = path_resolver.app_log_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "未知".to_string());
+
+    // 获取当前可执行文件路径
+    let install_dir = std::env::current_exe()
+        .map(|p| p.parent().map(|parent| parent.to_string_lossy().to_string()).unwrap_or_else(|| "未知".to_string()))
+        .unwrap_or_else(|_| "未知".to_string());
+
+    Ok(AppPaths {
+        data_dir,
+        config_dir,
+        cache_dir,
+        log_dir,
+        install_dir,
+    })
+}
+
+#[tauri::command]
+pub async fn clear_logs(app_handle: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    use std::fs;
+
+    let path_resolver = app_handle.path();
+    let log_dir = path_resolver.app_log_dir()
+        .map_err(|e| format!("无法获取日志目录: {}", e))?;
+
+    if !log_dir.exists() {
+        return Ok("日志目录不存在".to_string());
+    }
+
+    let mut deleted_count = 0;
+    let mut total_size: u64 = 0;
+
+    // 遍历日志目录中的所有文件
+    let entries = fs::read_dir(&log_dir)
+        .map_err(|e| format!("无法读取日志目录: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Ok(metadata) = fs::metadata(&path) {
+                total_size += metadata.len();
+            }
+            if fs::remove_file(&path).is_ok() {
+                deleted_count += 1;
+            }
+        }
+    }
+
+    let size_str = if total_size > 1024 * 1024 {
+        format!("{:.2} MB", total_size as f64 / 1024.0 / 1024.0)
+    } else if total_size > 1024 {
+        format!("{:.2} KB", total_size as f64 / 1024.0)
+    } else {
+        format!("{} B", total_size)
+    };
+
+    Ok(format!("已清除 {} 个日志文件，释放 {}", deleted_count, size_str))
+}
