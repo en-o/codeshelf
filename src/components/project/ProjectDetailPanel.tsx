@@ -374,7 +374,8 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                 <button
                   onClick={() => {
                     const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
-                    openInTerminal(project.path, termType, terminalConfig.customPath);
+                    const termPath = terminalConfig.paths?.[terminalConfig.type as keyof typeof terminalConfig.paths];
+                    openInTerminal(project.path, termType, terminalConfig.customPath, termPath);
                   }}
                   className="quick-action-btn"
                 >

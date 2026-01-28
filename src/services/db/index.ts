@@ -32,9 +32,10 @@ export async function openInEditor(path: string, editorPath?: string): Promise<v
 export async function openInTerminal(
   path: string,
   terminalType?: string,
-  customPath?: string
+  customPath?: string,
+  terminalPath?: string
 ): Promise<void> {
-  return invoke("open_in_terminal", { path, terminalType, customPath });
+  return invoke("open_in_terminal", { path, terminalType, customPath, terminalPath });
 }
 
 export async function openUrl(url: string): Promise<void> {

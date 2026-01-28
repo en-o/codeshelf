@@ -59,7 +59,8 @@ export function ProjectDetailDialog({ project, onClose, onUpdate }: ProjectDetai
   async function handleOpenTerminal() {
     try {
       const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
-      await openInTerminal(project.path, termType, terminalConfig.customPath);
+      const termPath = terminalConfig.paths?.[terminalConfig.type as keyof typeof terminalConfig.paths];
+      await openInTerminal(project.path, termType, terminalConfig.customPath, termPath);
     } catch (error) {
       console.error("Failed to open terminal:", error);
     }

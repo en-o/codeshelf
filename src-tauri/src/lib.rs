@@ -60,6 +60,7 @@ pub fn run() {
             system::open_in_terminal,
             system::open_url,
             system::read_readme,
+            system::test_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

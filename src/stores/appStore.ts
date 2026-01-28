@@ -14,6 +14,14 @@ export interface EditorConfig {
 export interface TerminalConfig {
   type: "default" | "powershell" | "cmd" | "terminal" | "iterm" | "custom";
   customPath?: string;
+  // 存储各终端类型的自定义路径（当自动检测失败时使用）
+  paths?: {
+    powershell?: string;
+    cmd?: string;
+    terminal?: string;
+    iterm?: string;
+    default?: string;
+  };
 }
 
 interface AppState {
