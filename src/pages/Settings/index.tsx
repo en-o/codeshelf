@@ -111,7 +111,7 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <div className="p-5 mt-5">
+      <div className="p-5" style={{ marginTop: "40px" }}>
         {/* Settings Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {settingsCards.map((card) => {

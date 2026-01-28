@@ -125,7 +125,7 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <div className="p-5 mt-5">
+      <div className="p-5" style={{ marginTop: "40px" }}>
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 text-[var(--text-light)]">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-[var(--primary)] border-t-transparent mb-4" />
