@@ -2,9 +2,15 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - 'release/**'
+      - 'release/*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 0.2.0)'
+        required: true
+        type: string
 
 jobs:
   release:
