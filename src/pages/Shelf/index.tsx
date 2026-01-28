@@ -19,6 +19,7 @@ export function ShelfPage() {
     setSearchQuery,
     scanDepth,
     categories: storedCategories,
+    incrementStatsVersion,
   } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [scanResults, setScanResults] = useState<GitRepo[] | null>(null);
@@ -157,6 +158,7 @@ export function ShelfPage() {
 
       if (newProjects.length > 0) {
         setProjects([...projects, ...newProjects]);
+        incrementStatsVersion(); // Trigger dashboard stats refresh
       }
 
       setScanResults(null);
@@ -523,6 +525,7 @@ export function ShelfPage() {
           onConfirm={(project) => {
             setProjects([...projects, project]);
             setShowAddProjectDialog(false);
+            incrementStatsVersion(); // Trigger dashboard stats refresh
           }}
           onCancel={() => setShowAddProjectDialog(false)}
         />
