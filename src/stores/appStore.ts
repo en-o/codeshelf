@@ -24,6 +24,10 @@ interface AppState {
   removeProject: (id: string) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
 
+  // Stats - version counter to trigger dashboard refresh
+  statsVersion: number;
+  incrementStatsVersion: () => void;
+
   // UI State
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
@@ -85,6 +89,11 @@ export const useAppStore = create<AppState>()(
             p.id === id ? { ...p, ...updates } : p
           ),
         })),
+
+      // Stats version - increment to trigger dashboard refresh
+      statsVersion: 0,
+      incrementStatsVersion: () =>
+        set((state) => ({ statsVersion: state.statsVersion + 1 })),
 
       // UI State
       viewMode: "grid",

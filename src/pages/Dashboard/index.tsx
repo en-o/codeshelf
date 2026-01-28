@@ -17,7 +17,7 @@ import type { DashboardStats, DailyActivity } from "@/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function DashboardPage() {
-  const { projects, sidebarCollapsed, setSidebarCollapsed } = useAppStore();
+  const { projects, sidebarCollapsed, setSidebarCollapsed, statsVersion } = useAppStore();
   const [stats, setStats] = useState<DashboardStats>({
     totalProjects: 0,
     todayCommits: 0,
@@ -40,6 +40,13 @@ export function DashboardPage() {
       handleRefreshStats();
     }
   }, [projects.length]);
+
+  // When stats version changes (after git operations), refresh stats
+  useEffect(() => {
+    if (statsVersion > 0 && !loading) {
+      handleRefreshStats();
+    }
+  }, [statsVersion]);
 
   // Load cached stats (fast)
   async function loadCachedStats() {

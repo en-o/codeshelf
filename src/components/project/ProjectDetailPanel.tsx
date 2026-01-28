@@ -38,7 +38,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [selectedLabels, setSelectedLabels] = useState<string[]>(project.labels || []);
   // 用于显示的本地项目数据（编辑后立即更新）
   const [localProject, setLocalProject] = useState<Project>(project);
-  const { editors, terminalConfig } = useAppStore();
+  const { editors, terminalConfig, incrementStatsVersion } = useAppStore();
 
   // 当外部 project prop 改变时同步本地状态
   useEffect(() => {
