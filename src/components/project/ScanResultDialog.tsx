@@ -1,8 +1,4 @@
-import { useState } from "react";
-import { X, FolderGit2, Check, CheckCircle2 } from "lucide-react";
-import { Button } from "@/components/ui";
-import { CategorySelector } from "./CategorySelector";
-import { LabelSelector } from "./LabelSelector";
+import { useState, useMemo } from "react";
 import type { GitRepo } from "@/types";
 
 interface ScanResultDialogProps {
@@ -11,10 +7,66 @@ interface ScanResultDialogProps {
   onCancel: () => void;
 }
 
+interface CategoryInfo {
+  name: string;
+  icon: string;
+  color: string;
+  bg: string;
+  text: string;
+  border: string;
+}
+
+interface HistoryItem {
+  category: string;
+  name: string;
+  count: number;
+}
+
 export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialogProps) {
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set(repos.map(r => r.path)));
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [assignedCategories, setAssignedCategories] = useState<Record<string, string>>({});
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showingAll, setShowingAll] = useState(true);
+  const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [showRenameInput, setShowRenameInput] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+
+  const [categories, setCategories] = useState<Record<string, CategoryInfo>>({
+    work: { name: "工作项目", icon: "💼", color: "orange", bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200" },
+    personal: { name: "个人学习", icon: "🎯", color: "emerald", bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
+    open: { name: "开源贡献", icon: "🌟", color: "purple", bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
+  });
+
+  // 检测共同前缀
+  const commonPrefix = useMemo(() => {
+    if (selectedPaths.size < 2) return null;
+    const names = Array.from(selectedPaths).map(path => {
+      const repo = repos.find(r => r.path === path);
+      return repo?.name || "";
+    });
+
+    let prefix = names[0];
+    for (let i = 1; i < names.length; i++) {
+      while (!names[i].startsWith(prefix) && prefix.length > 0) {
+        prefix = prefix.slice(0, -1);
+      }
+      if (prefix.length === 0) break;
+    }
+    prefix = prefix.replace(/[-_]+$/, "");
+    if (prefix.length >= 2 && !names.every(n => n === prefix)) {
+      return prefix;
+    }
+    return null;
+  }, [selectedPaths, repos]);
+
+  const filteredRepos = useMemo(() => {
+    return showingAll ? repos : repos.filter(r => !assignedCategories[r.path]);
+  }, [repos, showingAll, assignedCategories]);
+
+  const unclassifiedCount = repos.filter(r => !assignedCategories[r.path]).length;
+  const assignedCount = repos.length - unclassifiedCount;
 
   function toggleSelection(path: string) {
     const newSelected = new Set(selectedPaths);
@@ -26,146 +78,552 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
     setSelectedPaths(newSelected);
   }
 
-  function selectAll() {
-    setSelectedPaths(new Set(repos.map(r => r.path)));
+  function toggleSelectAll() {
+    const unassignedPaths = repos.filter(r => !assignedCategories[r.path]).map(r => r.path);
+    if (selectedPaths.size === unassignedPaths.length) {
+      setSelectedPaths(new Set());
+    } else {
+      setSelectedPaths(new Set(unassignedPaths));
+    }
   }
 
-  function deselectAll() {
-    setSelectedPaths(new Set());
+  function handleSelectCategory(catId: string) {
+    setSelectedCategory(selectedCategory === catId ? null : catId);
   }
+
+  function applyCategory() {
+    if (!selectedCategory || selectedPaths.size === 0) return;
+    const catInfo = categories[selectedCategory];
+    const paths = Array.from(selectedPaths);
+
+    const newAssigned = { ...assignedCategories };
+    paths.forEach(path => {
+      newAssigned[path] = selectedCategory;
+    });
+    setAssignedCategories(newAssigned);
+
+    setHistory([...history, {
+      category: selectedCategory,
+      name: catInfo.name,
+      count: paths.length,
+    }]);
+
+    setSelectedPaths(new Set());
+    setSelectedCategory(null);
+  }
+
+  function createNewCategory() {
+    setShowNewCategoryInput(true);
+  }
+
+  function confirmNewCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    const id = `auto_${Date.now()}`;
+    setCategories({
+      ...categories,
+      [id]: {
+        name,
+        icon: "📦",
+        color: "amber",
+        bg: "bg-amber-50",
+        text: "text-amber-700",
+        border: "border-amber-200",
+      },
+    });
+    setNewCategoryName("");
+    setShowNewCategoryInput(false);
+    setSelectedCategory(id);
+  }
+
+  function acceptRecommend() {
+    if (!commonPrefix) return;
+    const id = `auto_${Date.now()}`;
+    setCategories({
+      ...categories,
+      [id]: {
+        name: commonPrefix,
+        icon: "📦",
+        color: "amber",
+        bg: "bg-amber-50",
+        text: "text-amber-700",
+        border: "border-amber-200",
+      },
+    });
+    setSelectedCategory(id);
+  }
+
+  function showRename() {
+    setRenameValue(commonPrefix || "");
+    setShowRenameInput(true);
+  }
+
+  function confirmRename() {
+    const name = renameValue.trim();
+    if (!name) return;
+    const id = `auto_${Date.now()}`;
+    setCategories({
+      ...categories,
+      [id]: {
+        name,
+        icon: "📦",
+        color: "amber",
+        bg: "bg-amber-50",
+        text: "text-amber-700",
+        border: "border-amber-200",
+      },
+    });
+    setSelectedCategory(id);
+    setShowRenameInput(false);
+  }
+
+  function dismissRecommend() {
+    setShowRenameInput(false);
+  }
+
+  function undoHistory(index: number) {
+    const item = history[index];
+    const newAssigned = { ...assignedCategories };
+    Object.keys(newAssigned).forEach(path => {
+      if (newAssigned[path] === item.category) {
+        delete newAssigned[path];
+      }
+    });
+    setAssignedCategories(newAssigned);
+    setHistory(history.filter((_, i) => i !== index));
+  }
+
+  function resetAll() {
+    setAssignedCategories({});
+    setSelectedPaths(new Set());
+    setSelectedCategory(null);
+    setHistory([]);
+  }
+
+  function finishImport() {
+    if (assignedCount === 0) return;
+    const assignedPaths = Object.keys(assignedCategories);
+    const categoryNames = assignedPaths.map(path => categories[assignedCategories[path]]?.name || "");
+    onConfirm(assignedPaths, categoryNames, []);
+  }
+
+  const previewNames = Array.from(selectedPaths).slice(0, 2).map(path => {
+    const repo = repos.find(r => r.path === path);
+    return repo?.name || "";
+  }).join("、");
+
+  const canApply = selectedPaths.size > 0 && selectedCategory !== null;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--card)] rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-8 py-6 border-b border-[var(--border)]">
-          <div>
-            <h2 className="text-2xl font-semibold text-[var(--text)] mb-1">
-              发现 Git 项目
-            </h2>
-            <p className="text-sm text-[var(--text-light)]">
-              找到 <span className="font-semibold text-[var(--primary)]">{repos.length}</span> 个仓库，
-              已选择 <span className="font-semibold text-[var(--primary)]">{selectedPaths.size}</span> 个
-            </p>
-          </div>
-          <button
-            onClick={onCancel}
-            className="p-2 text-[var(--text-light)] hover:text-[var(--text)] hover:bg-[var(--bg-light)] rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-3 px-8 py-4 bg-[var(--bg-light)]">
-          <button
-            onClick={selectAll}
-            className="text-sm text-[var(--primary)] hover:underline font-medium"
-          >
-            全选
-          </button>
-          <span className="text-[var(--text-light)]">·</span>
-          <button
-            onClick={deselectAll}
-            className="text-sm text-[var(--text-light)] hover:text-[var(--text)] hover:underline"
-          >
-            取消全选
-          </button>
-        </div>
-
-        {/* List */}
-        <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
-          {/* Project List */}
-          <div>
-            <h4 className="text-sm font-semibold text-[var(--text)] mb-3">选择项目</h4>
-            <div className="space-y-3">
-              {repos.map((repo) => {
-                const isSelected = selectedPaths.has(repo.path);
-                return (
-                  <button
-                    key={repo.path}
-                    onClick={() => toggleSelection(repo.path)}
-                    className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl transition-all text-left group ${
-                      isSelected
-                        ? "bg-[var(--primary-light)] border-2 border-[var(--primary)]"
-                        : "bg-[var(--bg-light)] border-2 border-transparent hover:border-[var(--border)] hover:shadow-sm"
-                    }`}
-                  >
-                    {/* Checkbox */}
-                    <div
-                      className={`flex-shrink-0 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                        isSelected
-                          ? "bg-[var(--primary)] border-[var(--primary)]"
-                          : "border-[var(--border)] group-hover:border-[var(--primary)]"
-                      }`}
-                    >
-                      {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-                    </div>
-
-                    {/* Icon */}
-                    <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center ${
-                      isSelected ? "bg-[var(--primary)]/10" : "bg-[var(--card)]"
-                    }`}>
-                      <FolderGit2 className={`w-5 h-5 ${isSelected ? "text-[var(--primary)]" : "text-[var(--text-light)]"}`} />
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-[var(--text)] mb-0.5 truncate">
-                        {repo.name}
-                      </p>
-                      <p className="text-sm text-[var(--text-light)] truncate">
-                        {repo.path}
-                      </p>
-                    </div>
-
-                    {/* Selected Badge */}
-                    {isSelected && (
-                      <CheckCircle2 className="w-5 h-5 text-[var(--primary)] flex-shrink-0" />
-                    )}
-                  </button>
-                );
-              })}
+      <div className="scan-dialog bg-gray-50 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+        {/* 头部 */}
+        <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+              <i className="fa-solid fa-chart-simple text-xl"></i>
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">发现 Git 项目</h1>
+              <div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5">
+                <span>扫描到 <strong className="text-gray-900">{repos.length}</strong> 个仓库</span>
+                <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+                <span className="text-orange-600 font-medium"><strong>{unclassifiedCount}</strong> 个待分类</span>
+              </div>
             </div>
           </div>
+          <button onClick={onCancel} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+            <i className="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </header>
 
-          {/* Category Selector */}
-          <div className="border-t border-[var(--border)] pt-6">
-            <CategorySelector
-              selectedCategories={selectedCategories}
-              onChange={setSelectedCategories}
-              multiple={true}
-            />
-          </div>
+        {/* 主内容 */}
+        <div className="flex-1 overflow-hidden p-4">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
+            {/* 左侧：项目列表 */}
+            <div className="lg:col-span-8 h-full">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden h-full flex flex-col">
+                {/* 工具栏 */}
+                <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="scan-checkbox"
+                        checked={selectedPaths.size === repos.filter(r => !assignedCategories[r.path]).length && selectedPaths.size > 0}
+                        onChange={toggleSelectAll}
+                      />
+                      <span className="text-sm font-medium text-gray-700">全选</span>
+                    </label>
+                    <div className="h-4 w-px bg-gray-300"></div>
+                    <span className="text-sm text-gray-500">
+                      已选 <span className="font-bold text-blue-600">{selectedPaths.size}</span> 项
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowingAll(!showingAll)}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                      !showingAll ? "bg-gray-100 text-gray-600" : "bg-orange-50 text-orange-600 hover:bg-orange-100"
+                    }`}
+                  >
+                    {showingAll ? "仅看未分类" : "显示全部"}
+                  </button>
+                </div>
 
-          {/* Label Selector */}
-          <div className="border-t border-[var(--border)] pt-6">
-            <LabelSelector
-              selectedLabels={selectedLabels}
-              onChange={setSelectedLabels}
-              multiple={true}
-            />
-          </div>
-        </div>
+                {/* 表头 */}
+                <div className="grid grid-cols-12 gap-4 px-5 py-2 bg-gray-50 text-xs font-semibold text-gray-500 border-b border-gray-100 shrink-0">
+                  <div className="col-span-1">选择</div>
+                  <div className="col-span-8">项目信息</div>
+                  <div className="col-span-3 text-right">状态</div>
+                </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between px-8 py-6 border-t border-[var(--border)] bg-[var(--bg-light)]">
-          <p className="text-sm text-[var(--text-light)]">
-            {selectedPaths.size === 0 ? "请至少选择一个项目" : `将添加 ${selectedPaths.size} 个项目到书架`}
-          </p>
-          <div className="flex items-center gap-3">
-            <Button variant="secondary" onClick={onCancel}>
-              取消
-            </Button>
-            <Button
-              onClick={() => onConfirm(Array.from(selectedPaths), selectedCategories, selectedLabels)}
-              disabled={selectedPaths.size === 0}
-            >
-              确认添加
-            </Button>
+                {/* 列表 */}
+                <div className="flex-1 overflow-y-auto scan-scrollbar divide-y divide-gray-50">
+                  {filteredRepos.map(repo => {
+                    const isSelected = selectedPaths.has(repo.path);
+                    const hasCategory = !!assignedCategories[repo.path];
+                    const cat = hasCategory ? categories[assignedCategories[repo.path]] : null;
+
+                    return (
+                      <div
+                        key={repo.path}
+                        onClick={() => toggleSelection(repo.path)}
+                        className={`scan-project-row grid grid-cols-12 gap-4 px-5 py-3 items-center cursor-pointer ${isSelected ? "selected" : ""} ${hasCategory ? "assigned" : ""}`}
+                      >
+                        <div className="col-span-1 flex items-center">
+                          <input
+                            type="checkbox"
+                            className="scan-checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </div>
+                        <div className="col-span-8 flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-lg shrink-0">
+                            <i className="fa-solid fa-folder-open text-gray-400"></i>
+                          </div>
+                          <div className="min-w-0">
+                            <div className={`font-medium text-sm truncate ${hasCategory ? "text-gray-500" : "text-gray-900"}`}>
+                              {repo.name}
+                            </div>
+                            <div className="text-xs text-gray-400 truncate font-mono mt-0.5">{repo.path}</div>
+                          </div>
+                        </div>
+                        <div className="col-span-3 text-right">
+                          {hasCategory && cat ? (
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${cat.bg} ${cat.text} border ${cat.border}`}>
+                              {cat.icon} {cat.name}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* 右侧：操作面板 */}
+            <div className="lg:col-span-4 flex flex-col gap-4 overflow-y-auto scan-scrollbar">
+              {/* 1. 选中状态 */}
+              <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl shadow-lg shadow-blue-500/30 p-5 text-white relative overflow-hidden shrink-0">
+                <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
+                <div className="relative">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <i className="fa-solid fa-users opacity-80"></i>
+                      批量归类
+                    </h3>
+                    <span className="text-3xl font-bold">{selectedPaths.size}</span>
+                  </div>
+                  <div className={`text-sm mb-3 ${selectedPaths.size === 0 ? "text-blue-200" : "text-white font-medium"}`}>
+                    {selectedPaths.size === 0 ? "请在左侧选择项目" : `${previewNames}${selectedPaths.size > 2 ? ` 等 ${selectedPaths.size} 个` : ""}`}
+                  </div>
+                  <div className="text-xs text-blue-200 bg-blue-800/30 rounded-lg p-2.5">
+                    💡 智能检测：选择多个项目后，系统将自动识别共同前缀并推荐分类
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. 智能推荐区 */}
+              {commonPrefix && selectedPaths.size >= 2 && (
+                <div className="scan-recommend-card rounded-xl p-4 relative shrink-0">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-lg">
+                      <i className="fa-solid fa-bolt text-lg"></i>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-amber-900 text-sm mb-1">检测到共同前缀</h4>
+                      <p className="text-xs text-amber-800 mb-3">
+                        选中的 {selectedPaths.size} 个项目均以 "{commonPrefix}" 开头
+                      </p>
+
+                      {showRenameInput ? (
+                        <div className="mb-3">
+                          <input
+                            type="text"
+                            value={renameValue}
+                            onChange={e => setRenameValue(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-sm mb-2 focus:outline-none focus:border-amber-500"
+                            placeholder="输入分类名称..."
+                            autoFocus
+                          />
+                          <div className="flex gap-2">
+                            <button onClick={confirmRename} className="flex-1 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-medium hover:bg-amber-600">
+                              确认使用此名称
+                            </button>
+                            <button onClick={() => setShowRenameInput(false)} className="px-3 py-1.5 border border-amber-300 text-amber-700 rounded-lg text-xs hover:bg-amber-100">
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={acceptRecommend} className="flex-1 min-w-[100px] py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold shadow-md transition-colors flex items-center justify-center gap-1">
+                            <i className="fa-solid fa-check text-xs"></i>
+                            创建 "{commonPrefix}"
+                          </button>
+                          <button onClick={showRename} className="px-3 py-2 border-2 border-amber-500 text-amber-700 rounded-lg text-xs font-medium hover:bg-amber-100 transition-colors">
+                            重命名
+                          </button>
+                          <button onClick={dismissRecommend} className="px-3 py-2 border border-amber-400 text-amber-600 rounded-lg text-xs hover:bg-amber-100 transition-colors">
+                            添加到已有
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={dismissRecommend} className="absolute top-2 right-2 text-amber-600/60 hover:text-amber-800 p-1">
+                    <i className="fa-solid fa-xmark text-sm"></i>
+                  </button>
+                </div>
+              )}
+
+              {/* 3. 分类选择 */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 shrink-0">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold text-gray-900 text-sm">选择目标分类</h3>
+                  <button onClick={createNewCategory} className="text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                    <i className="fa-solid fa-plus text-xs"></i>
+                    新建
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2">
+                  {Object.entries(categories).map(([id, cat]) => (
+                    <div
+                      key={id}
+                      onClick={() => handleSelectCategory(id)}
+                      className={`scan-category-card cursor-pointer border-2 rounded-lg p-3 bg-white group flex items-center gap-3 ${
+                        selectedCategory === id ? "active border-blue-500" : "border-gray-100 hover:border-blue-200"
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0 ${cat.bg}`}>
+                        {cat.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-gray-900 text-sm">{cat.name}</div>
+                        <div className="text-xs text-gray-500 truncate">自定义分类</div>
+                      </div>
+                      <div className={`transition-opacity ${selectedCategory === id ? "opacity-100 text-blue-600" : "opacity-0 group-hover:opacity-50"}`}>
+                        <i className="fa-solid fa-check"></i>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 新建分类输入 */}
+                {showNewCategoryInput && (
+                  <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200 scan-animate-slide-in">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={e => setNewCategoryName(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && confirmNewCategory()}
+                      placeholder="分类名称..."
+                      className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm mb-2 focus:outline-none focus:border-blue-500"
+                      autoFocus
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={() => setShowNewCategoryInput(false)} className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">
+                        取消
+                      </button>
+                      <button onClick={confirmNewCategory} className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700">
+                        确定
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 应用按钮 */}
+                <button
+                  onClick={applyCategory}
+                  disabled={!canApply}
+                  className={`w-full mt-3 py-2.5 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 text-sm ${
+                    canApply
+                      ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/30 cursor-pointer"
+                      : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  }`}
+                >
+                  <i className="fa-solid fa-check"></i>
+                  {canApply && selectedCategory ? `应用到「${categories[selectedCategory].name}」` : "应用归类"}
+                </button>
+              </div>
+
+              {/* 4. 操作总结 */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex-1 flex flex-col">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">本次操作记录</h3>
+                    <span className="text-xs text-gray-400">{history.length} 次操作</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 content-start">
+                    {history.length === 0 ? (
+                      <div className="text-xs text-gray-400 italic py-2">暂无归类操作</div>
+                    ) : (
+                      history.map((item, idx) => {
+                        const cat = categories[item.category];
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => undoHistory(idx)}
+                            className={`scan-history-tag inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:opacity-80 ${cat?.bg || "bg-gray-100"} ${cat?.text || "text-gray-700"} border ${cat?.border || "border-gray-200"}`}
+                            title="点击撤销"
+                          >
+                            <span>{cat?.icon || "📦"}</span>
+                            <span>{item.name}</span>
+                            <span className="opacity-60">×{item.count}</span>
+                            <i className="fa-solid fa-xmark ml-1 opacity-60 text-xs"></i>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <div className="h-px bg-gray-200 my-4"></div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+                    <span>已归类: <strong className="text-gray-900">{assignedCount}</strong> 个</span>
+                    <span>待导入: <strong className="text-blue-600">{assignedCount}</strong> 个</span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2">
+                    <button
+                      onClick={resetAll}
+                      className="col-span-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm flex items-center justify-center"
+                      title="重置"
+                    >
+                      <i className="fa-solid fa-rotate-left"></i>
+                    </button>
+                    <button
+                      onClick={finishImport}
+                      disabled={assignedCount === 0}
+                      className={`col-span-3 py-2.5 rounded-lg font-semibold transition-all transform active:scale-95 text-sm flex items-center justify-center gap-2 ${
+                        assignedCount > 0
+                          ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/30"
+                          : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      }`}
+                    >
+                      <i className="fa-solid fa-circle-check"></i>
+                      确认导入所有项目
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
+      <style>{`
+        .scan-dialog {
+          animation: scanSlideDown 0.3s ease-out;
+        }
+        @keyframes scanSlideDown {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .scan-project-row {
+          transition: all 0.15s ease;
+          border-left: 3px solid transparent;
+        }
+        .scan-project-row:hover {
+          background-color: #f8fafc;
+        }
+        .scan-project-row.selected {
+          background-color: #eff6ff;
+          border-left-color: #3b82f6;
+        }
+        .scan-project-row.assigned {
+          opacity: 0.5;
+        }
+        .scan-category-card {
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .scan-category-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+        .scan-category-card.active {
+          box-shadow: 0 0 0 2px #3b82f6, 0 10px 25px -5px rgba(59, 130, 246, 0.3);
+          transform: translateY(-2px);
+        }
+        .scan-recommend-card {
+          animation: scanSlideDown 0.3s ease-out;
+          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+          border: 2px solid #fbbf24;
+        }
+        .scan-history-tag {
+          animation: scanPopIn 0.3s ease-out;
+        }
+        @keyframes scanPopIn {
+          from { opacity: 0; transform: scale(0.9); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        .scan-checkbox {
+          appearance: none;
+          width: 18px;
+          height: 18px;
+          border: 2px solid #cbd5e1;
+          border-radius: 5px;
+          cursor: pointer;
+          transition: all 0.15s;
+          position: relative;
+        }
+        .scan-checkbox:checked {
+          background-color: #3b82f6;
+          border-color: #3b82f6;
+        }
+        .scan-checkbox:checked::after {
+          content: '';
+          position: absolute;
+          left: 5px;
+          top: 2px;
+          width: 5px;
+          height: 9px;
+          border: solid white;
+          border-width: 0 2px 2px 0;
+          transform: rotate(45deg);
+        }
+        .scan-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .scan-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .scan-scrollbar::-webkit-scrollbar-thumb {
+          background-color: #cbd5e1;
+          border-radius: 20px;
+        }
+        .scan-animate-slide-in {
+          animation: scanSlideDown 0.2s ease-out;
+        }
+      `}</style>
     </div>
   );
 }
