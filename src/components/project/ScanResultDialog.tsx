@@ -275,10 +275,10 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
 
         {/* 主内容 - 可滚动区域 */}
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch" style={{ minHeight: "calc(90vh - 220px)" }}>
             {/* 左侧：项目列表 */}
-            <div className="lg:col-span-8">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col" style={{ maxHeight: "calc(90vh - 220px)" }}>
+            <div className="lg:col-span-8 flex flex-col">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col flex-1">
                 {/* 工具栏 */}
                 <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-3">
@@ -363,7 +363,7 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
             </div>
 
             {/* 右侧：操作面板 */}
-            <div className="lg:col-span-4 space-y-4">
+            <div className="lg:col-span-4 flex flex-col space-y-4">
               {/* 1. 选中状态 */}
               <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl shadow-lg shadow-blue-500/30 p-5 text-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
@@ -510,12 +510,12 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
               </div>
 
               {/* 4. 操作记录 */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">本次操作记录</h3>
                   <span className="text-xs text-gray-400">{history.length} 次操作</span>
                 </div>
-                <div className="flex flex-wrap gap-2 content-start max-h-20 overflow-y-auto">
+                <div className="flex flex-wrap gap-2 content-start flex-1 overflow-y-auto scan-scrollbar">
                   {history.length === 0 ? (
                     <div className="text-xs text-gray-400 italic py-2">暂无归类操作</div>
                   ) : (
