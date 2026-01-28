@@ -23,10 +23,11 @@ if "%~1"=="" (
 set VERSION=%~1
 
 :: 验证版本号格式 (简单检查是否包含两个点)
-echo %VERSION% | findstr /r "^[0-9]*\.[0-9]*\.[0-9]*$" >nul
-if errorlevel 1 (
-    echo [ERROR] 版本号格式无效: %VERSION% ^(应为 x.y.z 格式，如 0.2.0^)
-    exit /b 1
+for /f "tokens=1,2,3 delims=." %%a in ("%VERSION%") do (
+    if "%%c"=="" (
+        echo [ERROR] 版本号格式无效: %VERSION% ^(应为 x.y.z 格式，如 0.2.0^)
+        exit /b 1
+    )
 )
 
 :: 切换到脚本所在目录的父目录（项目根目录）
