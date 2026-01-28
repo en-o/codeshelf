@@ -12,7 +12,7 @@ interface AddProjectDialogProps {
 }
 
 export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps) {
-  const { categories: storeCategories, addCategory } = useAppStore();
+  const { categories: storeCategories, addCategory, labels: storeLabels, addLabel } = useAppStore();
   const [mode, setMode] = useState<"local" | "git">("local");
   const [localPath, setLocalPath] = useState("");
   const [gitUrl, setGitUrl] = useState("");
@@ -31,16 +31,33 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
   const [isGitRepository, setIsGitRepository] = useState<boolean | null>(null);
   const [shouldInitGit, setShouldInitGit] = useState(false);
 
-  const [techs, setTechs] = useState([
-    { value: "Java", icon: "fa-brands fa-java", color: "text-orange-600", iconSize: "text-lg" },
-    { value: "Vue", icon: "text", bg: "bg-green-500", text: "V", round: true },
-    { value: "React", icon: "fa-brands fa-react", color: "text-white", bg: "bg-blue-400", round: true },
-    { value: "小程序", icon: "text", bg: "bg-green-600", text: "微", small: true },
-    { value: "Node.js", icon: "fa-brands fa-node-js", color: "text-white", bg: "bg-green-500" },
-    { value: "Python", icon: "fa-brands fa-python", color: "text-white", bg: "bg-blue-500", round: true },
-    { value: "Go", icon: "text", bg: "bg-cyan-500", text: "G", round: true, bold: true },
-    { value: "Rust", icon: "fa-brands fa-rust", color: "text-white", bg: "bg-orange-700", round: true },
-  ]);
+  // 标签图标配置
+  const LABEL_ICONS: Record<string, { bg: string; text: string; round?: boolean }> = {
+    "Java": { bg: "bg-orange-600", text: "J" },
+    "Vue": { bg: "bg-green-500", text: "V", round: true },
+    "React": { bg: "bg-blue-400", text: "⚛", round: true },
+    "Angular": { bg: "bg-red-500", text: "A", round: true },
+    "小程序": { bg: "bg-green-600", text: "微" },
+    "Node.js": { bg: "bg-green-500", text: "N" },
+    "Python": { bg: "bg-blue-500", text: "P", round: true },
+    "Go": { bg: "bg-cyan-500", text: "G", round: true },
+    "Rust": { bg: "bg-orange-700", text: "R", round: true },
+    "TypeScript": { bg: "bg-blue-600", text: "TS" },
+    "JavaScript": { bg: "bg-yellow-400", text: "JS" },
+    "PHP": { bg: "bg-indigo-500", text: "P" },
+    "Spring Boot": { bg: "bg-green-600", text: "S" },
+    "Docker": { bg: "bg-blue-500", text: "D" },
+    "Kubernetes": { bg: "bg-blue-600", text: "K8" },
+  };
+
+  function getLabelIcon(label: string) {
+    const config = LABEL_ICONS[label] || { bg: "bg-gray-500", text: label.slice(0, 2) };
+    return (
+      <div className={`w-5 h-5 ${config.round ? 'rounded-full' : 'rounded'} ${config.bg} flex items-center justify-center flex-shrink-0`}>
+        <span className="text-white text-xs font-medium">{config.text}</span>
+      </div>
+    );
+  }
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -213,7 +230,8 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
   function confirmAddTech() {
     const name = customTechName.trim();
     if (name) {
-      setTechs([...techs, { value: name, icon: "text", bg: "bg-gray-600", text: name.slice(0, 2) }]);
+      // 添加到 store 中
+      addLabel(name);
       setSelectedTechs([...selectedTechs, name]);
       setCustomTechName("");
       setCustomTechInput(false);
@@ -494,39 +512,28 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
                 )}
 
                 <div className="grid grid-cols-4 gap-2">
-                  {techs.map((tech) => (
-                    <label key={tech.value} className="cursor-pointer add-project-tech-tag">
-                      <input
-                        type="checkbox"
-                        className="add-project-tag-checkbox hidden"
-                        checked={selectedTechs.includes(tech.value)}
-                        onChange={() => toggleTech(tech.value)}
-                        value={tech.value}
-                      />
-                      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-all">
-                        {tech.icon === "text" ? (
-                          <div
-                            className={`w-5 h-5 ${tech.round ? "rounded-full" : "rounded"} flex items-center justify-center ${tech.bg}`}
-                          >
-                            <span className={`text-white ${tech.small ? "text-[10px]" : tech.bold ? "text-xs font-bold" : "text-xs"}`}>
-                              {tech.text}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className={`w-5 h-5 flex items-center justify-center ${tech.bg || ""}`}>
-                            {tech.bg ? (
-                              <div className={`w-5 h-5 ${tech.round ? "rounded-full" : "rounded"} flex items-center justify-center ${tech.bg}`}>
-                                <i className={`${tech.icon} ${tech.color} ${tech.iconSize || "text-xs"}`}></i>
-                              </div>
-                            ) : (
-                              <i className={`${tech.icon} ${tech.color} ${tech.iconSize || "text-lg"}`}></i>
-                            )}
-                          </div>
-                        )}
-                        <span className="text-sm font-medium text-gray-700">{tech.value}</span>
-                      </div>
-                    </label>
+                  {storeLabels.map((label) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => toggleTech(label)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-left ${
+                        selectedTechs.includes(label)
+                          ? "bg-blue-50 border-2 border-blue-500"
+                          : "bg-gray-50 border-2 border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      {getLabelIcon(label)}
+                      <span className={`text-sm font-medium truncate ${selectedTechs.includes(label) ? "text-blue-700" : "text-gray-700"}`}>
+                        {label}
+                      </span>
+                    </button>
                   ))}
+                  {storeLabels.length === 0 && (
+                    <div className="col-span-4 text-center py-4 text-gray-400 text-sm">
+                      暂无标签，请在设置中添加或点击"自定义"
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -629,23 +636,11 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
           font-size: 12px;
           color: #3b82f6;
         }
-        .add-project-tag-checkbox:checked + div {
-          background: #dbeafe;
-          border-color: #3b82f6;
-          color: #1d4ed8;
-        }
         .add-project-category-pill {
           transition: all 0.2s;
         }
         .add-project-category-pill:hover {
           transform: scale(1.02);
-        }
-        .add-project-tech-tag {
-          transition: all 0.2s;
-        }
-        .add-project-tech-tag:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .add-project-btn-primary {
           background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
