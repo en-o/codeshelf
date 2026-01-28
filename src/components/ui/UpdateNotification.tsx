@@ -1,11 +1,14 @@
 import { useState, useEffect } from "react";
-import { Download, X, RefreshCw, CheckCircle } from "lucide-react";
+import { Download, X, RefreshCw, CheckCircle, ExternalLink, AlertCircle } from "lucide-react";
+import { open } from "@tauri-apps/plugin-shell";
 import {
   silentCheckForUpdates,
   downloadUpdate,
   installUpdate,
   type UpdateInfo,
 } from "@/services/updater";
+
+const RELEASES_URL = "https://github.com/en-o/codeshelf/releases/latest";
 
 type UpdateState = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
 
@@ -59,6 +62,10 @@ export function UpdateNotification() {
     }
   }
 
+  async function handleOpenReleases() {
+    await open(RELEASES_URL);
+  }
+
   function handleDismiss() {
     setDismissed(true);
   }
@@ -89,6 +96,8 @@ export function UpdateNotification() {
                 <RefreshCw className="w-5 h-5 text-blue-500 animate-spin" />
               ) : state === "ready" ? (
                 <CheckCircle className="w-5 h-5 text-green-500" />
+              ) : state === "error" ? (
+                <AlertCircle className="w-5 h-5 text-orange-500" />
               ) : (
                 <Download className="w-5 h-5 text-blue-500" />
               )}
@@ -102,7 +111,7 @@ export function UpdateNotification() {
                   : state === "ready"
                   ? "更新已就绪"
                   : state === "error"
-                  ? "更新失败"
+                  ? "自动更新失败"
                   : `发现新版本 v${updateInfo?.version}`}
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
@@ -111,7 +120,7 @@ export function UpdateNotification() {
                   : state === "ready"
                   ? "点击安装并重启应用"
                   : state === "error"
-                  ? "请稍后重试"
+                  ? "请手动前往下载页面获取新版本"
                   : "正在后台下载..."}
               </p>
             </div>
@@ -138,11 +147,11 @@ export function UpdateNotification() {
 
           {state === "error" && (
             <button
-              onClick={startDownload}
-              className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors"
+              onClick={handleOpenReleases}
+              className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors"
             >
-              <RefreshCw className="w-4 h-4" />
-              重试下载
+              <ExternalLink className="w-4 h-4" />
+              前往下载页面
             </button>
           )}
         </div>
