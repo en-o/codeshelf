@@ -106,17 +106,17 @@ export function DashboardPage() {
 
         <div className="re-actions flex items-center">
           {/* Integrated Window Controls */}
-          <div className="flex items-center ml-4 border-l border-[var(--border)] pl-3 gap-1 h-6">
+          <div className="flex items-center ml-4 border-l border-gray-200 pl-3 gap-1 h-6">
             <button
               onClick={() => getCurrentWindow()?.minimize()}
-              className="w-7 h-7 flex items-center justify-center hover:bg-[rgba(0,0,0,0.05)] rounded-md transition-colors text-[var(--text-light)] hover:text-[var(--text)]"
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 rounded-md transition-colors text-gray-400 hover:text-gray-600"
               title="最小化"
             >
               <Minus size={14} />
             </button>
             <button
               onClick={() => getCurrentWindow()?.close()}
-              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-[var(--text-light)]"
+              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-gray-400"
               title="关闭"
             >
               <X size={14} />
@@ -127,8 +127,8 @@ export function DashboardPage() {
 
       <div className="p-5" style={{ marginTop: "40px" }}>
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 text-[var(--text-light)]">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-[var(--primary)] border-t-transparent mb-4" />
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mb-4" />
             <p>分析数据中...</p>
           </div>
         ) : (
@@ -167,7 +167,7 @@ export function DashboardPage() {
               {heatmapData.length > 0 ? (
                 <CommitHeatmap data={heatmapData} />
               ) : (
-                <div className="flex flex-col items-center justify-center h-48 text-[var(--text-light)]">
+                <div className="flex flex-col items-center justify-center h-48 text-gray-400">
                   <p>暂无提交记录</p>
                 </div>
               )}
@@ -176,7 +176,7 @@ export function DashboardPage() {
             {/* Recent Activity */}
             <div className="re-card">
               <h2 className="text-[17px] font-semibold mb-6">最近活动</h2>
-              <div className="flex flex-col items-center justify-center h-32 text-[var(--text-light)]">
+              <div className="flex flex-col items-center justify-center h-32 text-gray-400">
                 <p>功能开发中...</p>
               </div>
             </div>
@@ -196,10 +196,10 @@ interface StatCardProps {
 
 function StatCard({ icon: Icon, label, value, color }: StatCardProps) {
   const colors = {
-    blue: "bg-blue-50 dark:bg-blue-500/10 text-blue-500",
-    green: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500",
-    orange: "bg-orange-50 dark:bg-orange-500/10 text-orange-500",
-    purple: "bg-purple-50 dark:bg-purple-500/10 text-purple-500",
+    blue: "bg-blue-50 text-blue-500",
+    green: "bg-emerald-50 text-emerald-500",
+    orange: "bg-orange-50 text-orange-500",
+    purple: "bg-purple-50 text-purple-500",
   };
 
   return (
@@ -209,8 +209,8 @@ function StatCard({ icon: Icon, label, value, color }: StatCardProps) {
           <Icon className="w-5 h-5" />
         </div>
         <div>
-          <p className="text-[var(--text-light)] text-sm font-medium mb-1">{label}</p>
-          <p className="text-2xl font-semibold text-[var(--text)]">{value}</p>
+          <p className="text-gray-500 text-sm font-medium mb-1">{label}</p>
+          <p className="text-2xl font-semibold text-gray-900">{value}</p>
         </div>
       </div>
     </div>

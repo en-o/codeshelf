@@ -15,12 +15,12 @@ export function AppearanceSettings({ onClose }: AppearanceSettingsProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
-        <h4 className="text-sm font-semibold text-[var(--text)]">选择主题模式</h4>
+      <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+        <h4 className="text-sm font-semibold text-gray-900">选择主题模式</h4>
         {onClose && (
           <button
             onClick={onClose}
-            className="text-xs text-[var(--text-light)] hover:text-[var(--primary)] transition-colors"
+            className="text-xs text-gray-500 hover:text-blue-500 transition-colors"
           >
             收起
           </button>
@@ -36,13 +36,13 @@ export function AppearanceSettings({ onClose }: AppearanceSettingsProps) {
               onClick={() => setTheme(value)}
               className={`flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all ${
                 isSelected
-                  ? "border-[var(--primary)] bg-[var(--primary-light)]"
-                  : "border-[var(--border)] hover:border-[var(--primary)]/50 hover:bg-[var(--bg-light)]"
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-200 hover:border-blue-500/50 hover:bg-gray-50"
               }`}
             >
               <div
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
-                  isSelected ? "bg-[var(--primary)] text-white" : "bg-[var(--bg-light)] text-[var(--text-light)]"
+                  isSelected ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-400"
                 }`}
               >
                 <Icon className="w-6 h-6" />
@@ -50,21 +50,21 @@ export function AppearanceSettings({ onClose }: AppearanceSettingsProps) {
               <div className="text-center">
                 <div
                   className={`font-semibold ${
-                    isSelected ? "text-[var(--primary)]" : "text-[var(--text)]"
+                    isSelected ? "text-blue-500" : "text-gray-900"
                   }`}
                 >
                   {label}
                 </div>
-                <div className="text-xs text-[var(--text-light)] mt-0.5">{description}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{description}</div>
               </div>
             </button>
           );
         })}
       </div>
 
-      <div className="flex items-start gap-2 p-3 bg-[var(--bg-light)] rounded-lg">
-        <Monitor className="w-4 h-4 text-[var(--text-light)] flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-[var(--text-light)]">
+      <div className="flex items-start gap-2 p-3 bg-gray-100 rounded-lg">
+        <Monitor className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-gray-500">
           主题设置会自动保存并应用到整个应用程序。选择适合您工作环境的主题模式。
         </p>
       </div>

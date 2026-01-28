@@ -32,7 +32,6 @@ export function FilterPopover({
     }
   }, [isOpen]);
 
-  // 处理键盘事件
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -55,7 +54,7 @@ export function FilterPopover({
       checked: onlyStarred,
       onChange: onStarredChange,
       activeColor: "text-yellow-500",
-      activeBg: "bg-yellow-50 dark:bg-yellow-500/10",
+      activeBg: "bg-yellow-50",
     },
     {
       id: "modified" as const,
@@ -65,7 +64,7 @@ export function FilterPopover({
       checked: onlyModified,
       onChange: onModifiedChange,
       activeColor: "text-emerald-500",
-      activeBg: "bg-emerald-50 dark:bg-emerald-500/10",
+      activeBg: "bg-emerald-50",
     },
   ];
 
@@ -74,14 +73,14 @@ export function FilterPopover({
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={`re-btn flex items-center gap-2 relative transition-all duration-200 ${
-          isOpen ? "ring-2 ring-[var(--primary)]/30" : ""
+          isOpen ? "ring-2 ring-blue-500/30" : ""
         } ${activeFiltersCount > 0 ? "re-btn-active" : ""}`}
         title="过滤器"
       >
         <Filter size={16} />
         <span>过滤</span>
         {activeFiltersCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-[var(--primary)] text-white text-xs rounded-full flex items-center justify-center font-semibold shadow-sm">
+          <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-blue-500 text-white text-xs rounded-full flex items-center justify-center font-semibold shadow-sm">
             {activeFiltersCount}
           </span>
         )}
@@ -89,27 +88,25 @@ export function FilterPopover({
 
       {isOpen && (
         <>
-          {/* Backdrop for mobile */}
           <div
             className="fixed inset-0 z-40 md:hidden"
             onClick={() => setIsOpen(false)}
           />
 
-          {/* Popover Panel */}
           <div
-            className="absolute top-full right-0 mt-2 w-80 bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200"
+            className="absolute top-full right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-slide-down"
             style={{
               boxShadow: "0 20px 50px -12px rgba(0, 0, 0, 0.15), 0 8px 20px -8px rgba(0, 0, 0, 0.1)",
             }}
           >
             {/* Header */}
-            <div className="px-5 py-4 border-b border-[var(--border)] bg-gradient-to-r from-[var(--bg-light)] to-transparent">
+            <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-transparent">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center">
-                    <Filter className="w-4 h-4 text-[var(--primary)]" />
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <Filter className="w-4 h-4 text-blue-500" />
                   </div>
-                  <h3 className="text-sm font-semibold text-[var(--text)]">过滤选项</h3>
+                  <h3 className="text-sm font-semibold text-gray-800">过滤选项</h3>
                 </div>
                 {activeFiltersCount > 0 && (
                   <button
@@ -117,7 +114,7 @@ export function FilterPopover({
                       onStarredChange(false);
                       onModifiedChange(false);
                     }}
-                    className="text-xs text-red-500 hover:text-red-600 font-medium flex items-center gap-1 px-2 py-1 rounded-md hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                    className="text-xs text-red-500 hover:text-red-600 font-medium flex items-center gap-1 px-2 py-1 rounded-md hover:bg-red-50 transition-colors"
                   >
                     <X size={12} />
                     清除全部
@@ -136,17 +133,16 @@ export function FilterPopover({
                     onClick={() => option.onChange(!option.checked)}
                     className={`w-full text-left p-3.5 rounded-xl transition-all duration-200 group ${
                       option.checked
-                        ? "bg-[var(--primary-light)] border-2 border-[var(--primary)]/50"
-                        : "bg-[var(--bg-light)] border-2 border-transparent hover:border-[var(--border)] hover:bg-[var(--bg-light)]/80"
+                        ? "bg-blue-50 border-2 border-blue-500/50"
+                        : "bg-gray-50 border-2 border-transparent hover:border-gray-200 hover:bg-gray-100"
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      {/* Icon */}
                       <div
                         className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 ${
                           option.checked
                             ? `${option.activeBg} ${option.activeColor}`
-                            : "bg-[var(--card)] text-[var(--text-light)] group-hover:text-[var(--text)]"
+                            : "bg-white text-gray-400 group-hover:text-gray-600"
                         }`}
                       >
                         <Icon
@@ -154,22 +150,20 @@ export function FilterPopover({
                         />
                       </div>
 
-                      {/* Text */}
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-[var(--text)] text-sm">
+                        <div className="font-semibold text-gray-800 text-sm">
                           {option.label}
                         </div>
-                        <div className="text-xs text-[var(--text-light)] mt-0.5">
+                        <div className="text-xs text-gray-500 mt-0.5">
                           {option.description}
                         </div>
                       </div>
 
-                      {/* Checkbox */}
                       <div
                         className={`flex-shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all duration-200 ${
                           option.checked
-                            ? "border-[var(--primary)] bg-[var(--primary)]"
-                            : "border-[var(--border)] group-hover:border-[var(--primary)]/50"
+                            ? "border-blue-500 bg-blue-500"
+                            : "border-gray-300 group-hover:border-blue-300"
                         }`}
                       >
                         {option.checked && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
@@ -181,18 +175,18 @@ export function FilterPopover({
             </div>
 
             {/* Footer */}
-            <div className="px-5 py-3 border-t border-[var(--border)] bg-[var(--bg-light)]">
+            <div className="px-5 py-3 border-t border-gray-100 bg-gray-50">
               {activeFiltersCount > 0 ? (
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-[var(--text-light)]">
+                  <span className="text-xs text-gray-500">
                     已启用 {activeFiltersCount} 个过滤条件
                   </span>
-                  <span className="text-xs font-medium text-[var(--primary)]">
+                  <span className="text-xs font-medium text-blue-500">
                     点击选项可切换
                   </span>
                 </div>
               ) : (
-                <p className="text-xs text-[var(--text-light)] text-center">
+                <p className="text-xs text-gray-500 text-center">
                   选择过滤条件以筛选项目列表
                 </p>
               )}

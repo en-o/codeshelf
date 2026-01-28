@@ -227,17 +227,17 @@ export function ShelfPage() {
           </button>
 
           {/* Integrated Window Controls */}
-          <div className="flex items-center ml-2 border-l border-[var(--border)] pl-3 gap-1 h-6">
+          <div className="flex items-center ml-2 border-l border-gray-200 pl-3 gap-1 h-6">
             <button
               onClick={() => getCurrentWindow()?.minimize()}
-              className="w-7 h-7 flex items-center justify-center hover:bg-[rgba(0,0,0,0.05)] rounded-md transition-colors text-[var(--text-light)] hover:text-[var(--text)]"
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 rounded-md transition-colors text-gray-400 hover:text-gray-600"
               title="最小化"
             >
               <Minus size={14} />
             </button>
             <button
               onClick={() => getCurrentWindow()?.close()}
-              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-[var(--text-light)]"
+              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-gray-400"
               title="关闭"
             >
               <X size={14} />
@@ -248,7 +248,7 @@ export function ShelfPage() {
 
       {/* Category Bar */}
       <div ref={categoryBarRef} className="re-cat-bar">
-        <span style={{ fontSize: "14px", color: "var(--text-light)" }}>分类：</span>
+        <span className="text-sm text-gray-500">分类：</span>
         <div className="re-cat-list">
           {["全部", ...categories].map((c) => (
             <span
@@ -274,14 +274,14 @@ export function ShelfPage() {
       {/* Content */}
       <div className="flex-1">
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 text-[var(--text-light)]">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-[var(--primary)] border-t-transparent mb-4" />
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mb-4" />
             <p>加载中...</p>
           </div>
         ) : sortedProjects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-[var(--text-light)]">
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <span className="text-6xl mb-4 opacity-50">📂</span>
-            <p className="text-lg font-medium mb-2 text-[var(--text)]">还没有项目</p>
+            <p className="text-lg font-medium mb-2 text-gray-700">还没有项目</p>
             <p className="text-sm">点击"+ 项目"开始使用</p>
           </div>
         ) : (

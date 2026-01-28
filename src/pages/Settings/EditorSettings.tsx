@@ -47,12 +47,12 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
-        <h4 className="text-sm font-semibold text-[var(--text)]">编辑器配置</h4>
+      <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+        <h4 className="text-sm font-semibold text-gray-900">编辑器配置</h4>
         {onClose && (
           <button
             onClick={onClose}
-            className="text-xs text-[var(--text-light)] hover:text-[var(--primary)] transition-colors"
+            className="text-xs text-gray-500 hover:text-blue-500 transition-colors"
           >
             收起
           </button>
@@ -75,7 +75,7 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
       {/* 编辑器列表 */}
       <div className="space-y-2">
         {editors.length === 0 ? (
-          <div className="text-center py-6 text-[var(--text-light)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--bg-light)]">
+          <div className="text-center py-6 text-gray-500 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
             <div className="text-sm font-medium">暂无配置的编辑器</div>
             <div className="text-xs mt-1">点击下方按钮添加</div>
           </div>
@@ -83,18 +83,18 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
           editors.map((editor, index) => (
             <div
               key={editor.id}
-              className="flex items-center justify-between p-3 border border-[var(--border)] rounded-lg hover:border-[var(--primary)]/50 transition-colors bg-[var(--card)]"
+              className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:border-blue-500/50 transition-colors bg-white"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-[var(--text)] text-sm">{editor.name}</span>
+                  <span className="font-medium text-gray-900 text-sm">{editor.name}</span>
                   {index === 0 && (
-                    <span className="px-2 py-0.5 bg-[var(--primary)]/10 text-[var(--primary)] text-xs rounded-full font-medium">
+                    <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 text-xs rounded-full font-medium">
                       默认
                     </span>
                   )}
                 </div>
-                <div className="text-xs text-[var(--text-light)] font-mono truncate mt-0.5">
+                <div className="text-xs text-gray-500 font-mono truncate mt-0.5">
                   {editor.path}
                 </div>
               </div>
@@ -112,9 +112,9 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
 
       {/* 添加编辑器表单 */}
       {showAddForm ? (
-        <div className="p-4 bg-[var(--bg-light)] border border-[var(--border)] rounded-lg space-y-3">
+        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
           <div>
-            <label className="block text-xs font-medium text-[var(--text)] mb-1.5">
+            <label className="block text-xs font-medium text-gray-900 mb-1.5">
               编辑器名称
             </label>
             <input
@@ -122,11 +122,11 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
               value={newEditor.name}
               onChange={(e) => setNewEditor({ ...newEditor, name: e.target.value })}
               placeholder="例如：VS Code、IntelliJ IDEA"
-              className="w-full px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm text-[var(--text)] placeholder-[var(--text-light)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]"
+              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-[var(--text)] mb-1.5">
+            <label className="block text-xs font-medium text-gray-900 mb-1.5">
               可执行文件路径
             </label>
             <div className="flex gap-2">
@@ -135,11 +135,11 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
                 value={newEditor.path}
                 onChange={(e) => setNewEditor({ ...newEditor, path: e.target.value })}
                 placeholder="选择或输入编辑器可执行文件路径"
-                className="flex-1 px-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm font-mono text-[var(--text)] placeholder-[var(--text-light)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]"
+                className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-mono text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
               <button
                 onClick={handleBrowsePath}
-                className="px-3 py-2 bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded-lg text-sm hover:bg-[var(--bg-light)] transition-colors flex items-center gap-1.5"
+                className="px-3 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm hover:bg-gray-100 transition-colors flex items-center gap-1.5"
               >
                 <FolderOpen size={14} />
                 浏览
@@ -149,7 +149,7 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
           <div className="flex gap-2 pt-1">
             <button
               onClick={handleAddEditor}
-              className="flex-1 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+              className="flex-1 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors flex items-center justify-center gap-1.5"
             >
               <Check size={14} />
               确认添加
@@ -159,7 +159,7 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
                 setShowAddForm(false);
                 setNewEditor({ name: "", path: "" });
               }}
-              className="px-4 py-2 bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded-lg text-sm font-medium hover:bg-[var(--bg-light)] transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors flex items-center gap-1.5"
             >
               <X size={14} />
               取消
@@ -169,7 +169,7 @@ export function EditorSettings({ onClose }: EditorSettingsProps) {
       ) : (
         <button
           onClick={() => setShowAddForm(true)}
-          className="w-full py-2.5 border-2 border-dashed border-[var(--border)] hover:border-[var(--primary)] text-[var(--text-light)] hover:text-[var(--primary)] rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2.5 border-2 border-dashed border-gray-200 hover:border-blue-500 text-gray-500 hover:text-blue-500 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
         >
           <Plus size={16} />
           添加编辑器

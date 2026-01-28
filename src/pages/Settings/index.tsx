@@ -92,17 +92,17 @@ export function SettingsPage() {
         </div>
 
         <div className="re-actions flex items-center">
-          <div className="flex items-center ml-4 border-l border-[var(--border)] pl-3 gap-1 h-6">
+          <div className="flex items-center ml-4 border-l border-gray-200 pl-3 gap-1 h-6">
             <button
               onClick={() => getCurrentWindow()?.minimize()}
-              className="w-7 h-7 flex items-center justify-center hover:bg-[rgba(0,0,0,0.05)] rounded-md transition-colors text-[var(--text-light)] hover:text-[var(--text)]"
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 rounded-md transition-colors text-gray-400 hover:text-gray-600"
               title="最小化"
             >
               <Minus size={14} />
             </button>
             <button
               onClick={() => getCurrentWindow()?.close()}
-              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-[var(--text-light)]"
+              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-gray-400"
               title="关闭"
             >
               <X size={14} />
@@ -126,8 +126,8 @@ export function SettingsPage() {
                   onClick={() => handleCardClick(card.id)}
                   className={`re-card p-5 text-left transition-all duration-200 hover:shadow-md ${
                     isActive
-                      ? "ring-2 ring-[var(--primary)] bg-[var(--primary-light)]"
-                      : "hover:border-[var(--primary)]"
+                      ? "ring-2 ring-blue-500 bg-blue-50"
+                      : "hover:border-blue-500"
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -135,17 +135,17 @@ export function SettingsPage() {
                       <div
                         className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
                           isActive
-                            ? "bg-[var(--primary)] text-white"
-                            : "bg-[var(--bg-light)] text-[var(--primary)]"
+                            ? "bg-blue-500 text-white"
+                            : "bg-gray-100 text-blue-500"
                         }`}
                       >
                         <Icon className="w-6 h-6" />
                       </div>
                       <div>
-                        <h3 className="text-base font-semibold text-[var(--text)]">
+                        <h3 className="text-base font-semibold text-gray-900">
                           {card.title}
                         </h3>
-                        <p className="text-sm text-[var(--text-light)] mt-0.5">
+                        <p className="text-sm text-gray-500 mt-0.5">
                           {card.description}
                         </p>
                       </div>
@@ -154,14 +154,14 @@ export function SettingsPage() {
                       <span
                         className={`text-sm font-medium px-3 py-1 rounded-full ${
                           isActive
-                            ? "bg-[var(--primary)] text-white"
-                            : "bg-[var(--bg-light)] text-[var(--text-light)]"
+                            ? "bg-blue-500 text-white"
+                            : "bg-gray-100 text-gray-500"
                         }`}
                       >
                         {card.value}
                       </span>
                       <ChevronRight
-                        className={`w-5 h-5 text-[var(--text-light)] transition-transform duration-200 ${
+                        className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
                           isActive ? "rotate-90" : ""
                         }`}
                       />

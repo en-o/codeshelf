@@ -138,7 +138,7 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
             {project.labels.map((label) => (
               <span
                 key={label}
-                className="inline-flex items-center px-2 py-0.5 bg-[var(--primary-light)] text-[var(--primary)] rounded text-xs font-medium"
+                className="inline-flex items-center px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-xs font-medium"
               >
                 {label}
               </span>

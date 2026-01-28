@@ -59,7 +59,7 @@ export function Dropdown({ trigger, items, align = "right" }: DropdownProps) {
 
           {/* Dropdown Menu */}
           <div
-            className={`absolute top-full mt-2 min-w-[200px] bg-[var(--card)] rounded-xl shadow-xl border border-[var(--border)] py-2 z-50 animate-in fade-in slide-in-from-top-1 duration-200 ${
+            className={`absolute top-full mt-2 min-w-[200px] bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-50 animate-in fade-in slide-in-from-top-1 duration-200 ${
               align === "right" ? "right-0" : "left-0"
             }`}
             style={{
@@ -69,7 +69,7 @@ export function Dropdown({ trigger, items, align = "right" }: DropdownProps) {
             {items.map((item, index) => (
               <div key={index}>
                 {item.divider && (
-                  <div className="h-px bg-[var(--border)] my-2 mx-3" />
+                  <div className="h-px bg-gray-200 my-2 mx-3" />
                 )}
                 <button
                   onClick={() => {
@@ -78,12 +78,12 @@ export function Dropdown({ trigger, items, align = "right" }: DropdownProps) {
                   }}
                   className={`w-full mx-1 px-3 py-2.5 text-left text-sm rounded-lg transition-all duration-150 flex items-center gap-3 min-w-[calc(100%-8px)] ${
                     item.danger
-                      ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                      : "text-[var(--text)] hover:bg-[var(--bg-light)]"
+                      ? "text-red-500 hover:bg-red-50"
+                      : "text-gray-900 hover:bg-gray-100"
                   }`}
                 >
                   {item.icon && (
-                    <span className="w-7 h-7 flex items-center justify-center rounded-lg bg-[var(--bg-light)] text-base">
+                    <span className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 text-base">
                       {item.icon}
                     </span>
                   )}

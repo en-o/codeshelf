@@ -42,7 +42,7 @@ export function TitleBar({ onNavigate, currentPage }: TitleBarProps) {
   return (
     <div
       data-tauri-drag-region
-      className="titlebar flex items-center justify-between h-8 bg-[var(--card)] border-b border-[var(--border)] select-none z-20"
+      className="titlebar flex items-center justify-between h-8 bg-white border-b border-gray-200 select-none z-20"
     >
       {/* Left: App Icon and Title */}
       <div
@@ -54,7 +54,7 @@ export function TitleBar({ onNavigate, currentPage }: TitleBarProps) {
           alt="CodeShelf"
           className="w-4 h-4 pointer-events-none"
         />
-        <span className="text-xs font-medium text-[var(--text-light)] pointer-events-none">
+        <span className="text-xs font-medium text-gray-500 pointer-events-none">
           CodeShelf · 代码书架
         </span>
       </div>
@@ -68,8 +68,8 @@ export function TitleBar({ onNavigate, currentPage }: TitleBarProps) {
               onNavigate("shelf");
             }}
             className={`px-3 py-1 text-xs rounded transition-all ${currentPage === "shelf"
-                ? "bg-[var(--primary-light)] text-[var(--primary)]"
-                : "text-[var(--text-light)] hover:text-[var(--primary)] hover:bg-[var(--primary-light)]"
+                ? "bg-blue-50 text-blue-500"
+                : "text-gray-500 hover:text-blue-500 hover:bg-blue-50"
               }`}
             title="项目书架"
           >
@@ -81,8 +81,8 @@ export function TitleBar({ onNavigate, currentPage }: TitleBarProps) {
               onNavigate("settings");
             }}
             className={`px-3 py-1 text-xs rounded transition-all ${currentPage === "settings"
-                ? "bg-[var(--primary-light)] text-[var(--primary)]"
-                : "text-[var(--text-light)] hover:text-[var(--primary)] hover:bg-[var(--primary-light)]"
+                ? "bg-blue-50 text-blue-500"
+                : "text-gray-500 hover:text-blue-500 hover:bg-blue-50"
               }`}
             title="设置"
           >
@@ -95,21 +95,21 @@ export function TitleBar({ onNavigate, currentPage }: TitleBarProps) {
       <div className="flex items-center h-full">
         <button
           onClick={handleMinimize}
-          className="h-full px-3.5 text-[var(--text-light)] hover:bg-[rgba(0,0,0,0.05)] transition-colors flex items-center justify-center"
+          className="h-full px-3.5 text-gray-400 hover:bg-gray-100 transition-colors flex items-center justify-center"
           title="最小化"
         >
           <Minus className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={handleMaximize}
-          className="h-full px-3.5 text-[var(--text-light)] hover:bg-[rgba(0,0,0,0.05)] transition-colors flex items-center justify-center"
+          className="h-full px-3.5 text-gray-400 hover:bg-gray-100 transition-colors flex items-center justify-center"
           title={isMaximized ? "还原" : "最大化"}
         >
           <Square className="w-3 h-3" />
         </button>
         <button
           onClick={handleClose}
-          className="h-full px-3.5 text-[var(--text-light)] hover:bg-red-500 hover:text-white transition-colors flex items-center justify-center"
+          className="h-full px-3.5 text-gray-400 hover:bg-red-500 hover:text-white transition-colors flex items-center justify-center"
           title="关闭"
         >
           <X className="w-4 h-4" />

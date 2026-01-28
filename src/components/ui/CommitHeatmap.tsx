@@ -31,11 +31,11 @@ export function CommitHeatmap({ data }: HeatmapProps) {
   });
 
   function getColor(count: number): string {
-    if (count === 0) return "bg-gray-100 dark:bg-gray-800";
-    if (count <= 2) return "bg-emerald-200 dark:bg-emerald-900";
-    if (count <= 5) return "bg-emerald-400 dark:bg-emerald-700";
-    if (count <= 10) return "bg-emerald-600 dark:bg-emerald-500";
-    return "bg-emerald-800 dark:bg-emerald-300";
+    if (count === 0) return "bg-gray-100";
+    if (count <= 2) return "bg-emerald-200";
+    if (count <= 5) return "bg-emerald-400";
+    if (count <= 10) return "bg-emerald-600";
+    return "bg-emerald-800";
   }
 
   const months = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
@@ -50,7 +50,7 @@ export function CommitHeatmap({ data }: HeatmapProps) {
           {weekdays.map((day, i) => (
             <div
               key={i}
-              className="h-3 text-xs text-[var(--color-text-muted)] flex items-center"
+              className="h-3 text-xs text-gray-400 flex items-center"
             >
               {i % 2 === 1 ? day : ""}
             </div>
@@ -63,7 +63,7 @@ export function CommitHeatmap({ data }: HeatmapProps) {
             <div key={weekIndex} className="flex flex-col gap-1">
               {/* Month label */}
               {weekIndex === 0 || week[0].date.getDate() <= 7 ? (
-                <div className="h-3 text-xs text-[var(--color-text-muted)]">
+                <div className="h-3 text-xs text-gray-400">
                   {months[week[0].date.getMonth()]}
                 </div>
               ) : (
@@ -84,14 +84,14 @@ export function CommitHeatmap({ data }: HeatmapProps) {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-2 mt-4 text-xs text-[var(--color-text-muted)]">
+      <div className="flex items-center gap-2 mt-4 text-xs text-gray-400">
         <span>少</span>
         <div className="flex gap-1">
-          <div className="w-3 h-3 rounded-sm bg-gray-100 dark:bg-gray-800" />
-          <div className="w-3 h-3 rounded-sm bg-emerald-200 dark:bg-emerald-900" />
-          <div className="w-3 h-3 rounded-sm bg-emerald-400 dark:bg-emerald-700" />
-          <div className="w-3 h-3 rounded-sm bg-emerald-600 dark:bg-emerald-500" />
-          <div className="w-3 h-3 rounded-sm bg-emerald-800 dark:bg-emerald-300" />
+          <div className="w-3 h-3 rounded-sm bg-gray-100" />
+          <div className="w-3 h-3 rounded-sm bg-emerald-200" />
+          <div className="w-3 h-3 rounded-sm bg-emerald-400" />
+          <div className="w-3 h-3 rounded-sm bg-emerald-600" />
+          <div className="w-3 h-3 rounded-sm bg-emerald-800" />
         </div>
         <span>多</span>
       </div>
