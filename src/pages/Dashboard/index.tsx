@@ -36,7 +36,7 @@ export function DashboardPage() {
 
   // When projects change, refresh stats
   useEffect(() => {
-    if (projects.length > 0 && !loading) {
+    if (!loading) {
       handleRefreshStats();
     }
   }, [projects.length]);

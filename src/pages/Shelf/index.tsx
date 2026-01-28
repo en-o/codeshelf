@@ -175,6 +175,7 @@ export function ShelfPage() {
 
   function handleProjectDelete(projectId: string) {
     setProjects(projects.filter((p) => p.id !== projectId));
+    incrementStatsVersion(); // Trigger dashboard stats refresh
   }
 
   // 批量操作函数
@@ -215,6 +216,7 @@ export function ShelfPage() {
         await removeProject(id);
       }
       setProjects(projects.filter(p => !selectedIds.has(p.id)));
+      incrementStatsVersion(); // Trigger dashboard stats refresh
       setSelectedIds(new Set());
       setBatchMode(false);
       showToast("success", "移除成功", `已从书架移除 ${selectedIds.size} 个项目`);
