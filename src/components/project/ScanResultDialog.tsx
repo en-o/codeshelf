@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useAppStore } from "@/stores/appStore";
 import type { GitRepo } from "@/types";
 
 interface ScanResultDialogProps {
@@ -23,6 +24,7 @@ interface HistoryItem {
 }
 
 export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialogProps) {
+  const { categories: storeCategories, addCategory: addCategoryToStore } = useAppStore();
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [assignedCategories, setAssignedCategories] = useState<Record<string, string>>({});
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -33,11 +35,32 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
   const [showRenameInput, setShowRenameInput] = useState(false);
   const [renameValue, setRenameValue] = useState("");
 
-  const [categories, setCategories] = useState<Record<string, CategoryInfo>>({
-    work: { name: "工作项目", icon: "💼", color: "orange", bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200" },
-    personal: { name: "个人学习", icon: "🎯", color: "emerald", bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
-    open: { name: "开源贡献", icon: "🌟", color: "purple", bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
-  });
+  // 预设颜色方案
+  const colorSchemes = [
+    { icon: "💼", color: "orange", bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200" },
+    { icon: "🎯", color: "emerald", bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
+    { icon: "🌟", color: "purple", bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
+    { icon: "📦", color: "amber", bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
+    { icon: "🚀", color: "blue", bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
+    { icon: "💡", color: "cyan", bg: "bg-cyan-50", text: "text-cyan-700", border: "border-cyan-200" },
+    { icon: "🔧", color: "gray", bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
+  ];
+
+  // 从 store 分类生成带样式的分类信息
+  const [categories, setCategories] = useState<Record<string, CategoryInfo>>({});
+
+  // 初始化分类样式
+  useEffect(() => {
+    const newCategories: Record<string, CategoryInfo> = {};
+    storeCategories.forEach((catName, index) => {
+      const scheme = colorSchemes[index % colorSchemes.length];
+      newCategories[catName] = {
+        name: catName,
+        ...scheme,
+      };
+    });
+    setCategories(newCategories);
+  }, [storeCategories]);
 
   // 检测共同前缀
   const commonPrefix = useMemo(() => {
@@ -119,10 +142,15 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
   function confirmNewCategory() {
     const name = newCategoryName.trim();
     if (!name) return;
-    const id = `auto_${Date.now()}`;
+    // 添加到 store
+    if (!storeCategories.includes(name)) {
+      addCategoryToStore(name);
+    }
+    // 添加到本地显示状态（带样式）
+    const schemeIndex = Object.keys(categories).length % colorSchemes.length;
     setCategories({
       ...categories,
-      [id]: {
+      [name]: {
         name,
         icon: "📦",
         color: "amber",
@@ -133,15 +161,19 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
     });
     setNewCategoryName("");
     setShowNewCategoryInput(false);
-    setSelectedCategory(id);
+    setSelectedCategory(name);
   }
 
   function acceptRecommend() {
     if (!commonPrefix) return;
-    const id = `auto_${Date.now()}`;
+    // 添加到 store
+    if (!storeCategories.includes(commonPrefix)) {
+      addCategoryToStore(commonPrefix);
+    }
+    // 添加到本地显示状态
     setCategories({
       ...categories,
-      [id]: {
+      [commonPrefix]: {
         name: commonPrefix,
         icon: "📦",
         color: "amber",
@@ -150,7 +182,7 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
         border: "border-amber-200",
       },
     });
-    setSelectedCategory(id);
+    setSelectedCategory(commonPrefix);
   }
 
   function showRename() {
@@ -161,10 +193,14 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
   function confirmRename() {
     const name = renameValue.trim();
     if (!name) return;
-    const id = `auto_${Date.now()}`;
+    // 添加到 store
+    if (!storeCategories.includes(name)) {
+      addCategoryToStore(name);
+    }
+    // 添加到本地显示状态
     setCategories({
       ...categories,
-      [id]: {
+      [name]: {
         name,
         icon: "📦",
         color: "amber",
@@ -173,7 +209,7 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
         border: "border-amber-200",
       },
     });
-    setSelectedCategory(id);
+    setSelectedCategory(name);
     setShowRenameInput(false);
   }
 
@@ -238,10 +274,10 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
         </header>
 
         {/* 主内容 */}
-        <div className="flex-1 overflow-hidden p-4">
+        <div className="flex-1 overflow-hidden p-4 min-h-0">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
             {/* 左侧：项目列表 */}
-            <div className="lg:col-span-8 h-full">
+            <div className="lg:col-span-8 h-full min-h-0">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden h-full flex flex-col">
                 {/* 工具栏 */}
                 <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between shrink-0">
@@ -278,7 +314,7 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
                 </div>
 
                 {/* 列表 */}
-                <div className="flex-1 overflow-y-auto scan-scrollbar divide-y divide-gray-50">
+                <div className="flex-1 overflow-y-auto scan-scrollbar divide-y divide-gray-50 min-h-0">
                   {filteredRepos.map(repo => {
                     const isSelected = selectedPaths.has(repo.path);
                     const hasCategory = !!assignedCategories[repo.path];
@@ -327,7 +363,9 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
             </div>
 
             {/* 右侧：操作面板 */}
-            <div className="lg:col-span-4 flex flex-col gap-4 overflow-y-auto scan-scrollbar">
+            <div className="lg:col-span-4 flex flex-col min-h-0">
+              {/* 可滚动区域 */}
+              <div className="flex-1 overflow-y-auto scan-scrollbar space-y-4 min-h-0">
               {/* 1. 选中状态 */}
               <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl shadow-lg shadow-blue-500/30 p-5 text-white relative overflow-hidden shrink-0">
                 <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
@@ -472,36 +510,35 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
                   {canApply && selectedCategory ? `应用到「${categories[selectedCategory].name}」` : "应用归类"}
                 </button>
               </div>
+              </div>
 
-              {/* 4. 操作总结 */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex-1 flex flex-col">
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">本次操作记录</h3>
-                    <span className="text-xs text-gray-400">{history.length} 次操作</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2 content-start">
-                    {history.length === 0 ? (
-                      <div className="text-xs text-gray-400 italic py-2">暂无归类操作</div>
-                    ) : (
-                      history.map((item, idx) => {
-                        const cat = categories[item.category];
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => undoHistory(idx)}
-                            className={`scan-history-tag inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:opacity-80 ${cat?.bg || "bg-gray-100"} ${cat?.text || "text-gray-700"} border ${cat?.border || "border-gray-200"}`}
-                            title="点击撤销"
-                          >
-                            <span>{cat?.icon || "📦"}</span>
-                            <span>{item.name}</span>
-                            <span className="opacity-60">×{item.count}</span>
-                            <i className="fa-solid fa-xmark ml-1 opacity-60 text-xs"></i>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
+              {/* 4. 操作总结 - 固定在底部 */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 shrink-0 mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">本次操作记录</h3>
+                  <span className="text-xs text-gray-400">{history.length} 次操作</span>
+                </div>
+                <div className="flex flex-wrap gap-2 content-start max-h-24 overflow-y-auto">
+                  {history.length === 0 ? (
+                    <div className="text-xs text-gray-400 italic py-2">暂无归类操作</div>
+                  ) : (
+                    history.map((item, idx) => {
+                      const cat = categories[item.category];
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => undoHistory(idx)}
+                          className={`scan-history-tag inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:opacity-80 ${cat?.bg || "bg-gray-100"} ${cat?.text || "text-gray-700"} border ${cat?.border || "border-gray-200"}`}
+                          title="点击撤销"
+                        >
+                          <span>{cat?.icon || "📦"}</span>
+                          <span>{item.name}</span>
+                          <span className="opacity-60">×{item.count}</span>
+                          <i className="fa-solid fa-xmark ml-1 opacity-60 text-xs"></i>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
 
                 <div className="h-px bg-gray-200 my-4"></div>

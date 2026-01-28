@@ -3,6 +3,7 @@ import type { Project, GitStatus } from "@/types";
 import { getGitStatus, getRemotes } from "@/services/git";
 import { openInEditor, openInTerminal, toggleFavorite, removeProject, deleteProjectDirectory } from "@/services/db";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { useAppStore } from "@/stores/appStore";
 
 interface ProjectCardProps {
   project: Project;
@@ -15,6 +16,7 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [remoteType, setRemoteType] = useState<"github" | "gitee" | "gitlab" | "other" | "none">("none");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { terminalConfig, editors } = useAppStore();
 
   useEffect(() => {
     loadGitInfo();
@@ -62,7 +64,8 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
   async function handleOpenEditor(e: React.MouseEvent) {
     e.stopPropagation();
     try {
-      await openInEditor(project.path);
+      const editorPath = editors.length > 0 ? editors[0].path : undefined;
+      await openInEditor(project.path, editorPath);
     } catch (error) {
       console.error("Failed to open in editor:", error);
     }
@@ -71,7 +74,8 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
   async function handleOpenTerminal(e: React.MouseEvent) {
     e.stopPropagation();
     try {
-      await openInTerminal(project.path);
+      const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
+      await openInTerminal(project.path, termType, terminalConfig.customPath);
     } catch (error) {
       console.error("Failed to open terminal:", error);
     }

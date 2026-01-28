@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { addProject } from "@/services/db";
+import { useAppStore } from "@/stores/appStore";
 import type { Project } from "@/types";
 
 interface AddProjectDialogProps {
@@ -10,6 +11,7 @@ interface AddProjectDialogProps {
 }
 
 export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps) {
+  const { categories: storeCategories, addCategory } = useAppStore();
   const [mode, setMode] = useState<"local" | "git">("local");
   const [localPath, setLocalPath] = useState("");
   const [gitUrl, setGitUrl] = useState("");
@@ -23,12 +25,6 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
   const [newCategoryName, setNewCategoryName] = useState("");
   const [customTechInput, setCustomTechInput] = useState(false);
   const [customTechName, setCustomTechName] = useState("");
-
-  const [categories, setCategories] = useState([
-    { id: "work", name: "希二世" },
-    { id: "personal", name: "七千万" },
-    { id: "opensource", name: "开源项目" },
-  ]);
 
   const [techs, setTechs] = useState([
     { value: "Java", icon: "fa-brands fa-java", color: "text-orange-600", iconSize: "text-lg" },
@@ -102,13 +98,10 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
         }
 
         const name = projectName.trim() || localPath.split(/[\\/]/).pop() || "Unknown";
-        const selectedCategoryNames = categories
-          .filter((c) => selectedCategories.includes(c.id))
-          .map((c) => c.name);
         const project = await addProject({
           name,
           path: localPath,
-          tags: selectedCategoryNames,
+          tags: selectedCategories,
           labels: selectedTechs,
         });
 
@@ -135,13 +128,10 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
           repoName: name,
         });
 
-        const selectedCategoryNames = categories
-          .filter((c) => selectedCategories.includes(c.id))
-          .map((c) => c.name);
         const project = await addProject({
           name,
           path: clonePath,
-          tags: selectedCategoryNames,
+          tags: selectedCategories,
           labels: selectedTechs,
         });
 
@@ -154,11 +144,11 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
     }
   }
 
-  function toggleCategory(id: string) {
-    if (selectedCategories.includes(id)) {
-      setSelectedCategories(selectedCategories.filter((c) => c !== id));
+  function toggleCategory(name: string) {
+    if (selectedCategories.includes(name)) {
+      setSelectedCategories(selectedCategories.filter((c) => c !== name));
     } else {
-      setSelectedCategories([...selectedCategories, id]);
+      setSelectedCategories([...selectedCategories, name]);
     }
   }
 
@@ -177,9 +167,10 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
   function confirmAddCategory() {
     const name = newCategoryName.trim();
     if (name) {
-      const id = `custom_${Date.now()}`;
-      setCategories([...categories, { id, name }]);
-      setSelectedCategories([...selectedCategories, id]);
+      if (!storeCategories.includes(name)) {
+        addCategory(name);
+      }
+      setSelectedCategories([...selectedCategories, name]);
       setNewCategoryName("");
       setNewCategoryInput(false);
     }
@@ -387,17 +378,17 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
                 )}
 
                 <div className="flex flex-wrap gap-2">
-                  {categories.map((category) => (
-                    <label key={category.id} className="cursor-pointer add-project-category-pill">
+                  {storeCategories.map((category) => (
+                    <label key={category} className="cursor-pointer add-project-category-pill">
                       <input
                         type="checkbox"
                         className="add-project-category-checkbox hidden"
-                        checked={selectedCategories.includes(category.id)}
-                        onChange={() => toggleCategory(category.id)}
-                        value={category.id}
+                        checked={selectedCategories.includes(category)}
+                        onChange={() => toggleCategory(category)}
+                        value={category}
                       />
                       <div className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-full text-sm font-medium text-gray-600 hover:border-gray-300 select-none pr-8 transition-all">
-                        {category.name}
+                        {category}
                       </div>
                     </label>
                   ))}

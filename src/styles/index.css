@@ -628,6 +628,7 @@ body {
   background-color: #f9fafb;
   overflow: hidden;
   margin-left: 18rem;
+  height: calc(100vh - 4.5rem);
 }
 
 .sidebar-section {
@@ -895,6 +896,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 1rem 1.25rem;
+  min-height: 0;
 }
 
 .loading-spinner {

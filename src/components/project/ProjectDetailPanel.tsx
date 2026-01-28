@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database } from "lucide-react";
+import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2 } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
 import { SyncRemoteModal } from "./SyncRemoteModal";
@@ -23,6 +23,8 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pulling, setPulling] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showReadme, setShowReadme] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -55,26 +57,32 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   }
 
   async function handlePull() {
-    if (!gitStatus || remotes.length === 0) return;
+    if (!gitStatus || remotes.length === 0 || pulling) return;
     try {
+      setPulling(true);
       await gitPull(project.path, remotes[0].name, gitStatus.branch);
       await loadProjectDetails();
       showToast("success", "拉取成功", `已从 ${remotes[0].name}/${gitStatus.branch} 拉取最新代码`);
     } catch (error) {
       console.error("Failed to pull:", error);
       showToast("error", "拉取失败", String(error));
+    } finally {
+      setPulling(false);
     }
   }
 
   async function handlePush() {
-    if (!gitStatus || remotes.length === 0) return;
+    if (!gitStatus || remotes.length === 0 || pushing) return;
     try {
+      setPushing(true);
       await gitPush(project.path, remotes[0].name, gitStatus.branch);
       await loadProjectDetails();
       showToast("success", "推送成功", `已推送到 ${remotes[0].name}/${gitStatus.branch}`);
     } catch (error) {
       console.error("Failed to push:", error);
       showToast("error", "推送失败", String(error));
+    } finally {
+      setPushing(false);
     }
   }
 
@@ -161,17 +169,27 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
         <div className="flex items-center gap-sm">
           <button
             onClick={handlePull}
-            className="action-btn action-btn-secondary"
+            disabled={pulling || pushing}
+            className={`action-btn action-btn-secondary ${pulling ? 'opacity-70' : ''}`}
           >
-            <RefreshCw size={14} className="text-gray-600" />
-            <span>拉取</span>
+            {pulling ? (
+              <Loader2 size={14} className="text-gray-600 animate-spin" />
+            ) : (
+              <RefreshCw size={14} className="text-gray-600" />
+            )}
+            <span>{pulling ? '拉取中...' : '拉取'}</span>
           </button>
           <button
             onClick={handlePush}
-            className="action-btn action-btn-primary"
+            disabled={pulling || pushing}
+            className={`action-btn action-btn-primary ${pushing ? 'opacity-70' : ''}`}
           >
-            <CloudUpload size={14} />
-            <span>推送</span>
+            {pushing ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <CloudUpload size={14} />
+            )}
+            <span>{pushing ? '推送中...' : '推送'}</span>
           </button>
           <div className="divider-vertical"></div>
           <button

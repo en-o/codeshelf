@@ -6,6 +6,7 @@ import { LabelSelector } from "./LabelSelector";
 import type { Project, GitStatus, CommitInfo, RemoteInfo } from "@/types";
 import { getGitStatus, getCommitHistory, getRemotes } from "@/services/git";
 import { openInEditor, openInTerminal, updateProject } from "@/services/db";
+import { useAppStore } from "@/stores/appStore";
 
 interface ProjectDetailDialogProps {
   project: Project;
@@ -22,6 +23,7 @@ export function ProjectDetailDialog({ project, onClose, onUpdate }: ProjectDetai
   const [editingLabels, setEditingLabels] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(project.tags);
   const [selectedLabels, setSelectedLabels] = useState<string[]>(project.labels || []);
+  const { terminalConfig, editors } = useAppStore();
 
   useEffect(() => {
     loadProjectDetails();
@@ -47,7 +49,8 @@ export function ProjectDetailDialog({ project, onClose, onUpdate }: ProjectDetai
 
   async function handleOpenEditor() {
     try {
-      await openInEditor(project.path);
+      const editorPath = editors.length > 0 ? editors[0].path : undefined;
+      await openInEditor(project.path, editorPath);
     } catch (error) {
       console.error("Failed to open in editor:", error);
     }
@@ -55,7 +58,8 @@ export function ProjectDetailDialog({ project, onClose, onUpdate }: ProjectDetai
 
   async function handleOpenTerminal() {
     try {
-      await openInTerminal(project.path);
+      const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
+      await openInTerminal(project.path, termType, terminalConfig.customPath);
     } catch (error) {
       console.error("Failed to open terminal:", error);
     }
