@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
+import { Plus } from "lucide-react";
 import type { Project, GitStatus } from "@/types";
 import { getGitStatus, getRemotes } from "@/services/git";
-import { openInTerminal, openInExplorer, toggleFavorite, removeProject, deleteProjectDirectory } from "@/services/db";
+import { openInTerminal, openInExplorer, toggleFavorite, removeProject, deleteProjectDirectory, updateProject } from "@/services/db";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { LabelSelector } from "./LabelSelector";
 import { useAppStore } from "@/stores/appStore";
 
 interface ProjectCardProps {
@@ -16,6 +18,8 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [remoteType, setRemoteType] = useState<"github" | "gitee" | "gitlab" | "other" | "none">("none");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showLabelModal, setShowLabelModal] = useState(false);
+  const [editingLabels, setEditingLabels] = useState<string[]>([]);
   const { terminalConfig } = useAppStore();
 
   useEffect(() => {
@@ -99,6 +103,23 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
     }
   }
 
+  async function handleSaveLabels() {
+    try {
+      const updated = await updateProject({ id: project.id, labels: editingLabels });
+      onUpdate?.(updated);
+      setShowLabelModal(false);
+    } catch (error) {
+      console.error("Failed to update labels:", error);
+      alert("更新标签失败：" + error);
+    }
+  }
+
+  function handleOpenLabelModal(e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditingLabels(project.labels || []);
+    setShowLabelModal(true);
+  }
+
   function getRemoteLabel() {
     switch (remoteType) {
       case "github":
@@ -140,10 +161,10 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
           分类：{project.tags.length > 0 ? project.tags.join(", ") : "未分类"}
         </div>
 
-        <div className="flex flex-wrap gap-1 px-4 pb-2 h-[28px] overflow-hidden">
+        <div className="flex flex-wrap gap-1 px-4 pb-2 min-h-[28px] items-center">
           {project.labels && project.labels.length > 0 ? (
             <>
-              {project.labels.slice(0, 4).map((label) => (
+              {project.labels.slice(0, 3).map((label) => (
                 <span
                   key={label}
                   className="inline-flex items-center px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-xs font-medium truncate max-w-[80px]"
@@ -152,15 +173,24 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
                   {label}
                 </span>
               ))}
-              {project.labels.length > 4 && (
+              {project.labels.length > 3 && (
                 <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                  +{project.labels.length - 4}
+                  +{project.labels.length - 3}
                 </span>
               )}
             </>
           ) : (
             <span className="text-xs text-gray-300">暂无标签</span>
           )}
+
+          {/* 添加标签按钮 */}
+          <button
+            onClick={handleOpenLabelModal}
+            className="inline-flex items-center justify-center w-5 h-5 bg-gray-50 text-gray-400 hover:bg-blue-50 hover:text-blue-500 rounded text-xs border border-dashed border-gray-300 hover:border-blue-300 transition-colors ml-1"
+            title="编辑标签"
+          >
+            <Plus size={12} />
+          </button>
         </div>
 
         <div className="re-card-path">
@@ -207,6 +237,49 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
           onConfirm={handleDelete}
           onCancel={() => setShowDeleteDialog(false)}
         />
+      )}
+
+      {/* 标签编辑弹框 */}
+      {showLabelModal && (
+        <div className="modal-overlay animate-fade-in" onClick={() => setShowLabelModal(false)}>
+          <div className="modal-content animate-scale-in max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title">编辑标签</h3>
+                <p className="modal-subtitle">为「{project.name}」设置技术栈标签</p>
+              </div>
+              <button
+                onClick={() => setShowLabelModal(false)}
+                className="modal-close-btn"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <LabelSelector
+                selectedLabels={editingLabels}
+                onChange={setEditingLabels}
+                multiple={true}
+              />
+            </div>
+
+            <div className="modal-footer">
+              <button
+                onClick={() => setShowLabelModal(false)}
+                className="modal-btn modal-btn-secondary"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveLabels}
+                className="modal-btn modal-btn-primary"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

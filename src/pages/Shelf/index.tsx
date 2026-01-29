@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { ProjectCard, ScanResultDialog, ProjectDetailPanel, AddProjectDialog, AddCategoryDialog, CategorySelector } from "@/components/project";
+import { ProjectCard, ScanResultDialog, ProjectDetailPanel, AddProjectDialog, AddCategoryDialog, CategorySelector, LabelSelector } from "@/components/project";
 import { FloatingCategoryBall, showToast } from "@/components/ui";
-import { Minus, X, MoreVertical, Plus, CheckSquare, Square, Trash2, Tag } from "lucide-react";
+import { Minus, X, MoreVertical, Plus, CheckSquare, Square, Trash2, Tag, Bookmark } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import type { Project, GitRepo, GitStatus } from "@/types";
 import { getProjects, addProject, removeProject, updateProject } from "@/services/db";
@@ -41,6 +41,11 @@ export function ShelfPage() {
   const [showBatchCategoryModal, setShowBatchCategoryModal] = useState(false);
   const [batchCategories, setBatchCategories] = useState<string[]>([]);
   const [batchCategoryMode, setBatchCategoryMode] = useState<"replace" | "append">("append");
+
+  // 批量标签状态
+  const [showBatchLabelModal, setShowBatchLabelModal] = useState(false);
+  const [batchLabels, setBatchLabels] = useState<string[]>([]);
+  const [batchLabelMode, setBatchLabelMode] = useState<"replace" | "append">("append");
 
   useEffect(() => {
     loadProjects();
@@ -270,6 +275,48 @@ export function ShelfPage() {
     }
   }
 
+  async function handleBatchUpdateLabels(newLabels: string[], mode: "replace" | "append") {
+    if (selectedIds.size === 0) return;
+
+    try {
+      setLoading(true);
+      const updatedProjects: Project[] = [];
+
+      for (const id of selectedIds) {
+        const currentProject = projects.find(p => p.id === id);
+        let finalLabels: string[];
+
+        if (mode === "append") {
+          // 追加模式：合并原有标签和新标签，去重
+          const existingLabels = currentProject?.labels || [];
+          finalLabels = Array.from(new Set([...existingLabels, ...newLabels]));
+        } else {
+          // 替换模式：直接使用新标签
+          finalLabels = newLabels;
+        }
+
+        const updated = await updateProject({ id, labels: finalLabels });
+        updatedProjects.push(updated);
+      }
+
+      setProjects(projects.map(p => {
+        const updated = updatedProjects.find(u => u.id === p.id);
+        return updated || p;
+      }));
+
+      setSelectedIds(new Set());
+      setBatchMode(false);
+      setShowBatchLabelModal(false);
+      const modeText = mode === "append" ? "追加" : "替换";
+      showToast("success", "更新成功", `已${modeText} ${selectedIds.size} 个项目的标签`);
+    } catch (error) {
+      console.error("Failed to update labels:", error);
+      showToast("error", "更新失败", String(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Filter projects
   const filteredProjects = projects.filter((p) => {
     const matchesSearch =
@@ -437,6 +484,14 @@ export function ShelfPage() {
             >
               <Tag size={14} />
               <span>修改分类</span>
+            </button>
+            <button
+              className="re-btn re-btn-secondary flex items-center gap-2"
+              onClick={() => setShowBatchLabelModal(true)}
+              disabled={selectedIds.size === 0}
+            >
+              <Bookmark size={14} />
+              <span>修改标签</span>
             </button>
             <button
               className="re-btn re-btn-danger flex items-center gap-2"
@@ -610,6 +665,85 @@ export function ShelfPage() {
               <button
                 onClick={() => handleBatchUpdateCategory(batchCategories, batchCategoryMode)}
                 disabled={batchCategories.length === 0}
+                className="modal-btn modal-btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                确认修改
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Label Modal */}
+      {showBatchLabelModal && (
+        <div className="modal-overlay animate-fade-in">
+          <div className="modal-content animate-scale-in max-w-lg">
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title">批量修改标签</h3>
+                <p className="modal-subtitle">为选中的 {selectedIds.size} 个项目设置技术栈标签</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowBatchLabelModal(false);
+                  setBatchLabels([]);
+                }}
+                className="modal-close-btn"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {/* 模式选择 */}
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                <label className="text-sm font-medium text-gray-700 mb-2 block">操作模式</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="batchLabelMode"
+                      checked={batchLabelMode === "append"}
+                      onChange={() => setBatchLabelMode("append")}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-sm text-gray-700">追加标签</span>
+                    <span className="text-xs text-gray-400">（保留原有标签）</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="batchLabelMode"
+                      checked={batchLabelMode === "replace"}
+                      onChange={() => setBatchLabelMode("replace")}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-sm text-gray-700">替换标签</span>
+                    <span className="text-xs text-gray-400">（清空原有标签）</span>
+                  </label>
+                </div>
+              </div>
+
+              <LabelSelector
+                selectedLabels={batchLabels}
+                onChange={setBatchLabels}
+                multiple={true}
+              />
+            </div>
+
+            <div className="modal-footer">
+              <button
+                onClick={() => {
+                  setShowBatchLabelModal(false);
+                  setBatchLabels([]);
+                }}
+                className="modal-btn modal-btn-secondary"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => handleBatchUpdateLabels(batchLabels, batchLabelMode)}
+                disabled={batchLabels.length === 0}
                 className="modal-btn modal-btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 确认修改
