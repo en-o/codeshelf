@@ -1,6 +1,6 @@
 {
   "name": "codeshelf",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "代码书架 - 本地项目管理工具",
   "type": "module",

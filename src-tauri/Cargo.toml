@@ -1,6 +1,6 @@
 [package]
 name = "codeshelf"
-version = "0.1.8"
+version = "0.1.9"
 description = "代码书架 - 本地项目管理工具"
 authors = ["tan"]
 license = " Apache License 2.0"
