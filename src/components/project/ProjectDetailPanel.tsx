@@ -59,17 +59,42 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
     }
   }, [remotes, currentRemote]);
 
+  // 当切换远程仓库时，重新获取提交历史
+  useEffect(() => {
+    if (currentRemote && gitStatus?.branch) {
+      loadCommitHistory();
+    }
+  }, [currentRemote, gitStatus?.branch]);
+
+  async function loadCommitHistory() {
+    if (!currentRemote || !gitStatus?.branch) return;
+    try {
+      // 获取远程分支的提交历史
+      const refName = `${currentRemote}/${gitStatus.branch}`;
+      const commitHistory = await getCommitHistory(project.path, 10, refName);
+      setCommits(commitHistory);
+    } catch (error) {
+      console.error("Failed to load commit history:", error);
+      // 如果远程分支不存在，回退到本地分支的提交历史
+      try {
+        const localCommits = await getCommitHistory(project.path, 10);
+        setCommits(localCommits);
+      } catch {
+        setCommits([]);
+      }
+    }
+  }
+
   async function loadProjectDetails() {
     try {
       setLoading(true);
-      const [status, commitHistory, remoteList] = await Promise.all([
+      const [status, remoteList] = await Promise.all([
         getGitStatus(project.path),
-        getCommitHistory(project.path, 10),
         getRemotes(project.path),
       ]);
       setGitStatus(status);
-      setCommits(commitHistory);
       setRemotes(remoteList);
+      // 提交历史会在 currentRemote 设置后通过 useEffect 加载
     } catch (error) {
       console.error("Failed to load project details:", error);
     } finally {

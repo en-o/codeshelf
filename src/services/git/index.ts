@@ -17,9 +17,10 @@ export async function getGitStatus(path: string): Promise<GitStatus> {
 
 export async function getCommitHistory(
   path: string,
-  limit?: number
+  limit?: number,
+  refName?: string
 ): Promise<CommitInfo[]> {
-  return invoke("get_commit_history", { path, limit });
+  return invoke("get_commit_history", { path, limit, refName });
 }
 
 export async function getBranches(path: string): Promise<BranchInfo[]> {
