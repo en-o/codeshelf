@@ -318,7 +318,15 @@ pub async fn add_remote(path: String, name: String, url: String) -> Result<(), S
 
 #[tauri::command]
 pub async fn verify_remote_url(url: String) -> Result<(), String> {
-    // 使用 git ls-remote 验证远程仓库 URL 是否有效
+    // 使用 git ls-remote 验证远程仓库 URL 是否有效 (hide console window on Windows)
+    #[cfg(target_os = "windows")]
+    let output = std::process::Command::new("git")
+        .args(&["ls-remote", "--exit-code", &url])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("执行 git 命令失败: {}", e))?;
+
+    #[cfg(not(target_os = "windows"))]
     let output = std::process::Command::new("git")
         .args(&["ls-remote", "--exit-code", &url])
         .output()
@@ -372,7 +380,15 @@ pub async fn git_clone(url: String, target_dir: String, repo_name: String) -> Re
         return Err(format!("Directory '{}' already exists", repo_name));
     }
 
-    // Clone the repository
+    // Clone the repository (hide console window on Windows)
+    #[cfg(target_os = "windows")]
+    let output = Command::new("git")
+        .args(&["clone", &url, &target_path_str])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("Failed to execute git clone: {}", e))?;
+
+    #[cfg(not(target_os = "windows"))]
     let output = Command::new("git")
         .args(&["clone", &url, &target_path_str])
         .output()

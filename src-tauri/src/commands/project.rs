@@ -5,15 +5,20 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: String,
     pub name: String,
     pub path: String,
+    #[serde(alias = "is_favorite")]
     pub is_favorite: bool,
     pub tags: Vec<String>,
     pub labels: Vec<String>,
+    #[serde(alias = "created_at")]
     pub created_at: String,
+    #[serde(alias = "updated_at")]
     pub updated_at: String,
+    #[serde(alias = "last_opened")]
     pub last_opened: Option<String>,
 }
 
