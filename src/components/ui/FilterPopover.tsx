@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from "react";
-import { Filter, Star, GitCommit, X, Check } from "lucide-react";
+import { Filter, Star, GitCommit, X, Check, Tag } from "lucide-react";
 
 interface FilterPopoverProps {
   onlyStarred: boolean;
   onlyModified: boolean;
   onStarredChange: (value: boolean) => void;
   onModifiedChange: (value: boolean) => void;
+  availableLabels: string[];
+  selectedLabels: string[];
+  onLabelsChange: (labels: string[]) => void;
 }
 
 export function FilterPopover({
@@ -13,11 +16,14 @@ export function FilterPopover({
   onlyModified,
   onStarredChange,
   onModifiedChange,
+  availableLabels,
+  selectedLabels,
+  onLabelsChange,
 }: FilterPopoverProps) {
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  const activeFiltersCount = [onlyStarred, onlyModified].filter(Boolean).length;
+  const activeFiltersCount = [onlyStarred, onlyModified].filter(Boolean).length + selectedLabels.length;
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -113,6 +119,7 @@ export function FilterPopover({
                     onClick={() => {
                       onStarredChange(false);
                       onModifiedChange(false);
+                      onLabelsChange([]);
                     }}
                     className="text-xs text-red-500 hover:text-red-600 font-medium flex items-center gap-1 px-2 py-1 rounded-md hover:bg-red-50 transition-colors"
                   >
@@ -173,6 +180,48 @@ export function FilterPopover({
                 );
               })}
             </div>
+
+            {/* Label Filter Section */}
+            {availableLabels.length > 0 && (
+              <div className="px-3 pb-3">
+                <div className="p-3.5 rounded-xl bg-gray-50 border-2 border-transparent">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center">
+                      <Tag className="w-4 h-4 text-purple-500" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-800 text-sm">按标签筛选</div>
+                      <div className="text-xs text-gray-500">选择技术栈标签</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                    {availableLabels.map((label) => {
+                      const isSelected = selectedLabels.includes(label);
+                      return (
+                        <button
+                          key={label}
+                          onClick={() => {
+                            if (isSelected) {
+                              onLabelsChange(selectedLabels.filter(l => l !== label));
+                            } else {
+                              onLabelsChange([...selectedLabels, label]);
+                            }
+                          }}
+                          className={`px-2.5 py-1 text-xs rounded-lg transition-all duration-200 flex items-center gap-1 ${
+                            isSelected
+                              ? "bg-purple-500 text-white"
+                              : "bg-white text-gray-600 hover:bg-purple-50 hover:text-purple-600 border border-gray-200"
+                          }`}
+                        >
+                          {isSelected && <Check className="w-3 h-3" strokeWidth={3} />}
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-gray-100 bg-gray-50">
