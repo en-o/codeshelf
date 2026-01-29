@@ -776,22 +776,37 @@ Tauri 命令开发的关键点：
 
 ```
 src-tauri/icons/
-├── 32x32.png          # 基础小图标
+├── icon.svg           # 主图标源文件 (全息风格 SVG)
+├── icon-small.svg     # 简化版源文件 (小尺寸用)
+├── icon.png           # 主图标 (256x256, 透明背景)
 ├── 128x128.png        # 标准图标
 ├── 128x128@2x.png     # 高清图标 (Retina)
-├── icon.png           # 主图标源文件 (256x256, 透明背景)
-├── tray-icon.png      # 托盘图标 (白底不透明)
-└── app-icon-circle.ico # 安装程序图标 (圆形蓝底)
+├── 32x32.png          # 小图标
+├── tray-icon.png      # 托盘图标 (深色背景不透明)
+└── app-icon-circle.ico # Windows 安装程序图标 (多尺寸)
 ```
+
+### 图标设计说明
+
+全息赛博朋克风格图标，包含以下视觉元素：
+- **三层发光层板**：代表"书架"核心概念
+- **Git 分支网络**：可视化多远程仓库（GitHub/Gitee）
+- **代码块投影**：强化开发者工具属性
+- **配色方案**：
+  - 主色：`#00f5ff` (Cyan Neon)
+  - 副色：`#bc13fe` (Electric Purple)
+  - 基底：`#0a1428` (Deep Glass)
 
 ### 图标用途说明
 
 | 文件 | 尺寸 | 用途 | 引用位置 |
 |-----|------|------|---------|
-| `32x32.png` | 32x32 | 小尺寸图标 | tauri.conf.json |
+| `icon.svg` | 200x200 viewBox | SVG 源文件 | 生成脚本 |
+| `icon-small.svg` | 200x200 viewBox | 简化版源文件 | 生成脚本 |
+| `icon.png` | 256x256 | 主图标 | tauri.conf.json |
 | `128x128.png` | 128x128 | 标准图标 | tauri.conf.json |
 | `128x128@2x.png` | 256x256 | 高清显示屏 | tauri.conf.json |
-| `icon.png` | 256x256 | 主图标源文件 | tauri.conf.json |
+| `32x32.png` | 32x32 | 小尺寸图标 | tauri.conf.json |
 | `tray-icon.png` | 32x32 | 系统托盘图标 | lib.rs |
 | `app-icon-circle.ico` | 多尺寸 | Windows 安装程序 | tauri.conf.json |
 
@@ -820,7 +835,7 @@ let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
 
 ### 图标生成
 
-如需重新生成托盘图标和安装图标，运行脚本：
+从 SVG 源文件生成所有图标，运行脚本：
 
 **Windows:**
 ```bash
@@ -836,6 +851,8 @@ bash scripts/generate-icons.sh
 - Windows: `winget install ImageMagick.ImageMagick`
 - Linux: `sudo apt-get install imagemagick`
 
-**生成的图标:**
-- `tray-icon.png` - 基于 32x32.png，白色背景不透明
-- `app-icon-circle.ico` - 基于 icon.png，蓝色圆形背景 (#3B82F6)
+**生成流程:**
+1. 从 `icon.svg` 生成大尺寸图标 (256x256, 128x128)
+2. 从 `icon-small.svg` 生成小尺寸图标 (32x32)
+3. 托盘图标使用深色背景 `#0a1428` 确保可见性
+4. ICO 文件包含多尺寸 (256/128/64/48/32/16)

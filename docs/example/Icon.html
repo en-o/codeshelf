@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeShelf Hologram Deep Optimization</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #020408;
+            color: #e0f7ff;
+            font-family: 'Consolas', 'Monaco', monospace;
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* 动态背景网格 */
+        .holo-grid {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image:
+                    linear-gradient(rgba(0, 245, 255, 0.05) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(188, 19, 254, 0.05) 1px, transparent 1px);
+            background-size: 40px 40px;
+            perspective: 1000px;
+            transform-style: preserve-3d;
+            animation: gridFloat 8s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes gridFloat {
+            0%, 100% { transform: perspective(1000px) rotateX(60deg) translateY(0); }
+            50% { transform: perspective(1000px) rotateX(60deg) translateY(20px); }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 60px;
+            position: relative;
+        }
+
+        .hologram-title {
+            font-size: 2.8rem;
+            background: linear-gradient(90deg, #00f5ff, #bc13fe, #00f5ff);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 8px;
+            animation: hologramShift 3s linear infinite;
+            text-shadow: 0 0 30px rgba(0, 245, 255, 0.5);
+            position: relative;
+        }
+
+        @keyframes hologramShift {
+            0% { background-position: 0% center; }
+            100% { background-position: 200% center; }
+        }
+
+        .subtitle {
+            color: #bc13fe;
+            margin-top: 15px;
+            font-size: 1rem;
+            letter-spacing: 4px;
+            opacity: 0.8;
+        }
+
+        .main-showcase {
+            background: rgba(10, 20, 40, 0.6);
+            border: 1px solid rgba(0, 245, 255, 0.3);
+            border-radius: 8px;
+            backdrop-filter: blur(20px);
+            box-shadow:
+                    0 0 60px rgba(0, 245, 255, 0.1),
+                    inset 0 0 60px rgba(188, 19, 254, 0.05);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .main-showcase::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, #00f5ff, transparent);
+            animation: scanline 4s linear infinite;
+            box-shadow: 0 0 10px #00f5ff;
+        }
+
+        @keyframes scanline {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .showcase-header {
+            padding: 30px;
+            border-bottom: 1px solid rgba(0, 245, 255, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .showcase-title {
+            font-size: 1.4rem;
+            color: #00f5ff;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .status-indicator {
+            display: flex;
+            gap: 20px;
+            font-size: 0.85rem;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #bc13fe;
+        }
+
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #bc13fe;
+            box-shadow: 0 0 10px #bc13fe;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .icon-theater {
+            padding: 80px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background:
+                    radial-gradient(circle at 30% 30%, rgba(0, 245, 255, 0.1) 0%, transparent 50%),
+                    radial-gradient(circle at 70% 70%, rgba(188, 19, 254, 0.1) 0%, transparent 50%);
+            position: relative;
+        }
+
+        /* 深度优化的全息图标 SVG */
+        .holo-icon {
+            filter: drop-shadow(0 0 20px rgba(0, 245, 255, 0.4));
+        }
+
+        .details-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            border-top: 1px solid rgba(0, 245, 255, 0.2);
+        }
+
+        .detail-section {
+            padding: 40px;
+            border-right: 1px solid rgba(0, 245, 255, 0.1);
+        }
+
+        .detail-section:last-child { border-right: none; }
+
+        .detail-title {
+            color: #00f5ff;
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .detail-list {
+            list-style: none;
+            color: #a0b0c0;
+            font-size: 0.95rem;
+            line-height: 2;
+        }
+
+        .detail-list li {
+            padding-left: 20px;
+            position: relative;
+            margin-bottom: 10px;
+        }
+
+        .detail-list li::before {
+            content: '◈';
+            position: absolute;
+            left: 0;
+            color: #bc13fe;
+            font-size: 0.8rem;
+        }
+
+        .highlight { color: #00f5ff; font-weight: bold; }
+        .highlight-purple { color: #bc13fe; font-weight: bold; }
+
+        .tech-specs {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #6272a4;
+            border: 1px solid rgba(98, 114, 164, 0.3);
+        }
+
+        .export-section {
+            margin-top: 60px;
+            background: rgba(10, 20, 40, 0.8);
+            border: 1px solid rgba(0, 245, 255, 0.3);
+            border-radius: 8px;
+            padding: 40px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .export-section::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 2px;
+            background: linear-gradient(90deg, #bc13fe, #00f5ff, #bc13fe);
+            background-size: 200% 100%;
+            animation: dataFlow 3s linear infinite;
+        }
+
+        @keyframes dataFlow {
+            0% { background-position: 100% 0; }
+            100% { background-position: -100% 0; }
+        }
+
+        .code-preview {
+            background: #050810;
+            border: 1px solid rgba(0, 245, 255, 0.2);
+            border-radius: 6px;
+            padding: 30px;
+            margin-top: 20px;
+            overflow-x: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            color: #e0f7ff;
+            position: relative;
+        }
+
+        .code-header {
+            position: absolute;
+            top: -12px; left: 30px;
+            background: #050810;
+            padding: 0 15px;
+            color: #bc13fe;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            border: 1px solid rgba(188, 19, 254, 0.3);
+        }
+
+        .code-tag { color: #ff79c6; }
+        .code-attr { color: #50fa7b; }
+        .code-val { color: #f1fa8c; }
+        .code-comment { color: #6272a4; }
+        .code-content { color: #8be9fd; }
+
+        .size-variants {
+            display: flex;
+            gap: 30px;
+            justify-content: center;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+
+        .variant-item {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 245, 255, 0.2);
+            border-radius: 8px;
+            min-width: 120px;
+        }
+
+        .variant-label {
+            color: #6272a4;
+            font-size: 0.8rem;
+            margin-top: 15px;
+            text-transform: uppercase;
+        }
+
+        .guide-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .guide-card {
+            background: rgba(10, 20, 40, 0.6);
+            border: 1px solid rgba(188, 19, 254, 0.2);
+            border-radius: 8px;
+            padding: 30px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .guide-card::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, #bc13fe, transparent);
+        }
+
+        .guide-title {
+            color: #bc13fe;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .guide-text {
+            color: #8b9bb4;
+            line-height: 1.8;
+            font-size: 0.9rem;
+        }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 8px; height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0a0e27;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #00f5ff;
+            border-radius: 4px;
+        }
+    </style>
+    <base target="_blank">
+</head>
+<body>
+<div class="holo-grid"></div>
+
+<div class="container">
+    <div class="header">
+        <h1 class="hologram-title">CODESHELF_HOLOGRAM_V2</h1>
+        <div class="subtitle">/// ADVANCED_VISUALIZATION_PROTOCOL</div>
+    </div>
+
+    <!-- 主展示区 -->
+    <div class="main-showcase">
+        <div class="showcase-header">
+            <div class="showcase-title">
+                <span style="color: #bc13fe;">◈</span>
+                HOLOGRAPHIC_SHELF_UNIT
+            </div>
+            <div class="status-indicator">
+                <div class="status-item">
+                    <div class="status-dot"></div>
+                    <span>GIT_SYNC_ACTIVE</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" style="background: #00f5ff; box-shadow: 0 0 10px #00f5ff;"></div>
+                    <span style="color: #00f5ff;">HOLO_RENDERING</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="icon-theater">
+            <svg class="holo-icon" width="400" height="400" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <!-- 全息发光滤镜 -->
+                    <filter id="holo-glow" x="-100%" y="-100%" width="300%" height="300%">
+                        <feGaussianBlur stdDeviation="1.5" result="blur"/>
+                        <feColorMatrix in="blur" type="matrix" values="
+                                1 0 0 0 0
+                                0 1 0 0 0
+                                0 0 1 0 0
+                                0 0 0 20 -8" result="glow"/>
+                        <feMerge>
+                            <feMergeNode in="glow"/>
+                            <feMergeNode in="glow"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+
+                    <!-- 强发光滤镜（用于节点） -->
+                    <filter id="node-glow" x="-100%" y="-100%" width="300%" height="300%">
+                        <feGaussianBlur stdDeviation="2" result="blur"/>
+                        <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+                    </filter>
+
+                    <!-- 网格渐变 -->
+                    <radialGradient id="grid-grad" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" style="stop-color:rgba(0,245,255,0.2)"/>
+                        <stop offset="100%" style="stop-color:rgba(0,245,255,0)"/>
+                    </radialGradient>
+
+                    <!-- 层板渐变 -->
+                    <linearGradient id="shelf-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#00f5ff;stop-opacity:0.2"/>
+                        <stop offset="50%" style="stop-color:#00f5ff;stop-opacity:1"/>
+                        <stop offset="100%" style="stop-color:#00f5ff;stop-opacity:0.2"/>
+                    </linearGradient>
+
+                    <!-- 投影遮罩 -->
+                    <clipPath id="circle-mask">
+                        <circle cx="100" cy="100" r="95"/>
+                    </clipPath>
+                </defs>
+
+                <!-- 外圈能量场 -->
+                <circle cx="100" cy="100" r="98" fill="none" stroke="#00f5ff" stroke-width="0.5" opacity="0.3">
+                    <animate attributeName="r" values="98;100;98" dur="4s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" values="0.3;0.1;0.3" dur="4s" repeatCount="indefinite"/>
+                </circle>
+
+                <!-- 背景六边形网格（象征数据结构） -->
+                <g clip-path="url(#circle-mask)" opacity="0.15">
+                    <path d="M50 50 L100 30 L150 50 L150 100 L100 120 L50 100 Z" fill="none" stroke="#00f5ff" stroke-width="0.5"/>
+                    <path d="M50 100 L100 80 L150 100 L150 150 L100 170 L50 150 Z" fill="none" stroke="#bc13fe" stroke-width="0.5"/>
+                    <line x1="100" y1="30" x2="100" y2="170" stroke="#00f5ff" stroke-width="0.3"/>
+                    <line x1="50" y1="75" x2="150" y2="75" stroke="#bc13fe" stroke-width="0.3"/>
+                    <line x1="50" y1="125" x2="150" y2="125" stroke="#00f5ff" stroke-width="0.3"/>
+                </g>
+
+                <!-- 主圆形基底（深色玻璃质感） -->
+                <circle cx="100" cy="100" r="90" fill="rgba(10,20,40,0.8)" stroke="#00f5ff" stroke-width="1.5" filter="url(#holo-glow)"/>
+
+                <!-- 内部扫描线 -->
+                <line x1="10" y1="100" x2="190" y2="100" stroke="#00f5ff" stroke-width="0.5" opacity="0.3" clip-path="url(#circle-mask)">
+                    <animate attributeName="y1" values="10;190;10" dur="6s" repeatCount="indefinite"/>
+                    <animate attributeName="y2" values="10;190;10" dur="6s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" values="0.3;0;0.3" dur="6s" repeatCount="indefinite"/>
+                </line>
+
+                <!-- ========== 全息书架结构 ========== -->
+                <g filter="url(#holo-glow)">
+                    <!-- 左侧主立柱（紫色能量管） -->
+                    <rect x="35" y="45" width="3" height="110" rx="1.5" fill="#bc13fe" opacity="0.8"/>
+                    <rect x="35" y="45" width="3" height="110" rx="1.5" fill="url(#shelf-grad)" opacity="0.4"/>
+
+                    <!-- 三层全息层板（发光线条） -->
+                    <line x1="38" y1="65" x2="162" y2="65" stroke="url(#shelf-grad)" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="38" y1="105" x2="162" y2="105" stroke="url(#shelf-grad)" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="38" y1="145" x2="162" y2="145" stroke="url(#shelf-grad)" stroke-width="2" stroke-linecap="round"/>
+
+                    <!-- 层板下方的微弱投影（增强立体感） -->
+                    <line x1="40" y1="67" x2="160" y2="67" stroke="#bc13fe" stroke-width="4" opacity="0.2" filter="url(#blur)"/>
+                    <line x1="40" y1="107" x2="160" y2="107" stroke="#bc13fe" stroke-width="4" opacity="0.2" filter="url(#blur)"/>
+                </g>
+
+                <!-- ========== 悬浮 Git 全息图谱 ========== -->
+                <!-- 顶层：Git 分支网络（多远程仓库可视化） -->
+                <g filter="url(#node-glow)">
+                    <!-- 主节点（当前仓库） -->
+                    <circle cx="65" cy="55" r="5" fill="#fff"/>
+                    <circle cx="65" cy="55" r="5" fill="#00f5ff">
+                        <animate attributeName="r" values="5;6;5" dur="3s" repeatCount="indefinite"/>
+                        <animate attributeName="opacity" values="1;0.6;1" dur="3s" repeatCount="indefinite"/>
+                    </circle>
+
+                    <!-- 连接线 1（到 GitHub） -->
+                    <path d="M65 60 L65 75" stroke="#00f5ff" stroke-width="1.5" opacity="0.8"/>
+                    <path d="M65 75 L85 75 L85 62" stroke="#00f5ff" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+
+                    <!-- 节点 2（GitHub） -->
+                    <circle cx="85" cy="58" r="4" fill="#bc13fe"/>
+                    <circle cx="85" cy="58" r="4" fill="#ff00ff" opacity="0.6">
+                        <animate attributeName="r" values="4;5;4" dur="4s" repeatCount="indefinite"/>
+                    </circle>
+
+                    <!-- 连接线 2（到 Gitee） -->
+                    <path d="M65 75 L105 75 L105 62" stroke="#bc13fe" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-dasharray="2,2" opacity="0.6"/>
+
+                    <!-- 节点 3（Gitee/备用远程） -->
+                    <circle cx="105" cy="58" r="3.5" fill="#00f5ff" opacity="0.8"/>
+
+                    <!-- 同步状态指示线（流动效果） -->
+                    <line x1="65" y1="75" x2="85" y2="75" stroke="#fff" stroke-width="2" opacity="0.8" stroke-dasharray="10,20">
+                        <animate attributeName="stroke-dashoffset" values="0;30" dur="2s" repeatCount="indefinite"/>
+                    </line>
+                </g>
+
+                <!-- ========== 中层：代码数据块（悬浮投影） ========== -->
+                <g filter="url(#holo-glow)">
+                    <!-- 代码容器（半透明矩形） -->
+                    <rect x="55" y="82" width="45" height="16" rx="2" fill="rgba(0,245,255,0.1)" stroke="#00f5ff" stroke-width="0.5" opacity="0.9"/>
+
+                    <!-- 代码内容：{..} 简化的花括号 -->
+                    <text x="62" y="94" font-family="Consolas, monospace" font-size="10" fill="#00f5ff" opacity="0.9">{ }</text>
+
+                    <!-- 右侧状态指示条（类似代码行号或状态条） -->
+                    <rect x="105" y="85" width="3" height="10" fill="#bc13fe" opacity="0.8">
+                        <animate attributeName="height" values="10;6;10" dur="2s" repeatCount="indefinite"/>
+                        <animate attributeName="y" values="85;87;85" dur="2s" repeatCount="indefinite"/>
+                    </rect>
+                    <rect x="110" y="83" width="3" height="14" fill="#00f5ff" opacity="0.6">
+                        <animate attributeName="height" values="14;10;14" dur="3s" repeatCount="indefinite"/>
+                    </rect>
+                </g>
+
+                <!-- ========== 底层：终端命令全息 ========== -->
+                <g filter="url(#holo-glow)">
+                    <!-- 命令行前缀 -->
+                    <text x="55" y="135" font-family="monospace" font-size="9" fill="#bc13fe" opacity="0.9">$</text>
+
+                    <!-- 命令内容（git push） -->
+                    <text x="62" y="135" font-family="monospace" font-size="9" fill="#e0f7ff" opacity="0.9">git push</text>
+
+                    <!-- 光标闪烁 -->
+                    <rect x="95" y="128" width="3" height="8" fill="#00f5ff" opacity="1">
+                        <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+                    </rect>
+
+                    <!-- 结果代码片段 -->
+                    <rect x="55" y="140" width="35" height="3" rx="1" fill="#00f5ff" opacity="0.4"/>
+                    <rect x="93" y="140" width="20" height="3" rx="1" fill="#bc13fe" opacity="0.4"/>
+                </g>
+
+                <!-- ========== 环境细节：悬浮数据粒子 ========== -->
+                <g opacity="0.6">
+                    <circle cx="140" cy="135" r="1.5" fill="#00f5ff">
+                        <animate attributeName="cy" values="135;125;135" dur="4s" repeatCount="indefinite"/>
+                        <animate attributeName="opacity" values="0.6;0.2;0.6" dur="4s" repeatCount="indefinite"/>
+                    </circle>
+                    <circle cx="155" cy="120" r="1" fill="#bc13fe">
+                        <animate attributeName="cy" values="120;110;120" dur="3s" repeatCount="indefinite"/>
+                    </circle>
+                    <circle cx="145" cy="145" r="1" fill="#fff" opacity="0.8"/>
+
+                    <!-- 右侧悬浮括号（装饰性） -->
+                    <text x="150" y="100" font-family="monospace" font-size="14" fill="#bc13fe" opacity="0.3">}</text>
+                    <text x="45" y="90" font-family="monospace" font-size="12" fill="#00f5ff" opacity="0.2">{</text>
+                </g>
+
+                <!-- 故障效果覆盖层（偶尔闪现） -->
+                <g clip-path="url(#circle-mask)" opacity="0">
+                    <rect x="20" y="60" width="160" height="2" fill="#ff00ff" opacity="0.8"/>
+                    <animate attributeName="opacity" values="0;0;0.8;0;0" dur="5s" repeatCount="indefinite"/>
+                </g>
+            </svg>
+        </div>
+
+        <div class="details-panel">
+            <div class="detail-section">
+                <div class="detail-title">◈ VISUAL_ELEMENTS</div>
+                <ul class="detail-list">
+                    <li><span class="highlight">六边形网格底层</span>：象征数据结构与技术架构，半透明营造全息感</li>
+                    <li><span class="highlight-purple">三层发光层板</span>：代表"书架"核心概念，渐变发光模拟全息投影</li>
+                    <li><span class="highlight">Git 分支网络</span>：顶部悬浮节点+连线，可视化多远程仓库（GitHub/Gitee）</li>
+                    <li><span class="highlight-purple">流动数据条</span>：虚线流动动画暗示代码同步推送</li>
+                    <li><span class="highlight">代码块投影</span>：中层悬浮代码片段，强化开发者工具属性</li>
+                </ul>
+            </div>
+
+            <div class="detail-section">
+                <div class="detail-title">◈ TECHNICAL_FEATURES</div>
+                <ul class="detail-list">
+                    <li><span class="highlight">SVG 原生 SMIL 动画</span>：呼吸灯、流动线、扫描线，导出 PNG 时自动定格</li>
+                    <li><span class="highlight-purple">双层发光滤镜</span>：柔和光晕(holo-glow) + 强光晕(node-glow)</li>
+                    <li><span class="highlight">故障闪现层</span>：随机出现的粉色横条，赛博朋克标志性视觉</li>
+                    <li><span class="highlight-purple">玻璃质感基底</span>：半透明深蓝黑圆形，适配深色模式 Dock</li>
+                </ul>
+
+                <div class="tech-specs">
+                    COLOR_PROFILE:<br>
+                    PRIMARY: #00f5ff (Cyan Neon)<br>
+                    SECONDARY: #bc13fe (Electric Purple)<br>
+                    ACCENT: #ff00ff (Magenta)<br>
+                    BASE: rgba(10,20,40,0.8) (Deep Glass)
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 尺寸适配展示 -->
+    <div style="margin-top: 40px; text-align: center;">
+        <div class="hologram-title" style="font-size: 1.5rem; margin-bottom: 30px;">SIZE_ADAPTIVE_DISPLAY</div>
+
+        <div class="size-variants">
+            <!-- 16x16 极简 -->
+            <div class="variant-item">
+                <svg width="16" height="16" viewBox="0 0 200 200">
+                    <circle cx="100" cy="100" r="90" fill="#0a1428" stroke="#00f5ff" stroke-width="4"/>
+                    <line x1="40" y1="65" x2="160" y2="65" stroke="#00f5ff" stroke-width="6"/>
+                    <line x1="40" y1="105" x2="160" y2="105" stroke="#00f5ff" stroke-width="6"/>
+                    <line x1="40" y1="145" x2="160" y2="145" stroke="#00f5ff" stroke-width="6"/>
+                    <line x1="40" y1="65" x2="40" y2="145" stroke="#bc13fe" stroke-width="6"/>
+                    <circle cx="70" cy="58" r="8" fill="#fff"/>
+                </svg>
+                <div class="variant-label">16×16<br>极简</div>
+            </div>
+
+            <!-- 32x32 清晰 -->
+            <div class="variant-item">
+                <svg width="32" height="32" viewBox="0 0 200 200">
+                    <circle cx="100" cy="100" r="90" fill="#0a1428" stroke="#00f5ff" stroke-width="3"/>
+                    <line x1="38" y1="65" x2="162" y2="65" stroke="#00f5ff" stroke-width="4"/>
+                    <line x1="38" y1="105" x2="162" y2="105" stroke="#00f5ff" stroke-width="4"/>
+                    <line x1="38" y1="145" x2="162" y2="145" stroke="#00f5ff" stroke-width="4"/>
+                    <rect x="35" y="45" width="6" height="100" fill="#bc13fe"/>
+                    <circle cx="65" cy="55" r="6" fill="#fff"/>
+                    <text x="70" y="95" font-family="monospace" font-size="24" fill="#00f5ff">{_}</text>
+                </svg>
+                <div class="variant-label">32×32<br>任务栏</div>
+            </div>
+
+            <!-- 64x64 详细 -->
+            <div class="variant-item">
+                <svg width="64" height="64" viewBox="0 0 200 200">
+                    <defs>
+                        <filter id="glow64" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur stdDeviation="2" result="blur"/>
+                            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+                        </filter>
+                    </defs>
+                    <circle cx="100" cy="100" r="90" fill="#0a1428" stroke="#00f5ff" stroke-width="2" filter="url(#glow64)"/>
+                    <line x1="38" y1="65" x2="162" y2="65" stroke="#00f5ff" stroke-width="3" filter="url(#glow64)"/>
+                    <line x1="38" y1="105" x2="162" y2="105" stroke="#00f5ff" stroke-width="3" filter="url(#glow64)"/>
+                    <line x1="38" y1="145" x2="162" y2="145" stroke="#00f5ff" stroke-width="3" filter="url(#glow64)"/>
+                    <rect x="35" y="45" width="4" height="100" fill="#bc13fe" filter="url(#glow64)"/>
+                    <circle cx="65" cy="55" r="5" fill="#fff" filter="url(#glow64)"/>
+                    <path d="M65 60 L65 75 M65 75 L85 60" stroke="#00f5ff" stroke-width="2" fill="none"/>
+                    <circle cx="85" cy="58" r="4" fill="#bc13fe"/>
+                    <text x="72" y="95" font-family="monospace" font-size="20" fill="#00f5ff">{ }</text>
+                    <text x="70" y="135" font-family="monospace" font-size="16" fill="#bc13fe">&lt;/&gt;</text>
+                </svg>
+                <div class="variant-label">64×64<br>列表视图</div>
+            </div>
+
+            <!-- 256x256 完整 -->
+            <div class="variant-item" style="min-width: 200px;">
+                <svg width="128" height="128" viewBox="0 0 200 200">
+                    <circle cx="100" cy="100" r="90" fill="rgba(10,20,40,0.8)" stroke="#00f5ff" stroke-width="2"/>
+                    <line x1="38" y1="65" x2="162" y2="65" stroke="#00f5ff" stroke-width="2" opacity="0.8"/>
+                    <line x1="38" y1="105" x2="162" y2="105" stroke="#00f5ff" stroke-width="2" opacity="0.8"/>
+                    <line x1="38" y1="145" x2="162" y2="145" stroke="#00f5ff" stroke-width="2" opacity="0.8"/>
+                    <rect x="35" y="45" width="3" height="100" fill="#bc13fe"/>
+                    <circle cx="65" cy="55" r="5" fill="#00f5ff"/>
+                    <path d="M65 60 L65 75 L85 75 L85 60" stroke="#00f5ff" stroke-width="1.5" fill="none"/>
+                    <circle cx="85" cy="58" r="4" fill="#bc13fe"/>
+                    <circle cx="105" cy="58" r="3" fill="#00f5ff"/>
+                    <rect x="55" y="82" width="40" height="16" fill="rgba(0,245,255,0.1)" stroke="#00f5ff"/>
+                    <text x="62" y="94" font-family="monospace" font-size="9" fill="#00f5ff">{ }</text>
+                    <text x="55" y="135" font-family="monospace" font-size="9" fill="#bc13fe">$ git push</text>
+                </svg>
+                <div class="variant-label">128×128<br>桌面图标</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导出代码 -->
+    <div class="export-section">
+        <div class="hologram-title" style="font-size: 1.8rem; margin-bottom: 10px;">SVG_EXPORT_OPTIMIZED</div>
+        <div style="color: #6272a4; margin-bottom: 20px;">/// 完整 SVG 源码，可复制保存为 icon.svg</div>
+
+        <div class="code-preview">
+            <div class="code-header">icon.svg</div>
+            <span class="code-tag">&lt;svg</span>
+            <span class="code-attr">width</span>=<span class="code-val">"512"</span>
+            <span class="code-attr">height</span>=<span class="code-val">"512"</span>
+            <span class="code-attr">viewBox</span>=<span class="code-val">"0 0 200 200"</span>
+            <span class="code-attr">xmlns</span>=<span class="code-val">"http://www.w3.org/2000/svg"</span><span class="code-tag">&gt;</span><br>
+            <span class="code-tag">&lt;defs&gt;</span><br>
+            <span class="code-tag">&lt;filter</span> <span class="code-attr">id</span>=<span class="code-val">"glow"</span><span class="code-tag">&gt;</span><br>
+            <span class="code-tag">&lt;feGaussianBlur</span> <span class="code-attr">stdDeviation</span>=<span class="code-val">"2"</span> <span class="code-attr">result</span>=<span class="code-val">"blur"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;feComposite</span> <span class="code-attr">in</span>=<span class="code-val">"SourceGraphic"</span> <span class="code-attr">in2</span>=<span class="code-val">"blur"</span> <span class="code-attr">operator</span>=<span class="code-val">"over"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;/filter&gt;</span><br>
+            <span class="code-tag">&lt;/defs&gt;</span><br><br>
+            <span class="code-comment">&lt;!-- 外圈能量场 --&gt;</span><br>
+            <span class="code-tag">&lt;circle</span> <span class="code-attr">cx</span>=<span class="code-val">"100"</span> <span class="code-attr">cy</span>=<span class="code-val">"100"</span> <span class="code-attr">r</span>=<span class="code-val">"90"</span>
+            <span class="code-attr">fill</span>=<span class="code-val">"#0a1428"</span> <span class="code-attr">stroke</span>=<span class="code-val">"#00f5ff"</span> <span class="code-attr">stroke-width</span>=<span class="code-val">"2"</span>
+            <span class="code-attr">filter</span>=<span class="code-val">"url(#glow)"</span><span class="code-tag">/&gt;</span><br><br>
+            <span class="code-comment">&lt;!-- 书架结构 --&gt;</span><br>
+            <span class="code-tag">&lt;g</span> <span class="code-attr">filter</span>=<span class="code-val">"url(#glow)"</span><span class="code-tag">&gt;</span><br>
+            <span class="code-tag">&lt;rect</span> <span class="code-attr">x</span>=<span class="code-val">"35"</span> <span class="code-attr">y</span>=<span class="code-val">"45"</span> <span class="code-attr">width</span>=<span class="code-val">"3"</span> <span class="code-attr">height</span>=<span class="code-val">"110"</span>
+            <span class="code-attr">fill</span>=<span class="code-val">"#bc13fe"</span> <span class="code-attr">opacity</span>=<span class="code-val">"0.8"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-comment">&lt;!-- 三层发光层板 --&gt;</span><br>
+            <span class="code-tag">&lt;line</span> <span class="code-attr">x1</span>=<span class="code-val">"38"</span> <span class="code-attr">y1</span>=<span class="code-val">"65"</span> <span class="code-attr">x2</span>=<span class="code-val">"162"</span> <span class="code-attr">y2</span>=<span class="code-val">"65"</span>
+            <span class="code-attr">stroke</span>=<span class="code-val">"#00f5ff"</span> <span class="code-attr">stroke-width</span>=<span class="code-val">"2"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;line</span> <span class="code-attr">x1</span>=<span class="code-val">"38"</span> <span class="code-attr">y1</span>=<span class="code-val">"105"</span> <span class="code-attr">x2</span>=<span class="code-val">"162"</span> <span class="code-attr">y2</span>=<span class="code-val">"105"</span>
+            <span class="code-attr">stroke</span>=<span class="code-val">"#00f5ff"</span> <span class="code-attr">stroke-width</span>=<span class="code-val">"2"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;line</span> <span class="code-attr">x1</span>=<span class="code-val">"38"</span> <span class="code-attr">y1</span>=<span class="code-val">"145"</span> <span class="code-attr">x2</span>=<span class="code-val">"162"</span> <span class="code-attr">y2</span>=<span class="code-val">"145"</span>
+            <span class="code-attr">stroke</span>=<span class="code-val">"#00f5ff"</span> <span class="code-attr">stroke-width</span>=<span class="code-val">"2"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;/g&gt;</span><br><br>
+            <span class="code-comment">&lt;!-- Git 分支网络（多远程） --&gt;</span><br>
+            <span class="code-tag">&lt;g</span> <span class="code-attr">filter</span>=<span class="code-val">"url(#glow)"</span><span class="code-tag">&gt;</span><br>
+            <span class="code-comment">&lt;!-- 主节点 --&gt;</span><br>
+            <span class="code-tag">&lt;circle</span> <span class="code-attr">cx</span>=<span class="code-val">"65"</span> <span class="code-attr">cy</span>=<span class="code-val">"55"</span> <span class="code-attr">r</span>=<span class="code-val">"5"</span> <span class="code-attr">fill</span>=<span class="code-val">"#00f5ff"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;path</span> <span class="code-attr">d</span>=<span class="code-val">"M65 60 L65 75 M65 75 L85 75 L85 60"</span>
+            <span class="code-attr">stroke</span>=<span class="code-val">"#00f5ff"</span> <span class="code-attr">stroke-width</span>=<span class="code-val">"1.5"</span> <span class="code-attr">fill</span>=<span class="code-val">"none"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;circle</span> <span class="code-attr">cx</span>=<span class="code-val">"85"</span> <span class="code-attr">cy</span>=<span class="code-val">"58"</span> <span class="code-attr">r</span>=<span class="code-val">"4"</span> <span class="code-attr">fill</span>=<span class="code-val">"#bc13fe"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;path</span> <span class="code-attr">d</span>=<span class="code-val">"M65 75 L105 75 L105 60"</span>
+            <span class="code-attr">stroke</span>=<span class="code-val">"#bc13fe"</span> <span class="code-attr">stroke-width</span>=<span class="code-val">"1.5"</span> <span class="code-attr">stroke-dasharray</span>=<span class="code-val">"2,2"</span> <span class="code-attr">fill</span>=<span class="code-val">"none"</span> <span class="code-attr">opacity</span>=<span class="code-val">"0.6"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;circle</span> <span class="code-attr">cx</span>=<span class="code-val">"105"</span> <span class="code-attr">cy</span>=<span class="code-val">"58"</span> <span class="code-attr">r</span>=<span class="code-val">"3.5"</span> <span class="code-attr">fill</span>=<span class="code-val">"#00f5ff"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;/g&gt;</span><br><br>
+            <span class="code-comment">&lt;!-- 中层代码块 --&gt;</span><br>
+            <span class="code-tag">&lt;rect</span> <span class="code-attr">x</span>=<span class="code-val">"55"</span> <span class="code-attr">y</span>=<span class="code-val">"82"</span> <span class="code-attr">width</span>=<span class="code-val">"45"</span> <span class="code-attr">height</span>=<span class="code-val">"16"</span>
+            <span class="code-attr">rx</span>=<span class="code-val">"2"</span> <span class="code-attr">fill</span>=<span class="code-val">"rgba(0,245,255,0.1)"</span> <span class="code-attr">stroke</span>=<span class="code-val">"#00f5ff"</span> <span class="code-attr">stroke-width</span>=<span class="code-val">"0.5"</span><span class="code-tag">/&gt;</span><br>
+            <span class="code-tag">&lt;text</span> <span class="code-attr">x</span>=<span class="code-val">"62"</span> <span class="code-attr">y</span>=<span class="code-val">"94"</span> <span class="code-attr">font-family</span>=<span class="code-val">"monospace"</span> <span class="code-attr">font-size</span>=<span class="code-val">"10"</span> <span class="code-attr">fill</span>=<span class="code-val">"#00f5ff"</span><span class="code-tag">&gt;</span>{ }<span class="code-tag">&lt;/text&gt;</span><br><br>
+            <span class="code-comment">&lt;!-- 底层命令 --&gt;</span><br>
+            <span class="code-tag">&lt;text</span> <span class="code-attr">x</span>=<span class="code-val">"55"</span> <span class="code-attr">y</span>=<span class="code-val">"135"</span> <span class="code-attr">font-family</span>=<span class="code-val">"monospace"</span> <span class="code-attr">font-size</span>=<span class="code-val">"9"</span> <span class="code-attr">fill</span>=<span class="code-val">"#e0f7ff"</span><span class="code-tag">&gt;</span>$ git push<span class="code-tag">&lt;/text&gt;</span><br>
+            <span class="code-tag">&lt;/svg&gt;</span>
+        </div>
+    </div>
+
+    <!-- 使用指南 -->
+    <div class="guide-grid">
+        <div class="guide-card">
+            <div class="guide-title">◈ PROJECT_CONCEPT</div>
+            <div class="guide-text">
+                优化后的全息图标深度融合了 CodeShelf 的<strong>三大核心</strong>：<br>
+                1. <span style="color: #00f5ff;">书架整理</span>：三层发光层板直观展示项目层级<br>
+                2. <span style="color: #bc13fe;">Git 管理</span>：顶部悬浮节点可视化多远程仓库同步<br>
+                3. <span style="color: #00f5ff;">代码本质</span>：中层代码块与底层命令行强化开发者属性
+            </div>
+        </div>
+
+        <div class="guide-card">
+            <div class="guide-title">◈ Tauri_INTEGRATION</div>
+            <div class="guide-text">
+                建议配置：<br>
+                • macOS：保留完整发光滤镜，禁用 template 模式以保持霓虹色<br>
+                • Windows：导出 ICO 时包含 16/32/48/256 多尺寸，16px 自动简化<br>
+                • Linux：适配深色主题，图标基底透明度确保与面板融合
+            </div>
+        </div>
+
+        <div class="guide-card">
+            <div class="guide-title">◈ ANIMATION_NOTE</div>
+            <div class="guide-text">
+                SVG 内含 SMIL 动画（呼吸灯、流动线），当转换为 PNG 时会自动定格。<br>
+                如需在 Tauri 启动界面使用动画，可直接使用此 SVG，或导出序列帧制作 loading 动画。
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

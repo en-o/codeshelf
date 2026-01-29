@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# 生成托盘图标和安装图标
+# 从 SVG 生成所有图标
 # 需要 ImageMagick: sudo apt-get install imagemagick
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -8,25 +8,32 @@ ICONS_DIR="$(dirname "$SCRIPT_DIR")/src-tauri/icons"
 
 cd "$ICONS_DIR" || exit 1
 
-echo "正在生成图标..."
+echo "正在从 SVG 生成图标..."
 
-# 托盘图标 (白色背景，不透明)
-convert 32x32.png -background white -alpha remove -alpha off tray-icon.png
+# 主图标 (256x256)
+convert -background none icon.svg -resize 256x256 -depth 8 icon.png
+echo "done: icon.png (256x256)"
+
+# 高清图标 (256x256)
+convert -background none icon.svg -resize 256x256 -depth 8 128x128@2x.png
+echo "done: 128x128@2x.png (256x256 Retina)"
+
+# 标准图标 (128x128)
+convert -background none icon.svg -resize 128x128 -depth 8 128x128.png
+echo "done: 128x128.png"
+
+# 小图标 (32x32) - 使用简化版 SVG
+convert -background none icon-small.svg -resize 32x32 -depth 8 32x32.png
+echo "done: 32x32.png"
+
+# 托盘图标 (32x32, 深色背景不透明)
+convert -background "#0a1428" icon-small.svg -resize 32x32 -alpha remove -alpha off -depth 8 tray-icon.png
 echo "done: tray-icon.png (托盘图标)"
 
-# 圆形安装图标 (蓝色背景)
-SIZE=256
-BG_COLOR="#3B82F6"
-
-convert -size ${SIZE}x${SIZE} xc:none \
-    -fill "$BG_COLOR" -draw "circle 128,128 128,0" \
-    \( icon.png -resize 180x180 -gravity center -extent ${SIZE}x${SIZE} \) \
-    -gravity center -composite \
-    -depth 8 -alpha on icon-circle-tmp.png
-
-convert icon-circle-tmp.png -depth 8 -define icon:auto-resize=256,128,64,48,32,16 app-icon-circle.ico
-rm -f icon-circle-tmp.png
-echo "done: app-icon-circle.ico (安装图标)"
+# Windows ICO (多尺寸)
+convert icon.png -define icon:auto-resize=256,128,64,48,32,16 -depth 8 app-icon-circle.ico
+echo "done: app-icon-circle.ico (Windows 安装图标)"
 
 echo ""
-echo "完成！"
+echo "完成！生成的图标文件："
+ls -la *.png *.ico
