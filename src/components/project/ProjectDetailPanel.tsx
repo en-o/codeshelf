@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus } from "lucide-react";
+import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus, Trash2, Check } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
 import { SyncRemoteModal } from "./SyncRemoteModal";
@@ -9,7 +9,7 @@ import { GitCommitModal } from "./GitCommitModal";
 import { AddRemoteModal } from "./AddRemoteModal";
 import { showToast } from "@/components/ui";
 import type { Project, GitStatus, CommitInfo, RemoteInfo } from "@/types";
-import { getGitStatus, getCommitHistory, getRemotes, gitPull, gitPush } from "@/services/git";
+import { getGitStatus, getCommitHistory, getRemotes, gitPull, gitPush, removeRemote } from "@/services/git";
 import { openInEditor, openInExplorer, openInTerminal, updateProject } from "@/services/db";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "@/stores/appStore";
@@ -24,6 +24,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
+  const [currentRemote, setCurrentRemote] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -51,6 +52,13 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
     loadProjectDetails();
   }, [project.path]);
 
+  // 当远程列表加载完成后，设置默认当前远程
+  useEffect(() => {
+    if (remotes.length > 0 && !currentRemote) {
+      setCurrentRemote(remotes[0].name);
+    }
+  }, [remotes, currentRemote]);
+
   async function loadProjectDetails() {
     try {
       setLoading(true);
@@ -70,13 +78,13 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   }
 
   async function handlePull() {
-    if (!gitStatus || remotes.length === 0 || pulling) return;
+    if (!gitStatus || !currentRemote || pulling) return;
     try {
       setPulling(true);
-      await gitPull(project.path, remotes[0].name, gitStatus.branch);
+      await gitPull(project.path, currentRemote, gitStatus.branch);
       await loadProjectDetails();
       incrementStatsVersion(); // Trigger dashboard stats refresh
-      showToast("success", "拉取成功", `已从 ${remotes[0].name}/${gitStatus.branch} 拉取最新代码`);
+      showToast("success", "拉取成功", `已从 ${currentRemote}/${gitStatus.branch} 拉取最新代码`);
     } catch (error) {
       console.error("Failed to pull:", error);
       showToast("error", "拉取失败", String(error));
@@ -86,13 +94,13 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   }
 
   async function handlePush() {
-    if (!gitStatus || remotes.length === 0 || pushing) return;
+    if (!gitStatus || !currentRemote || pushing) return;
     try {
       setPushing(true);
-      await gitPush(project.path, remotes[0].name, gitStatus.branch);
+      await gitPush(project.path, currentRemote, gitStatus.branch);
       await loadProjectDetails();
       incrementStatsVersion(); // Trigger dashboard stats refresh
-      showToast("success", "推送成功", `已推送到 ${remotes[0].name}/${gitStatus.branch}`);
+      showToast("success", "推送成功", `已推送到 ${currentRemote}/${gitStatus.branch}`);
     } catch (error) {
       console.error("Failed to push:", error);
       showToast("error", "推送失败", String(error));
@@ -128,6 +136,20 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
       console.error("Failed to load README:", error);
       setReadmeContent("未找到 README.md 文件");
       setShowReadme(true);
+    }
+  }
+
+  async function handleRemoveRemote(remoteName: string) {
+    if (!confirm(`确定要删除远程仓库 "${remoteName}" 吗？`)) {
+      return;
+    }
+    try {
+      await removeRemote(project.path, remoteName);
+      await loadProjectDetails();
+      showToast("success", "删除成功", `远程仓库 ${remoteName} 已删除`);
+    } catch (error) {
+      console.error("Failed to remove remote:", error);
+      showToast("error", "删除失败", String(error));
     }
   }
 
@@ -299,32 +321,64 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
 
             {remotes.length > 0 ? (
               <div className="space-y-md">
-                {remotes.map((remote, index) => (
-                  <div
-                    key={remote.name}
-                    className={`remote-card ${index > 0 ? 'remote-card-secondary' : ''}`}
-                  >
-                    <div className="flex items-center gap-sm mb-xs relative z-10">
-                      <div className="remote-icon">
-                        <GitBranch size={12} className={index === 0 ? "text-blue-500" : "text-gray-400"} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="remote-name">
-                          {remote.name}
-                          {index === 0 ? (
-                            <span className="remote-badge">当前</span>
-                          ) : (
-                            <span className="remote-badge-secondary">备用</span>
-                          )}
+                {[...remotes]
+                  .sort((a, b) => {
+                    // 当前远程仓库排在第一位
+                    if (a.name === currentRemote) return -1;
+                    if (b.name === currentRemote) return 1;
+                    return 0;
+                  })
+                  .map((remote) => {
+                  const isCurrent = remote.name === currentRemote;
+                  return (
+                    <div
+                      key={remote.name}
+                      className={`remote-card ${!isCurrent ? 'remote-card-secondary' : ''}`}
+                    >
+                      <div className="flex items-center gap-sm mb-xs relative z-10">
+                        <div className="remote-icon">
+                          <GitBranch size={12} className={isCurrent ? "text-blue-500" : "text-gray-400"} />
                         </div>
-                        <div className="remote-type">{getRemoteType(remote.url)}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="remote-name">
+                            {remote.name}
+                            {isCurrent ? (
+                              <span className="remote-badge">当前</span>
+                            ) : (
+                              <span className="remote-badge-secondary">备用</span>
+                            )}
+                          </div>
+                          <div className="remote-type">{getRemoteType(remote.url)}</div>
+                        </div>
+                        {/* 非当前仓库可切换和删除 */}
+                        {!isCurrent && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                setCurrentRemote(remote.name);
+                                showToast("success", "切换成功", `已切换到远程仓库 ${remote.name}`);
+                              }}
+                              className="p-1 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"
+                              title="设为当前远程仓库"
+                            >
+                              <Check size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleRemoveRemote(remote.name)}
+                              className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                              title="删除此远程仓库"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="remote-url relative z-10">
+                        {remote.url}
                       </div>
                     </div>
-                    <div className="remote-url relative z-10">
-                      {remote.url}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-xl text-gray-400 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
@@ -341,13 +395,22 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
 
             {/* 同步按钮 */}
             {remotes.length > 0 && (
-              <button
-                onClick={() => setShowSyncModal(true)}
-                className="sync-btn mt-md"
-              >
-                <Database size={14} />
-                <span>同步到其他远程库</span>
-              </button>
+              <div className="flex gap-sm mt-md">
+                <button
+                  onClick={() => setShowAddRemoteModal(true)}
+                  className="flex-1 flex items-center justify-center gap-sm px-md py-sm bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors text-sm font-medium border border-gray-200"
+                >
+                  <Plus size={14} />
+                  <span>添加远程</span>
+                </button>
+                <button
+                  onClick={() => setShowSyncModal(true)}
+                  className="flex-1 sync-btn"
+                >
+                  <Database size={14} />
+                  <span>同步远程库</span>
+                </button>
+              </div>
             )}
 
             {/* 快捷操作 */}
@@ -553,11 +616,11 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
       )}
 
       {/* Sync Remote Modal */}
-      {showSyncModal && remotes.length > 0 && (
+      {showSyncModal && remotes.length > 0 && currentRemote && (
         <SyncRemoteModal
           projectPath={project.path}
           remotes={remotes}
-          sourceRemote={remotes[0].name}
+          sourceRemote={currentRemote}
           onClose={() => setShowSyncModal(false)}
           onSuccess={() => {
             loadProjectDetails();

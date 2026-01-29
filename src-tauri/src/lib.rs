@@ -103,6 +103,7 @@ pub fn run() {
             git::get_branches,
             git::get_remotes,
             git::add_remote,
+            git::verify_remote_url,
             git::remove_remote,
             git::git_push,
             git::git_pull,

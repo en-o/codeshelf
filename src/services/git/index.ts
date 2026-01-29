@@ -38,6 +38,10 @@ export async function addRemote(
   return invoke("add_remote", { path, name, url });
 }
 
+export async function verifyRemoteUrl(url: string): Promise<void> {
+  return invoke("verify_remote_url", { url });
+}
+
 export async function removeRemote(path: string, name: string): Promise<void> {
   return invoke("remove_remote", { path, name });
 }

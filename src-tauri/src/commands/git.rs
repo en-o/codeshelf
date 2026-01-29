@@ -185,11 +185,19 @@ fn get_ahead_behind(path: &str) -> (u32, u32) {
 }
 
 #[tauri::command]
-pub async fn get_commit_history(path: String, limit: Option<u32>) -> Result<Vec<CommitInfo>, String> {
+pub async fn get_commit_history(path: String, limit: Option<u32>, ref_name: Option<String>) -> Result<Vec<CommitInfo>, String> {
     let limit_str = limit.unwrap_or(50).to_string();
     let format = "%H|%h|%s|%an|%ae|%ai";
 
-    let output = run_git_command(&path, &["log", &format!("-{}", limit_str), &format!("--format={}", format)])?;
+    let mut args = vec!["log".to_string(), format!("-{}", limit_str), format!("--format={}", format)];
+
+    // 如果指定了 ref_name（如 origin/main），则获取该引用的提交历史
+    if let Some(ref_name) = ref_name {
+        args.push(ref_name);
+    }
+
+    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let output = run_git_command(&path, &args_ref)?;
 
     let commits: Vec<CommitInfo> = output
         .lines()
@@ -283,6 +291,22 @@ pub async fn get_remotes(path: String) -> Result<Vec<RemoteInfo>, String> {
 pub async fn add_remote(path: String, name: String, url: String) -> Result<(), String> {
     run_git_command(&path, &["remote", "add", &name, &url])?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn verify_remote_url(url: String) -> Result<(), String> {
+    // 使用 git ls-remote 验证远程仓库 URL 是否有效
+    let output = std::process::Command::new("git")
+        .args(&["ls-remote", "--exit-code", &url])
+        .output()
+        .map_err(|e| format!("执行 git 命令失败: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("无法连接到远程仓库: {}", stderr.trim()))
+    }
 }
 
 #[tauri::command]

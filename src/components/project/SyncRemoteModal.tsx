@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { X, Database, Plus, Minus, AlertCircle } from "lucide-react";
+import { X, Database, Plus, AlertCircle } from "lucide-react";
 import type { RemoteInfo } from "@/types";
-import { addRemote, syncToRemote } from "@/services/git";
+import { syncToRemote } from "@/services/git";
+import { AddRemoteModal } from "./AddRemoteModal";
 
 interface SyncRemoteModalProps {
   projectPath: string;
@@ -20,9 +21,8 @@ export function SyncRemoteModal({
 }: SyncRemoteModalProps) {
   const [selectedRemote, setSelectedRemote] = useState<string | null>(null);
   const [syncAllBranches, setSyncAllBranches] = useState(true);
-  const [showAddRemote, setShowAddRemote] = useState(false);
-  const [newRemoteName, setNewRemoteName] = useState("");
-  const [newRemoteUrl, setNewRemoteUrl] = useState("");
+  const [showAddRemoteModal, setShowAddRemoteModal] = useState(false);
+  const [pendingSelectRemote, setPendingSelectRemote] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,28 +30,24 @@ export function SyncRemoteModal({
   const otherRemotes = remotes.filter((r) => r.name !== sourceRemote);
 
   useEffect(() => {
-    if (otherRemotes.length > 0 && !selectedRemote) {
+    // 如果有待选中的远程，优先选中它
+    if (pendingSelectRemote) {
+      const found = otherRemotes.find((r) => r.name === pendingSelectRemote);
+      if (found) {
+        setSelectedRemote(pendingSelectRemote);
+        setPendingSelectRemote(null);
+      }
+    } else if (otherRemotes.length > 0 && !selectedRemote) {
       setSelectedRemote(otherRemotes[0].name);
     }
-  }, [otherRemotes, selectedRemote]);
+  }, [otherRemotes, selectedRemote, pendingSelectRemote]);
 
-  async function handleAddRemote() {
-    if (!newRemoteName.trim() || !newRemoteUrl.trim()) {
-      setError("请输入远程库名称和地址");
-      return;
+  async function handleAddRemoteSuccess(remoteName?: string) {
+    if (remoteName) {
+      setPendingSelectRemote(remoteName);
     }
-
-    try {
-      await addRemote(projectPath, newRemoteName.trim(), newRemoteUrl.trim());
-      setShowAddRemote(false);
-      setNewRemoteName("");
-      setNewRemoteUrl("");
-      setError(null);
-      // Refresh remotes list
-      onSuccess();
-    } catch (err) {
-      setError("添加远程库失败：" + err);
-    }
+    setShowAddRemoteModal(false);
+    onSuccess(); // 刷新远程列表
   }
 
   async function handleSync() {
@@ -189,59 +185,15 @@ export function SyncRemoteModal({
               </div>
             )}
 
-            {/* Add Remote Section */}
+            {/* Add Remote Button */}
             <div className="border-t border-gray-200 pt-4 mt-4">
               <button
-                onClick={() => setShowAddRemote(!showAddRemote)}
-                className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 mb-3 transition-colors"
+                onClick={() => setShowAddRemoteModal(true)}
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 transition-colors"
               >
-                {showAddRemote ? (
-                  <>
-                    <Minus size={14} />
-                    <span>收起添加表单</span>
-                  </>
-                ) : (
-                  <>
-                    <Plus size={14} />
-                    <span>添加新的远程库</span>
-                  </>
-                )}
+                <Plus size={14} />
+                <span>添加新的远程库</span>
               </button>
-
-              {showAddRemote && (
-                <div className="space-y-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      远程库名称
-                    </label>
-                    <input
-                      type="text"
-                      value={newRemoteName}
-                      onChange={(e) => setNewRemoteName(e.target.value)}
-                      placeholder="例如：github、backup"
-                      className="input-base"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      远程库地址 (URL)
-                    </label>
-                    <input
-                      type="text"
-                      value={newRemoteUrl}
-                      onChange={(e) => setNewRemoteUrl(e.target.value)}
-                      placeholder="https://github.com/username/repo.git"
-                      className="input-base font-mono text-xs"
-                    />
-                  </div>
-                  <button
-                    onClick={handleAddRemote}
-                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors"
-                  >
-                    确认添加
-                  </button>
-                </div>
-              )}
             </div>
           </div>
 
@@ -339,6 +291,15 @@ export function SyncRemoteModal({
           </div>
         </div>
       </div>
+
+      {/* Add Remote Modal */}
+      {showAddRemoteModal && (
+        <AddRemoteModal
+          projectPath={projectPath}
+          onClose={() => setShowAddRemoteModal(false)}
+          onSuccess={handleAddRemoteSuccess}
+        />
+      )}
     </div>
   );
 }
