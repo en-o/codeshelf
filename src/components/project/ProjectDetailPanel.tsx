@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus, Trash2, Check } from "lucide-react";
+import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus, Trash2, Check, Copy } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
 import { SyncRemoteModal } from "./SyncRemoteModal";
@@ -265,9 +265,17 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
             </div>
 
             {/* 项目路径 */}
-            <p className="project-path">
+            <p
+              className="project-path cursor-pointer hover:text-blue-600 transition-colors"
+              title="点击复制路径"
+              onClick={() => {
+                navigator.clipboard.writeText(localProject.path);
+                showToast("success", "已复制", "路径已复制到剪贴板");
+              }}
+            >
               <FolderOpen size={12} className="text-gray-400" />
               {localProject.path}
+              <Copy size={11} className="text-gray-400 ml-1" />
             </p>
           </div>
         </div>
