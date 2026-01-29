@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   FolderGit2,
   GitCommit,
@@ -12,12 +12,18 @@ import {
 } from "lucide-react";
 import { CommitHeatmap } from "@/components/ui";
 import { useAppStore } from "@/stores/appStore";
-import { getDashboardStats, refreshDashboardStats, type RecentCommit } from "@/services/stats";
+import {
+  initStatsCache,
+  refreshDashboardStats,
+  refreshDirtyStats,
+  hasDirtyStats,
+  type RecentCommit,
+} from "@/services/stats";
 import type { DashboardStats, DailyActivity } from "@/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function DashboardPage() {
-  const { projects, sidebarCollapsed, setSidebarCollapsed, statsVersion } = useAppStore();
+  const { projects, sidebarCollapsed, setSidebarCollapsed } = useAppStore();
   const [stats, setStats] = useState<DashboardStats>({
     totalProjects: 0,
     todayCommits: 0,
@@ -29,43 +35,58 @@ export function DashboardPage() {
   const [recentActivity, setRecentActivity] = useState<RecentCommit[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
+  // Get project infos for API calls
+  const getProjectInfos = useCallback(() => {
+    return projects.map(p => ({ id: p.id, name: p.name, path: p.path }));
+  }, [projects]);
+
+  // Initialize stats on mount
   useEffect(() => {
-    loadCachedStats();
+    initializeStats();
   }, []);
 
-  // When projects change, refresh stats
+  // Check for dirty stats when projects change
   useEffect(() => {
-    if (!loading) {
-      handleRefreshStats();
+    if (initialized && projects.length > 0) {
+      checkAndRefreshDirtyStats();
     }
-  }, [projects.length]);
+  }, [projects.length, initialized]);
 
-  // When stats version changes (after git operations), refresh stats
+  // Check for dirty stats when page becomes visible
   useEffect(() => {
-    if (statsVersion > 0 && !loading) {
-      handleRefreshStats();
-    }
-  }, [statsVersion]);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && initialized) {
+        checkAndRefreshDirtyStats();
+      }
+    };
 
-  // Load cached stats (fast)
-  async function loadCachedStats() {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [initialized]);
+
+  // Initialize stats from cache
+  async function initializeStats() {
     try {
       setLoading(true);
-      const cached = await getDashboardStats();
-
-      // If cache is empty (first load), trigger a refresh
-      if (cached.stats.totalProjects === 0 && projects.length > 0) {
-        await handleRefreshStats();
-        return;
-      }
+      const projectInfos = getProjectInfos();
+      const cached = await initStatsCache(projectInfos);
 
       setStats(cached.stats);
       setHeatmapData(cached.heatmapData);
       setRecentActivity(cached.recentCommits);
+      setInitialized(true);
+
+      // Check if there are dirty projects that need refresh
+      const hasDirty = await hasDirtyStats();
+      if (hasDirty && projectInfos.length > 0) {
+        // Refresh dirty stats in background
+        refreshDirtyStatsBackground();
+      }
     } catch (error) {
-      console.error("Failed to load cached stats:", error);
-      // Fallback to refresh if cache load fails
+      console.error("Failed to initialize stats:", error);
+      // Fallback to full refresh
       if (projects.length > 0) {
         await handleRefreshStats();
       }
@@ -74,7 +95,34 @@ export function DashboardPage() {
     }
   }
 
-  // Refresh stats by analyzing all projects (slow)
+  // Check and refresh dirty stats (non-blocking)
+  async function checkAndRefreshDirtyStats() {
+    try {
+      const hasDirty = await hasDirtyStats();
+      if (hasDirty) {
+        await refreshDirtyStatsBackground();
+      }
+    } catch (error) {
+      console.error("Failed to check dirty stats:", error);
+    }
+  }
+
+  // Refresh only dirty projects (background, non-blocking)
+  async function refreshDirtyStatsBackground() {
+    try {
+      const projectInfos = getProjectInfos();
+      if (projectInfos.length === 0) return;
+
+      const data = await refreshDirtyStats(projectInfos);
+      setStats(data.stats);
+      setHeatmapData(data.heatmapData);
+      setRecentActivity(data.recentCommits);
+    } catch (error) {
+      console.error("Failed to refresh dirty stats:", error);
+    }
+  }
+
+  // Full refresh (manual button click)
   async function handleRefreshStats() {
     if (projects.length === 0) {
       setStats({
@@ -91,7 +139,7 @@ export function DashboardPage() {
 
     try {
       setRefreshing(true);
-      const projectInfos = projects.map(p => ({ name: p.name, path: p.path }));
+      const projectInfos = getProjectInfos();
       const data = await refreshDashboardStats(projectInfos);
 
       setStats(data.stats);

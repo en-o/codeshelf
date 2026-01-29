@@ -126,9 +126,14 @@ pub fn run() {
             project::update_project,
             project::toggle_favorite,
             // Stats commands
-            stats::refresh_dashboard_stats,
             stats::get_dashboard_stats,
-            stats::refresh_project_stats,
+            stats::refresh_dashboard_stats,
+            stats::refresh_dirty_stats,
+            stats::init_stats_cache,
+            stats::mark_project_dirty,
+            stats::mark_all_projects_dirty,
+            stats::has_dirty_stats,
+            stats::cleanup_stats_cache,
             // System commands
             system::open_in_explorer,
             system::open_in_editor,

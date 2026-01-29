@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DashboardStats, DailyActivity, CommitInfo } from "@/types";
 
 export interface ProjectInfo {
+  id?: string;
   name: string;
   path: string;
 }
@@ -45,15 +46,6 @@ function transformStats(data: any): CachedDashboardData {
 }
 
 /**
- * Refresh dashboard stats by analyzing all projects
- * This is the slow operation - call after adding projects or git operations
- */
-export async function refreshDashboardStats(projects: ProjectInfo[]): Promise<CachedDashboardData> {
-  const data = await invoke("refresh_dashboard_stats", { projects });
-  return transformStats(data);
-}
-
-/**
  * Get cached dashboard stats (fast - no git operations)
  * Use this for initial page load
  */
@@ -63,12 +55,58 @@ export async function getDashboardStats(): Promise<CachedDashboardData> {
 }
 
 /**
- * Refresh stats for a single project (after git operations)
+ * Refresh dashboard stats by analyzing all projects (slow)
+ * Use for manual refresh button
  */
-export async function refreshProjectStats(
-  project: ProjectInfo,
-  allProjects: ProjectInfo[]
-): Promise<CachedDashboardData> {
-  const data = await invoke("refresh_project_stats", { project, allProjects });
+export async function refreshDashboardStats(projects: ProjectInfo[]): Promise<CachedDashboardData> {
+  const data = await invoke("refresh_dashboard_stats", { projects });
   return transformStats(data);
+}
+
+/**
+ * Initialize stats cache on app startup
+ * Returns cached data if valid, marks new/changed projects as dirty
+ */
+export async function initStatsCache(projects: ProjectInfo[]): Promise<CachedDashboardData> {
+  const data = await invoke("init_stats_cache", { projects });
+  return transformStats(data);
+}
+
+/**
+ * Refresh only dirty (changed) projects (incremental update)
+ * Use this after git operations or when dirty projects exist
+ */
+export async function refreshDirtyStats(projects: ProjectInfo[]): Promise<CachedDashboardData> {
+  const data = await invoke("refresh_dirty_stats", { projects });
+  return transformStats(data);
+}
+
+/**
+ * Mark a single project as dirty (needs refresh)
+ * Call this after git operations on a project
+ */
+export async function markProjectDirty(projectPath: string): Promise<void> {
+  await invoke("mark_project_dirty", { projectPath });
+}
+
+/**
+ * Mark all projects as dirty
+ * Use when major changes occur
+ */
+export async function markAllProjectsDirty(projects: ProjectInfo[]): Promise<void> {
+  await invoke("mark_all_projects_dirty", { projects });
+}
+
+/**
+ * Check if there are any dirty projects that need refresh
+ */
+export async function hasDirtyStats(): Promise<boolean> {
+  return await invoke("has_dirty_stats");
+}
+
+/**
+ * Clean up stats cache for deleted projects
+ */
+export async function cleanupStatsCache(currentProjectPaths: string[]): Promise<void> {
+  await invoke("cleanup_stats_cache", { currentProjectPaths });
 }

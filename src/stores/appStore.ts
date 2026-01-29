@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Project, ViewMode } from "@/types";
+import { markProjectDirty as markDirty } from "@/services/stats";
 
 export type Theme = "light" | "dark";
 
@@ -32,9 +33,8 @@ interface AppState {
   removeProject: (id: string) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
 
-  // Stats - version counter to trigger dashboard refresh
-  statsVersion: number;
-  incrementStatsVersion: () => void;
+  // Stats - mark project as dirty for incremental refresh
+  markProjectDirty: (projectPath: string) => void;
 
   // UI State
   viewMode: ViewMode;
@@ -99,10 +99,11 @@ export const useAppStore = create<AppState>()(
           ),
         })),
 
-      // Stats version - increment to trigger dashboard refresh
-      statsVersion: 0,
-      incrementStatsVersion: () =>
-        set((state) => ({ statsVersion: state.statsVersion + 1 })),
+      // Stats - mark project as dirty (calls Rust command)
+      markProjectDirty: (projectPath) => {
+        // Fire and forget - don't need to await
+        markDirty(projectPath).catch(console.error);
+      },
 
       // UI State
       viewMode: "grid",
@@ -191,6 +192,7 @@ export const useAppStore = create<AppState>()(
     {
       name: "codeshelf-storage",
       partialize: (state) => ({
+        projects: state.projects,
         viewMode: state.viewMode,
         sidebarCollapsed: state.sidebarCollapsed,
         theme: state.theme,
@@ -207,6 +209,7 @@ export const useAppStore = create<AppState>()(
         return {
           ...currentState,
           ...persisted,
+          projects: persisted.projects || [],
           labels: persisted.labels && persisted.labels.length > 0 ? persisted.labels : defaultLabels,
         };
       },

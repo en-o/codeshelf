@@ -20,7 +20,7 @@ export function ShelfPage() {
     scanDepth,
     categories: storedCategories,
     labels: storedLabels,
-    incrementStatsVersion,
+    markProjectDirty,
   } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [scanResults, setScanResults] = useState<GitRepo[] | null>(null);
@@ -130,7 +130,14 @@ export function ShelfPage() {
 
   async function loadProjects() {
     try {
-      setLoading(true);
+      // If we already have cached projects from Zustand, show them immediately
+      if (projects.length > 0) {
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
+      // Sync with backend in background
       const data = await getProjects();
       setProjects(data);
     } catch (error) {
@@ -199,7 +206,8 @@ export function ShelfPage() {
 
       if (newProjects.length > 0) {
         setProjects([...projects, ...newProjects]);
-        incrementStatsVersion(); // Trigger dashboard stats refresh
+        // Mark all new projects as dirty for stats refresh
+        newProjects.forEach(p => markProjectDirty(p.path));
       }
 
       setScanResults(null);
@@ -215,8 +223,12 @@ export function ShelfPage() {
   }
 
   function handleProjectDelete(projectId: string) {
+    const deletedProject = projects.find(p => p.id === projectId);
     setProjects(projects.filter((p) => p.id !== projectId));
-    incrementStatsVersion(); // Trigger dashboard stats refresh
+    // Mark the deleted project as dirty so stats are refreshed
+    if (deletedProject) {
+      markProjectDirty(deletedProject.path);
+    }
   }
 
   // 批量操作函数
@@ -253,11 +265,13 @@ export function ShelfPage() {
 
     try {
       setLoading(true);
+      const removedProjects = projects.filter(p => selectedIds.has(p.id));
       for (const id of selectedIds) {
         await removeProject(id);
       }
       setProjects(projects.filter(p => !selectedIds.has(p.id)));
-      incrementStatsVersion(); // Trigger dashboard stats refresh
+      // Mark removed projects as dirty for stats refresh
+      removedProjects.forEach(p => markProjectDirty(p.path));
       setSelectedIds(new Set());
       setBatchMode(false);
       showToast("success", "移除成功", `已从书架移除 ${selectedIds.size} 个项目`);
@@ -636,7 +650,7 @@ export function ShelfPage() {
           onConfirm={(project) => {
             setProjects([...projects, project]);
             setShowAddProjectDialog(false);
-            incrementStatsVersion(); // Trigger dashboard stats refresh
+            markProjectDirty(project.path); // Mark for stats refresh
           }}
           onCancel={() => setShowAddProjectDialog(false)}
         />

@@ -39,7 +39,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [selectedLabels, setSelectedLabels] = useState<string[]>(project.labels || []);
   // 用于显示的本地项目数据（编辑后立即更新）
   const [localProject, setLocalProject] = useState<Project>(project);
-  const { editors, terminalConfig, incrementStatsVersion } = useAppStore();
+  const { editors, terminalConfig, markProjectDirty } = useAppStore();
 
   // 当外部 project prop 改变时同步本地状态
   useEffect(() => {
@@ -124,7 +124,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
       setPulling(true);
       await gitPull(project.path, currentRemote, gitStatus.branch);
       await loadProjectDetails();
-      incrementStatsVersion(); // Trigger dashboard stats refresh
+      markProjectDirty(project.path); // Mark for stats refresh
       showToast("success", "拉取成功", `已从 ${currentRemote}/${gitStatus.branch} 拉取最新代码`);
     } catch (error) {
       console.error("Failed to pull:", error);
@@ -140,7 +140,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
       setPushing(true);
       await gitPush(project.path, currentRemote, gitStatus.branch);
       await loadProjectDetails();
-      incrementStatsVersion(); // Trigger dashboard stats refresh
+      markProjectDirty(project.path); // Mark for stats refresh
       showToast("success", "推送成功", `已推送到 ${currentRemote}/${gitStatus.branch}`);
     } catch (error) {
       console.error("Failed to push:", error);
@@ -690,7 +690,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           onClose={() => setShowSyncModal(false)}
           onSuccess={() => {
             loadProjectDetails();
-            incrementStatsVersion();
+            markProjectDirty(project.path);
           }}
         />
       )}
@@ -714,7 +714,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           onClose={() => setShowCommitModal(false)}
           onSuccess={() => {
             loadProjectDetails();
-            incrementStatsVersion();
+            markProjectDirty(project.path);
           }}
         />
       )}
