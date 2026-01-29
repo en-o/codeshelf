@@ -113,6 +113,7 @@ pub fn run() {
             git::checkout_branch,
             git::create_branch,
             git::git_add,
+            git::git_unstage,
             git::git_commit,
             git::git_add_and_commit,
             git::is_git_repo,

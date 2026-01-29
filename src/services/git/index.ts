@@ -109,6 +109,13 @@ export async function gitAdd(
   return invoke("git_add", { path, files });
 }
 
+export async function gitUnstage(
+  path: string,
+  files: string[] = []
+): Promise<string> {
+  return invoke("git_unstage", { path, files });
+}
+
 export async function gitCommit(
   path: string,
   message: string

@@ -452,6 +452,17 @@ pub async fn git_add(path: String, files: Vec<String>) -> Result<String, String>
 }
 
 #[tauri::command]
+pub async fn git_unstage(path: String, files: Vec<String>) -> Result<String, String> {
+    if files.is_empty() {
+        run_git_command(&path, &["reset", "HEAD"])
+    } else {
+        let mut args = vec!["reset", "HEAD", "--"];
+        args.extend(files.iter().map(|s| s.as_str()));
+        run_git_command(&path, &args)
+    }
+}
+
+#[tauri::command]
 pub async fn git_commit(path: String, message: String) -> Result<String, String> {
     if message.trim().is_empty() {
         return Err("提交信息不能为空".to_string());

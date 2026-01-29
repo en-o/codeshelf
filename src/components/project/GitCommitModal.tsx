@@ -2,7 +2,13 @@ import { useState, useEffect } from "react";
 import { X, GitCommit, CloudUpload, FileText, Plus, Minus, Circle, CheckSquare, Square, Loader2 } from "lucide-react";
 import { showToast } from "@/components/ui";
 import type { GitStatus, RemoteInfo } from "@/types";
-import { getGitStatus, getRemotes, gitAdd, gitCommit, gitPush } from "@/services/git";
+import { getGitStatus, getRemotes, gitAdd, gitUnstage, gitCommit, gitPush } from "@/services/git";
+
+interface FileItem {
+  path: string;
+  /** staged: 已暂存, unstaged: 已修改, untracked: 新文件 */
+  type: "staged" | "unstaged" | "untracked";
+}
 
 interface GitCommitModalProps {
   projectPath: string;
@@ -17,6 +23,8 @@ export function GitCommitModal({ projectPath, onClose, onSuccess }: GitCommitMod
   const [committing, setCommitting] = useState(false);
   const [pushing, setPushing] = useState(false);
 
+  // 所有文件列表（统一管理）
+  const [allFiles, setAllFiles] = useState<FileItem[]>([]);
   // Selected files for staging
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   // Commit message
@@ -45,12 +53,22 @@ export function GitCommitModal({ projectPath, onClose, onSuccess }: GitCommitMod
         setSelectedRemote(remoteList[0].name);
       }
 
-      // Auto-select all modified files
-      const allFiles = [
-        ...status.unstaged,
-        ...status.untracked,
-      ];
-      setSelectedFiles(new Set(allFiles));
+      // 构建统一的文件列表，去重（同一文件可能同时出现在 staged 和 unstaged）
+      const fileMap = new Map<string, FileItem>();
+      for (const file of status.staged) {
+        fileMap.set(file, { path: file, type: "staged" });
+      }
+      for (const file of status.unstaged) {
+        fileMap.set(file, { path: file, type: "unstaged" });
+      }
+      for (const file of status.untracked) {
+        fileMap.set(file, { path: file, type: "untracked" });
+      }
+
+      const files = Array.from(fileMap.values());
+      setAllFiles(files);
+      // 默认全选
+      setSelectedFiles(new Set(files.map(f => f.path)));
     } catch (error) {
       console.error("Failed to load git info:", error);
       showToast("error", "加载失败", String(error));
@@ -70,12 +88,7 @@ export function GitCommitModal({ projectPath, onClose, onSuccess }: GitCommitMod
   }
 
   function selectAll() {
-    if (!gitStatus) return;
-    const allFiles = [
-      ...gitStatus.unstaged,
-      ...gitStatus.untracked,
-    ];
-    setSelectedFiles(new Set(allFiles));
+    setSelectedFiles(new Set(allFiles.map(f => f.path)));
   }
 
   function deselectAll() {
@@ -88,31 +101,70 @@ export function GitCommitModal({ projectPath, onClose, onSuccess }: GitCommitMod
       return;
     }
 
+    if (selectedFiles.size === 0) {
+      showToast("error", "提交失败", "请选择要提交的文件");
+      return;
+    }
+
     try {
       setCommitting(true);
 
-      // Stage selected files
-      const filesToAdd = Array.from(selectedFiles);
+      // 需要暂存的文件（选中的非 staged 文件）
+      const filesToAdd = allFiles
+        .filter(f => selectedFiles.has(f.path) && f.type !== "staged")
+        .map(f => f.path);
+
+      // 需要取消暂存的文件（未选中的 staged 文件）
+      const filesToUnstage = allFiles
+        .filter(f => !selectedFiles.has(f.path) && f.type === "staged")
+        .map(f => f.path);
+
+      // 取消暂存
+      if (filesToUnstage.length > 0) {
+        try {
+          await gitUnstage(projectPath, filesToUnstage);
+        } catch (error) {
+          console.error("Failed to unstage files:", error);
+          showToast("error", "取消暂存失败", String(error));
+          return;
+        }
+      }
+
+      // 暂存选中的文件
       if (filesToAdd.length > 0) {
-        await gitAdd(projectPath, filesToAdd);
+        try {
+          await gitAdd(projectPath, filesToAdd);
+        } catch (error) {
+          console.error("Failed to stage files:", error);
+          showToast("error", "暂存文件失败", String(error));
+          return;
+        }
       }
 
       // Commit
-      await gitCommit(projectPath, message.trim());
-      showToast("success", "提交成功", "代码已提交到本地仓库");
+      try {
+        await gitCommit(projectPath, message.trim());
+        showToast("success", "提交成功", "代码已提交到本地仓库");
+      } catch (error) {
+        console.error("Failed to commit:", error);
+        showToast("error", "提交失败", String(error));
+        return;
+      }
 
       // Push if enabled
       if (pushAfterCommit && selectedRemote && gitStatus.branch) {
         setPushing(true);
-        await gitPush(projectPath, selectedRemote, gitStatus.branch);
-        showToast("success", "推送成功", `已推送到 ${selectedRemote}/${gitStatus.branch}`);
+        try {
+          await gitPush(projectPath, selectedRemote, gitStatus.branch);
+          showToast("success", "推送成功", `已推送到 ${selectedRemote}/${gitStatus.branch}`);
+        } catch (error) {
+          console.error("Failed to push:", error);
+          showToast("error", "推送失败", String(error));
+        }
       }
 
       onSuccess?.();
       onClose();
-    } catch (error) {
-      console.error("Failed to commit:", error);
-      showToast("error", "操作失败", String(error));
     } finally {
       setCommitting(false);
       setPushing(false);
@@ -136,8 +188,15 @@ export function GitCommitModal({ projectPath, onClose, onSuccess }: GitCommitMod
     }
   }
 
-  const allFiles = gitStatus ? [...gitStatus.unstaged, ...gitStatus.untracked] : [];
-  const hasChanges = allFiles.length > 0 || (gitStatus?.staged.length ?? 0) > 0;
+  const hasChanges = allFiles.length > 0;
+
+  function getFileTypeLabel(type: FileItem["type"]) {
+    switch (type) {
+      case "staged": return { text: "已暂存", color: "text-green-600 bg-green-50" };
+      case "unstaged": return { text: "已修改", color: "text-orange-600 bg-orange-50" };
+      case "untracked": return { text: "新文件", color: "text-blue-600 bg-blue-50" };
+    }
+  }
 
   return (
     <div className="modal-overlay animate-fade-in">
@@ -204,43 +263,34 @@ export function GitCommitModal({ projectPath, onClose, onSuccess }: GitCommitMod
                 </div>
 
                 <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
-                  {/* Staged files */}
-                  {gitStatus?.staged.map((file) => (
-                    <div
-                      key={`staged-${file}`}
-                      className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                    >
-                      <CheckSquare size={16} className="text-green-600" />
-                      <Plus size={14} className="text-green-600" />
-                      <span className="text-sm text-gray-700 font-mono truncate flex-1">{file}</span>
-                      <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded">已暂存</span>
-                    </div>
-                  ))}
-
-                  {/* Unstaged and untracked files */}
-                  {allFiles.map((file) => (
-                    <div
-                      key={file}
-                      className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-0 cursor-pointer"
-                      onClick={() => toggleFile(file)}
-                    >
-                      {selectedFiles.has(file) ? (
-                        <CheckSquare size={16} className="text-blue-600" />
-                      ) : (
-                        <Square size={16} className="text-gray-400" />
-                      )}
-                      {gitStatus?.untracked.includes(file) ? (
-                        <Plus size={14} className="text-green-600" />
-                      ) : (
-                        <Minus size={14} className="text-orange-500" />
-                      )}
-                      <span className="text-sm text-gray-700 font-mono truncate flex-1">{file}</span>
-                    </div>
-                  ))}
+                  {/* 统一显示所有文件 */}
+                  {allFiles.map((file) => {
+                    const label = getFileTypeLabel(file.type);
+                    return (
+                      <div
+                        key={file.path}
+                        className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-0 cursor-pointer"
+                        onClick={() => toggleFile(file.path)}
+                      >
+                        {selectedFiles.has(file.path) ? (
+                          <CheckSquare size={16} className="text-blue-600" />
+                        ) : (
+                          <Square size={16} className="text-gray-400" />
+                        )}
+                        {file.type === "untracked" ? (
+                          <Plus size={14} className="text-green-600" />
+                        ) : (
+                          <Minus size={14} className="text-orange-500" />
+                        )}
+                        <span className="text-sm text-gray-700 font-mono truncate flex-1">{file.path}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded ${label.color}`}>{label.text}</span>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <p className="text-xs text-gray-500 mt-2">
-                  已选择 {selectedFiles.size + (gitStatus?.staged.length ?? 0)} 个文件
+                  已选择 {selectedFiles.size} 个文件
                 </p>
               </div>
 
