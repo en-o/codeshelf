@@ -4,6 +4,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
+import { AnimatedLogo } from "@/components/ui/AnimatedLogo";
 
 interface SidebarProps {
   currentPage: string;
@@ -24,7 +25,7 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
       className={`re-nav ${sidebarCollapsed ? "collapsed" : ""}`}
     >
       <div className="re-logo select-none">
-        <img src="/favicon.svg" alt="logo" width={30} height={30} /> CodeShelf
+        <AnimatedLogo size={30} /> CodeShelf
       </div>
 
       <nav className="re-menu">
