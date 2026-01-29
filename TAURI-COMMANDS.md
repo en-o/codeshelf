@@ -769,3 +769,73 @@ Tauri 命令开发的关键点：
 6. **封装**: 将命令调用封装在服务层
 
 遵循这些原则，可以构建类型安全、易维护的 Tauri 应用！
+
+## 第七部分：图标管理
+
+### 图标目录结构
+
+```
+src-tauri/icons/
+├── 32x32.png          # 基础小图标
+├── 128x128.png        # 标准图标
+├── 128x128@2x.png     # 高清图标 (Retina)
+├── icon.png           # 主图标源文件 (256x256, 透明背景)
+├── tray-icon.png      # 托盘图标 (白底不透明)
+└── app-icon-circle.ico # 安装程序图标 (圆形蓝底)
+```
+
+### 图标用途说明
+
+| 文件 | 尺寸 | 用途 | 引用位置 |
+|-----|------|------|---------|
+| `32x32.png` | 32x32 | 小尺寸图标 | tauri.conf.json |
+| `128x128.png` | 128x128 | 标准图标 | tauri.conf.json |
+| `128x128@2x.png` | 256x256 | 高清显示屏 | tauri.conf.json |
+| `icon.png` | 256x256 | 主图标源文件 | tauri.conf.json |
+| `tray-icon.png` | 32x32 | 系统托盘图标 | lib.rs |
+| `app-icon-circle.ico` | 多尺寸 | Windows 安装程序 | tauri.conf.json |
+
+### 配置引用
+
+**tauri.conf.json:**
+```json
+{
+  "bundle": {
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/app-icon-circle.ico",
+      "icons/icon.png"
+    ]
+  }
+}
+```
+
+**lib.rs (托盘图标):**
+```rust
+let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+    .expect("Failed to load tray icon");
+```
+
+### 图标生成
+
+如需重新生成托盘图标和安装图标，运行脚本：
+
+**Windows:**
+```bash
+scripts\generate-icons.bat
+```
+
+**Linux/WSL:**
+```bash
+bash scripts/generate-icons.sh
+```
+
+**前提条件:** 安装 ImageMagick
+- Windows: `winget install ImageMagick.ImageMagick`
+- Linux: `sudo apt-get install imagemagick`
+
+**生成的图标:**
+- `tray-icon.png` - 基于 32x32.png，白色背景不透明
+- `app-icon-circle.ico` - 基于 icon.png，蓝色圆形背景 (#3B82F6)
