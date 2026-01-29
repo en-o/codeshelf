@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { ProjectCard, ScanResultDialog, ProjectDetailPanel, AddProjectDialog, AddCategoryDialog, CategorySelector, LabelSelector } from "@/components/project";
 import { FloatingCategoryBall, showToast } from "@/components/ui";
-import { Minus, X, MoreVertical, Plus, CheckSquare, Square, Trash2, Tag, Bookmark } from "lucide-react";
+import { Minus, X, MoreVertical, Plus, CheckSquare, Square, Trash2, Tag, Bookmark, Maximize2, Minimize2 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import type { Project, GitRepo, GitStatus } from "@/types";
 import { getProjects, addProject, removeProject, updateProject } from "@/services/db";
@@ -19,6 +19,7 @@ export function ShelfPage() {
     setSearchQuery,
     scanDepth,
     categories: storedCategories,
+    labels: storedLabels,
     incrementStatsVersion,
   } = useAppStore();
   const [loading, setLoading] = useState(true);
@@ -47,9 +48,38 @@ export function ShelfPage() {
   const [batchLabels, setBatchLabels] = useState<string[]>([]);
   const [batchLabelMode, setBatchLabelMode] = useState<"replace" | "append">("append");
 
+  // 全屏状态
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // 标签筛选状态
+  const [selectedLabelFilters, setSelectedLabelFilters] = useState<string[]>([]);
+
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // 检查窗口最大化状态
+  useEffect(() => {
+    checkMaximized();
+    // 监听窗口 resize 事件来更新最大化状态
+    const handleResize = () => {
+      checkMaximized();
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  async function checkMaximized() {
+    const appWindow = getCurrentWindow();
+    const maximized = await appWindow.isMaximized();
+    setIsMaximized(maximized);
+  }
+
+  async function handleToggleMaximize() {
+    const appWindow = getCurrentWindow();
+    await appWindow.toggleMaximize();
+    checkMaximized();
+  }
 
   // 当启用 onlyModified 筛选时，加载所有项目的 git 状态
   useEffect(() => {
@@ -91,6 +121,12 @@ export function ShelfPage() {
   // Extract unique categories (tags) from projects and stored categories
   const categories = Array.from(new Set([...storedCategories, ...projects.flatMap(p => p.tags)]));
   const activeCat = selectedTags.length === 0 ? "全部" : selectedTags[0];
+
+  // 收集所有可用的标签（从 store 和项目中）
+  const allLabels = Array.from(new Set([
+    ...storedLabels,
+    ...projects.flatMap(p => p.labels || [])
+  ]));
 
   async function loadProjects() {
     try {
@@ -336,6 +372,14 @@ export function ShelfPage() {
       if (status.isClean) return false;
     }
 
+    // 标签筛选：项目需要包含任一选中的标签（OR 逻辑）
+    if (selectedLabelFilters.length > 0) {
+      const projectLabels = p.labels || [];
+      if (!selectedLabelFilters.some(label => projectLabels.includes(label))) {
+        return false;
+      }
+    }
+
     return true;
   });
 
@@ -381,6 +425,9 @@ export function ShelfPage() {
             onlyModified={onlyModified}
             onStarredChange={setOnlyStarred}
             onModifiedChange={setOnlyModified}
+            availableLabels={allLabels}
+            selectedLabels={selectedLabelFilters}
+            onLabelsChange={setSelectedLabelFilters}
           />
 
           {/* Batch Mode Toggle */}
@@ -423,6 +470,13 @@ export function ShelfPage() {
 
           {/* Integrated Window Controls */}
           <div className="flex items-center ml-2 border-l border-gray-200 pl-3 gap-1 h-6">
+            <button
+              onClick={handleToggleMaximize}
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 rounded-md transition-colors text-gray-400 hover:text-gray-600"
+              title={isMaximized ? "还原" : "最大化"}
+            >
+              {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
             <button
               onClick={() => getCurrentWindow()?.minimize()}
               className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 rounded-md transition-colors text-gray-400 hover:text-gray-600"
