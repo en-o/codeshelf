@@ -9,6 +9,7 @@ import {
   Clock,
   FolderOpen,
   RefreshCw,
+  ChevronRight,
 } from "lucide-react";
 import { CommitHeatmap } from "@/components/ui";
 import { useAppStore } from "@/stores/appStore";
@@ -23,7 +24,7 @@ import type { DashboardStats, DailyActivity } from "@/types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function DashboardPage() {
-  const { projects, sidebarCollapsed, setSidebarCollapsed } = useAppStore();
+  const { projects, sidebarCollapsed, setSidebarCollapsed, navigateToProject } = useAppStore();
   const [stats, setStats] = useState<DashboardStats>({
     totalProjects: 0,
     todayCommits: 0,
@@ -271,7 +272,9 @@ export function DashboardPage() {
                   {recentActivity.map((activity, index) => (
                     <div
                       key={`${activity.hash}-${index}`}
-                      className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+                      className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer group"
+                      onClick={() => navigateToProject(activity.projectPath)}
+                      title="点击查看项目详情"
                     >
                       {/* Commit dot */}
                       <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-blue-500"></div>
@@ -301,6 +304,11 @@ export function DashboardPage() {
                             {activity.shortHash}
                           </span>
                         </div>
+                      </div>
+
+                      {/* Arrow indicator */}
+                      <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400">
+                        <ChevronRight size={16} />
                       </div>
                     </div>
                   ))}

@@ -1,15 +1,15 @@
-import { ReactNode, useState, useEffect } from "react";
+import { ReactNode, useEffect } from "react";
 import { Sidebar } from "./Sidebar";
 import { useAppStore } from "@/stores/appStore";
 import { getVersion } from "@tauri-apps/api/app";
+import { useState } from "react";
 
 interface MainLayoutProps {
   children: (currentPage: string) => ReactNode;
 }
 
 export function MainLayout({ children }: MainLayoutProps) {
-  const [currentPage, setCurrentPage] = useState("shelf");
-  const { theme } = useAppStore();
+  const { theme, sidebarCollapsed, currentPage, setCurrentPage } = useAppStore();
   const [appVersion, setAppVersion] = useState<string>("...");
 
   useEffect(() => {
@@ -24,8 +24,6 @@ export function MainLayout({ children }: MainLayoutProps) {
       root.classList.remove("dark");
     }
   }, [theme]);
-
-  const { sidebarCollapsed } = useAppStore();
 
   // Use the 1:1 classes from index.css
   return (

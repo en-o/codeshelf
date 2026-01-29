@@ -25,6 +25,8 @@ export interface TerminalConfig {
   };
 }
 
+export type PageType = "shelf" | "dashboard" | "settings";
+
 interface AppState {
   // Projects
   projects: Project[];
@@ -35,6 +37,11 @@ interface AppState {
 
   // Stats - mark project as dirty for incremental refresh
   markProjectDirty: (projectPath: string) => void;
+
+  // Navigation
+  currentPage: PageType;
+  setCurrentPage: (page: PageType) => void;
+  navigateToProject: (projectPath: string) => void;
 
   // UI State
   viewMode: ViewMode;
@@ -104,6 +111,17 @@ export const useAppStore = create<AppState>()(
         // Fire and forget - don't need to await
         markDirty(projectPath).catch(console.error);
       },
+
+      // Navigation
+      currentPage: "shelf",
+      setCurrentPage: (currentPage) => set({ currentPage }),
+      navigateToProject: (projectPath) => set((state) => {
+        const project = state.projects.find((p) => p.path === projectPath);
+        if (project) {
+          return { currentPage: "shelf" as PageType, selectedProjectId: project.id };
+        }
+        return { currentPage: "shelf" as PageType };
+      }),
 
       // UI State
       viewMode: "grid",

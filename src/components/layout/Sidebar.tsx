@@ -4,15 +4,15 @@ import {
   LayoutDashboard,
   Settings,
 } from "lucide-react";
-import { useAppStore } from "@/stores/appStore";
+import { useAppStore, type PageType } from "@/stores/appStore";
 import { AnimatedLogo } from "@/components/ui/AnimatedLogo";
 
 interface SidebarProps {
-  currentPage: string;
-  onPageChange: (page: string) => void;
+  currentPage: PageType;
+  onPageChange: (page: PageType) => void;
 }
 
-const navItems = [
+const navItems: { id: PageType; label: string; icon: typeof BookOpen }[] = [
   { id: "shelf", label: "项目书架", icon: BookOpen },
   { id: "dashboard", label: "数据统计", icon: LayoutDashboard },
   { id: "settings", label: "设置", icon: Settings },
