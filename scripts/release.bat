@@ -103,18 +103,33 @@ if errorlevel 1 (
 )
 echo [SUCCESS] src-tauri/Cargo.toml -^> %VERSION%
 
+:: 4. 更新 src-tauri/Cargo.lock
+echo [INFO] 更新 src-tauri/Cargo.lock...
+if exist "src-tauri\Cargo.lock" (
+    pushd src-tauri
+    cargo update -p codeshelf --quiet
+    popd
+    if errorlevel 1 (
+        echo [ERROR] 更新 src-tauri/Cargo.lock 失败
+        exit /b 1
+    )
+    echo [SUCCESS] src-tauri/Cargo.lock -^> %VERSION%
+) else (
+    echo [WARN] 找不到 src-tauri/Cargo.lock，跳过
+)
+
 echo.
 echo [INFO] 版本号更新完成，开始 Git 操作...
 
-:: 4. Git add
+:: 5. Git add
 echo [INFO] 暂存更改...
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 if errorlevel 1 (
     echo [ERROR] git add 失败
     exit /b 1
 )
 
-:: 5. Git commit
+:: 6. Git commit
 echo [INFO] 提交更改...
 git commit -m "chore: release v%VERSION%"
 if errorlevel 1 (
@@ -123,7 +138,7 @@ if errorlevel 1 (
 )
 echo [SUCCESS] 提交完成
 
-:: 6. 创建 release 分支
+:: 7. 创建 release 分支
 echo [INFO] 创建分支 %BRANCH_NAME%...
 git checkout -b "%BRANCH_NAME%"
 if errorlevel 1 (
@@ -132,7 +147,7 @@ if errorlevel 1 (
 )
 echo [SUCCESS] 分支创建完成
 
-:: 7. 推送到远程
+:: 8. 推送到远程
 echo [INFO] 推送到远程 origin/%BRANCH_NAME%...
 git push origin "%BRANCH_NAME%"
 if errorlevel 1 (
@@ -141,7 +156,7 @@ if errorlevel 1 (
 )
 echo [SUCCESS] 推送完成
 
-:: 8. 切回 main 分支
+:: 9. 切回 main 分支
 echo [INFO] 切回 main 分支...
 git checkout main
 

@@ -115,29 +115,40 @@ else
     error "找不到 src-tauri/Cargo.toml"
 fi
 
+# 4. 更新 src-tauri/Cargo.lock
+info "更新 src-tauri/Cargo.lock..."
+if [ -f "src-tauri/Cargo.lock" ]; then
+    cd src-tauri
+    cargo update -p codeshelf --quiet
+    cd ..
+    success "src-tauri/Cargo.lock -> $VERSION"
+else
+    warn "找不到 src-tauri/Cargo.lock，跳过"
+fi
+
 echo ""
 info "版本号更新完成，开始 Git 操作..."
 
-# 4. Git add
+# 5. Git add
 info "暂存更改..."
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 
-# 5. Git commit
+# 6. Git commit
 info "提交更改..."
 git commit -m "chore: release v$VERSION"
 success "提交完成"
 
-# 6. 创建 release 分支
+# 7. 创建 release 分支
 info "创建分支 $BRANCH_NAME..."
 git checkout -b "$BRANCH_NAME"
 success "分支创建完成"
 
-# 7. 推送到远程
+# 8. 推送到远程
 info "推送到远程 origin/$BRANCH_NAME..."
 git push origin "$BRANCH_NAME"
 success "推送完成"
 
-# 8. 切回 main 分支
+# 9. 切回 main 分支
 info "切回 main 分支..."
 git checkout main
 
