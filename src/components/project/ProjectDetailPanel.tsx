@@ -265,18 +265,35 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
             </div>
 
             {/* 项目路径 */}
-            <p
-              className="project-path cursor-pointer hover:text-blue-600 transition-colors"
-              title="点击复制路径"
-              onClick={() => {
-                navigator.clipboard.writeText(localProject.path);
-                showToast("success", "已复制", "路径已复制到剪贴板");
-              }}
-            >
-              <FolderOpen size={12} className="text-gray-400" />
-              {localProject.path}
-              <Copy size={11} className="text-gray-400 ml-1" />
-            </p>
+            <div className="flex items-center gap-xs">
+              <p
+                className="project-path cursor-pointer hover:text-blue-600 transition-colors"
+                title="点击复制路径"
+                onClick={() => {
+                  navigator.clipboard.writeText(localProject.path);
+                  showToast("success", "已复制", "路径已复制到剪贴板");
+                }}
+              >
+                <FolderOpen size={12} className="text-gray-400" />
+                {localProject.path}
+                <Copy size={11} className="text-gray-400 ml-1" />
+              </p>
+              {/^[A-Za-z]:[\\/]/.test(localProject.path) && (
+                <button
+                  className="text-xs text-gray-400 hover:text-blue-600 transition-colors px-1.5 py-0.5 rounded hover:bg-blue-50 whitespace-nowrap"
+                  title="复制 WSL 路径"
+                  onClick={() => {
+                    const wslPath = localProject.path
+                      .replace(/^([A-Za-z]):/, (_m, drive: string) => `/mnt/${drive.toLowerCase()}`)
+                      .replace(/\\/g, "/");
+                    navigator.clipboard.writeText(wslPath);
+                    showToast("success", "已复制", `WSL 路径: ${wslPath}`);
+                  }}
+                >
+                  WSL
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
