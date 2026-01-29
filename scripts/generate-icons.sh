@@ -10,20 +10,20 @@ cd "$ICONS_DIR" || exit 1
 
 echo "正在从 SVG 生成图标..."
 
-# 主图标 (256x256)
-convert -background none icon.svg -resize 256x256 -depth 8 icon.png
+# 主图标 (256x256) - 强制 RGBA 格式
+convert -background none icon.svg -resize 256x256 -depth 8 -define png:color-type=6 PNG32:icon.png
 echo "done: icon.png (256x256)"
 
-# 高清图标 (256x256)
-convert -background none icon.svg -resize 256x256 -depth 8 128x128@2x.png
+# 高清图标 (256x256) - 强制 RGBA 格式
+convert -background none icon.svg -resize 256x256 -depth 8 -define png:color-type=6 PNG32:128x128@2x.png
 echo "done: 128x128@2x.png (256x256 Retina)"
 
-# 标准图标 (128x128)
-convert -background none icon.svg -resize 128x128 -depth 8 128x128.png
+# 标准图标 (128x128) - 强制 RGBA 格式
+convert -background none icon.svg -resize 128x128 -depth 8 -define png:color-type=6 PNG32:128x128.png
 echo "done: 128x128.png"
 
-# 小图标 (32x32) - 使用简化版 SVG
-convert -background none icon-small.svg -resize 32x32 -depth 8 32x32.png
+# 小图标 (32x32) - 强制 RGBA 格式
+convert -background none icon-small.svg -resize 32x32 -depth 8 -define png:color-type=6 PNG32:32x32.png
 echo "done: 32x32.png"
 
 # 托盘图标 (32x32, 深色背景不透明)
