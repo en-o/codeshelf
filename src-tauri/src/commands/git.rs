@@ -127,8 +127,8 @@ pub async fn get_git_status(path: String) -> Result<GitStatus, String> {
     let branch = run_git_command(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
         .unwrap_or_else(|_| "unknown".to_string());
 
-    // Get status
-    let status_output = run_git_command(&path, &["status", "--porcelain"])?;
+    // Get status with -uall to show all untracked files recursively
+    let status_output = run_git_command(&path, &["status", "--porcelain", "-uall"])?;
 
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();

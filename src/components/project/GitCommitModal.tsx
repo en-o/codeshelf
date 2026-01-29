@@ -296,7 +296,7 @@ export function GitCommitModal({ projectPath, onClose, onSuccess }: GitCommitMod
           {hasChanges && (
             <button
               onClick={handleCommit}
-              disabled={committing || pushing || !message.trim()}
+              disabled={committing || pushing}
               className="modal-btn modal-btn-primary"
             >
               {committing ? (
