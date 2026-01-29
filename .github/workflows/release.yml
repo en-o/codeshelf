@@ -22,12 +22,16 @@ jobs:
         include:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
+            config: 'src-tauri/tauri.release.conf.json'
           - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
+            config: 'src-tauri/tauri.release.conf.json'
           - platform: 'ubuntu-22.04'
             args: ''
+            config: 'src-tauri/tauri.release.conf.json'
           - platform: 'windows-latest'
             args: ''
+            config: 'src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows.conf.json'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -65,7 +69,7 @@ jobs:
           releaseDraft: false
           prerelease: false
           updaterJsonKeepUniversal: true
-          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+          args: ${{ matrix.args }} --config ${{ matrix.config }}
 
       # Windows 便携版（绿色版）
       - name: Create portable version (Windows)

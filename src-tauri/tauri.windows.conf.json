@@ -1,21 +1,17 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
-    "createUpdaterArtifacts": false,
-    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "installerIcon": "icons/app-icon-circle.ico",
+        "headerImage": null,
+        "sidebarImage": null,
         "installMode": "currentUser",
         "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false,
         "installerHooks": "nsis-hooks.nsi"
       }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "active": false
     }
   }
 }
