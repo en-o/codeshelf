@@ -31,8 +31,8 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
-            // 加载托盘图标
-            let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))
+            // 加载托盘图标（不透明版本）
+            let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
                 .expect("Failed to load tray icon");
 
             // 创建系统托盘
