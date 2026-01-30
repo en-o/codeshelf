@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus, Trash2, Check, Copy } from "lucide-react";
+import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus, Trash2, Check, Copy, Minus, Maximize2, Minimize2 } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
 import { SyncRemoteModal } from "./SyncRemoteModal";
@@ -13,6 +13,7 @@ import { getGitStatus, getCommitHistory, getRemotes, gitPull, gitPush, removeRem
 import { openInEditor, openInExplorer, openInTerminal, updateProject } from "@/services/db";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "@/stores/appStore";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface ProjectDetailPanelProps {
   project: Project;
@@ -40,6 +41,46 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   // 用于显示的本地项目数据（编辑后立即更新）
   const [localProject, setLocalProject] = useState<Project>(project);
   const { editors, terminalConfig, markProjectDirty } = useAppStore();
+
+  // 窗口最大化状态
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // 检查窗口最大化状态
+  useEffect(() => {
+    checkMaximized();
+    const handleResize = () => checkMaximized();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  async function checkMaximized() {
+    try {
+      const appWindow = getCurrentWindow();
+      const maximized = await appWindow.isMaximized();
+      setIsMaximized(maximized);
+    } catch (error) {
+      console.error("Failed to check maximized state:", error);
+    }
+  }
+
+  async function handleToggleMaximize() {
+    try {
+      const appWindow = getCurrentWindow();
+      await appWindow.toggleMaximize();
+      checkMaximized();
+    } catch (error) {
+      console.error("Failed to toggle maximize:", error);
+    }
+  }
+
+  async function handleMinimize() {
+    try {
+      const appWindow = getCurrentWindow();
+      await appWindow.minimize();
+    } catch (error) {
+      console.error("Failed to minimize:", error);
+    }
+  }
 
   // 当外部 project prop 改变时同步本地状态
   useEffect(() => {
@@ -204,7 +245,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   return (
     <div className="project-detail-panel">
       {/* Header - 完全按照 example-projectPanel.html */}
-      <header className="project-detail-header">
+      <header className="project-detail-header" data-tauri-drag-region>
         <div className="flex items-center gap-md">
           {/* 项目图标 */}
           <div className="project-icon">
@@ -335,9 +376,34 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           <button
             onClick={onClose}
             className="icon-btn"
+            title="关闭面板"
           >
             <X size={16} />
           </button>
+          {/* 窗口控制按钮 */}
+          <div className="flex items-center ml-1 border-l border-gray-200 pl-2 gap-1">
+            <button
+              onClick={handleToggleMaximize}
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 rounded-md transition-colors text-gray-400 hover:text-gray-600"
+              title={isMaximized ? "还原" : "最大化"}
+            >
+              {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+            <button
+              onClick={handleMinimize}
+              className="w-7 h-7 flex items-center justify-center hover:bg-gray-100 rounded-md transition-colors text-gray-400 hover:text-gray-600"
+              title="最小化"
+            >
+              <Minus size={14} />
+            </button>
+            <button
+              onClick={() => getCurrentWindow()?.close()}
+              className="w-7 h-7 flex items-center justify-center hover:bg-red-500 hover:text-white rounded-md transition-colors text-gray-400"
+              title="关闭窗口"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       </header>
 
