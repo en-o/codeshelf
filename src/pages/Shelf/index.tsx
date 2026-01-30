@@ -65,7 +65,10 @@ export function ShelfPage() {
     if (selectedProjectId) {
       const project = projects.find((p) => p.id === selectedProjectId);
       if (project) {
-        setSelectedProject(project);
+        // 更新 lastOpened 时间
+        const updatedProject = { ...project, lastOpened: new Date().toISOString() };
+        setProjects(projects.map(p => p.id === project.id ? updatedProject : p));
+        setSelectedProject(updatedProject);
       }
       setSelectedProjectId(null);
     }
@@ -233,6 +236,14 @@ export function ShelfPage() {
 
   function handleProjectUpdate(updated: Project) {
     setProjects(projects.map((p) => (p.id === updated.id ? updated : p)));
+  }
+
+  // 打开项目详情时更新 lastOpened
+  function handleShowProjectDetail(project: Project) {
+    // 更新 lastOpened 时间
+    const updatedProject = { ...project, lastOpened: new Date().toISOString() };
+    setProjects(projects.map(p => p.id === project.id ? updatedProject : p));
+    setSelectedProject(updatedProject);
   }
 
   function handleProjectDelete(projectId: string) {
@@ -630,7 +641,7 @@ export function ShelfPage() {
                 <ProjectCard
                   project={project}
                   onUpdate={handleProjectUpdate}
-                  onShowDetail={batchMode ? () => toggleSelectProject(project.id) : setSelectedProject}
+                  onShowDetail={batchMode ? () => toggleSelectProject(project.id) : handleShowProjectDetail}
                   onDelete={handleProjectDelete}
                 />
               </div>

@@ -170,9 +170,9 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Header with Title and Integrated Window Controls */}
-      <header className="re-header sticky top-0 z-20" data-tauri-drag-region>
+      <header className="re-header flex-shrink-0" data-tauri-drag-region>
         <span
           className="toggle"
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -216,16 +216,17 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <div className="p-5" style={{ marginTop: "40px" }}>
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mb-4" />
-            <p>分析数据中...</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-8">
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mb-4" />
+          <p>分析数据中...</p>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col min-h-0 pt-[13px]">
+          {/* 固定区域：统计卡片 + 编码足迹 */}
+          <div className="flex-shrink-0 px-5 pt-1 pb-2">
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
               <StatCard
                 icon={FolderGit2}
                 label="总项目数"
@@ -252,77 +253,84 @@ export function DashboardPage() {
               />
             </div>
 
-            {/* Heatmap */}
-            <div className="re-card">
-              <h2 className="text-[17px] font-semibold mb-6">编码足迹</h2>
+            {/* Heatmap - 编码足迹 */}
+            <div className="re-card py-3">
+              <h2 className="text-[15px] font-semibold mb-3">编码足迹</h2>
               {heatmapData.length > 0 ? (
                 <CommitHeatmap data={heatmapData} />
               ) : (
-                <div className="flex flex-col items-center justify-center h-48 text-gray-400">
-                  <p>暂无提交记录</p>
-                </div>
-              )}
-            </div>
-
-            {/* Recent Activity */}
-            <div className="re-card">
-              <h2 className="text-[17px] font-semibold mb-6">最近活动</h2>
-              {recentActivity.length > 0 ? (
-                <div className="space-y-3">
-                  {recentActivity.map((activity, index) => (
-                    <div
-                      key={`${activity.hash}-${index}`}
-                      className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer group"
-                      onClick={() => navigateToProject(activity.projectPath)}
-                      title="点击查看项目详情"
-                    >
-                      {/* Commit dot */}
-                      <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-blue-500"></div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        {/* Commit message */}
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {activity.message}
-                        </p>
-
-                        {/* Meta info */}
-                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <FolderOpen size={12} />
-                            <span className="truncate max-w-[120px]">{activity.projectName}</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <User size={12} />
-                            <span>{activity.author}</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock size={12} />
-                            <span>{formatRelativeTime(activity.date)}</span>
-                          </span>
-                          <span className="font-mono text-gray-400">
-                            {activity.shortHash}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Arrow indicator */}
-                      <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400">
-                        <ChevronRight size={16} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-32 text-gray-400">
-                  <GitCommit size={32} className="mb-2 opacity-50" />
+                <div className="flex flex-col items-center justify-center h-24 text-gray-400">
                   <p>暂无提交记录</p>
                 </div>
               )}
             </div>
           </div>
-        )}
-      </div>
+
+          {/* 滚动区域：最近活动 */}
+          <div className="flex-1 min-h-0 px-5 pb-3">
+            <div className="re-card h-full flex flex-col">
+              <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <h2 className="text-[15px] font-semibold">最近活动</h2>
+                <span className="text-xs text-gray-400">共 {recentActivity.length} 条最近活动</span>
+              </div>
+              {recentActivity.length > 0 ? (
+                <div className="flex-1 overflow-y-auto min-h-0 -mx-3 px-3">
+                  <div className="space-y-1">
+                    {recentActivity.map((activity, index) => (
+                      <div
+                        key={`${activity.hash}-${index}`}
+                        className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer group"
+                        onClick={() => navigateToProject(activity.projectPath)}
+                        title="点击查看项目详情"
+                      >
+                        {/* Commit dot */}
+                        <div className="flex-shrink-0 w-2 h-2 mt-1.5 rounded-full bg-blue-500"></div>
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          {/* Commit message */}
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {activity.message}
+                          </p>
+
+                          {/* Meta info */}
+                          <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                            <span className="flex items-center gap-1">
+                              <FolderOpen size={11} />
+                              <span className="truncate max-w-[100px]">{activity.projectName}</span>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <User size={11} />
+                              <span>{activity.author}</span>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock size={11} />
+                              <span>{formatRelativeTime(activity.date)}</span>
+                            </span>
+                            <span className="font-mono text-gray-400 text-[11px]">
+                              {activity.shortHash}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Arrow indicator */}
+                        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400">
+                          <ChevronRight size={14} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                  <GitCommit size={28} className="mb-2 opacity-50" />
+                  <p className="text-sm">暂无提交记录</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -343,14 +351,14 @@ function StatCard({ icon: Icon, label, value, color }: StatCardProps) {
   };
 
   return (
-    <div className="re-card p-6">
-      <div className="flex items-center gap-4">
-        <div className={`p-3.5 rounded-xl ${colors[color]}`}>
-          <Icon className="w-5 h-5" />
+    <div className="re-card p-4">
+      <div className="flex items-center gap-3">
+        <div className={`p-2.5 rounded-lg ${colors[color]}`}>
+          <Icon className="w-4 h-4" />
         </div>
         <div>
-          <p className="text-gray-500 text-sm font-medium mb-1">{label}</p>
-          <p className="text-2xl font-semibold text-gray-900">{value}</p>
+          <p className="text-gray-500 text-xs font-medium mb-0.5">{label}</p>
+          <p className="text-xl font-semibold text-gray-900">{value}</p>
         </div>
       </div>
     </div>

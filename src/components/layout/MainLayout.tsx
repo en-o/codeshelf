@@ -27,11 +27,11 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   // Use the 1:1 classes from index.css
   return (
-    <div className="flex w-full min-h-screen bg-gray-50 text-gray-900">
+    <div className="flex w-full h-screen overflow-hidden bg-gray-50 text-gray-900">
       <Sidebar currentPage={currentPage} onPageChange={setCurrentPage} />
 
       <div className={`re-main-wrap ${sidebarCollapsed ? 'expanded' : ''}`}>
-        <main className="flex-1">
+        <main className="flex-1 min-h-0 overflow-auto">
           {children(currentPage)}
         </main>
 

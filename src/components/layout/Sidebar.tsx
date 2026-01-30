@@ -1,12 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   BookOpen,
   LayoutDashboard,
   Settings,
+  Clock,
+  FolderGit2,
 } from "lucide-react";
 import { useAppStore, type PageType } from "@/stores/appStore";
 import { AnimatedLogo } from "@/components/ui/AnimatedLogo";
 import { NotificationPanel } from "@/components/ui/NotificationPanel";
+import { getDashboardStats } from "@/services/stats";
+import type { Project } from "@/types";
 
 interface SidebarProps {
   currentPage: PageType;
@@ -20,8 +24,75 @@ const navItems: { id: PageType; label: string; icon: typeof BookOpen }[] = [
 ];
 
 export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
-  const { sidebarCollapsed } = useAppStore();
+  const { sidebarCollapsed, projects, setSelectedProjectId, setCurrentPage } = useAppStore();
   const [showLogoPopup, setShowLogoPopup] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
+
+  // 获取最近活跃的项目
+  useEffect(() => {
+    async function loadRecentProjects() {
+      try {
+        // 从统计数据获取最近提交记录
+        const { recentCommits } = await getDashboardStats();
+
+        // 根据提交记录按项目去重，取最近4-5个项目
+        const recentProjectPaths = new Set<string>();
+        const recentFromCommits: Project[] = [];
+
+        for (const commit of recentCommits) {
+          if (recentProjectPaths.has(commit.projectPath)) continue;
+
+          const project = projects.find(p => p.path === commit.projectPath);
+          if (project) {
+            recentProjectPaths.add(commit.projectPath);
+            recentFromCommits.push(project);
+          }
+
+          if (recentFromCommits.length >= 5) break;
+        }
+
+        // 如果从提交记录获取的不足5个，用 lastOpened 补充
+        if (recentFromCommits.length < 5) {
+          const remainingCount = 5 - recentFromCommits.length;
+          const projectsByLastOpened = [...projects]
+            .filter(p => p.lastOpened && !recentProjectPaths.has(p.path))
+            .sort((a, b) => {
+              const aDate = new Date(a.lastOpened || 0).getTime();
+              const bDate = new Date(b.lastOpened || 0).getTime();
+              return bDate - aDate;
+            })
+            .slice(0, remainingCount);
+
+          recentFromCommits.push(...projectsByLastOpened);
+        }
+
+        setRecentProjects(recentFromCommits);
+      } catch (error) {
+        console.error("Failed to load recent projects:", error);
+        // 降级：使用 lastOpened 排序
+        const projectsByLastOpened = [...projects]
+          .filter(p => p.lastOpened)
+          .sort((a, b) => {
+            const aDate = new Date(a.lastOpened || 0).getTime();
+            const bDate = new Date(b.lastOpened || 0).getTime();
+            return bDate - aDate;
+          })
+          .slice(0, 5);
+        setRecentProjects(projectsByLastOpened);
+      }
+    }
+
+    if (projects.length > 0) {
+      loadRecentProjects();
+    }
+  }, [projects]);
+
+  // 点击快捷项目，跳转到书架页并打开详情
+  function handleQuickAccess(project: Project) {
+    setSelectedProjectId(project.id);
+    setCurrentPage("shelf");
+    onPageChange("shelf");
+  }
 
   return (
     <aside
@@ -98,6 +169,45 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
           );
         })}
       </nav>
+
+      {/* 快捷访问菜单 */}
+      {!sidebarCollapsed && recentProjects.length > 0 && (
+        <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+            <Clock size={12} />
+            <span>最近活跃</span>
+          </div>
+          <div className="mt-1 space-y-0.5">
+            {recentProjects.map((project) => (
+              <button
+                key={project.id}
+                onClick={() => handleQuickAccess(project)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 rounded-md transition-colors truncate"
+                title={`${project.name}\n${project.path}`}
+              >
+                <FolderGit2 size={14} className="flex-shrink-0 opacity-60" />
+                <span className="truncate">{project.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 折叠模式下的快捷访问 */}
+      {sidebarCollapsed && recentProjects.length > 0 && (
+        <div className="px-1 py-2 border-t border-gray-200 dark:border-gray-700">
+          {recentProjects.slice(0, 3).map((project) => (
+            <button
+              key={project.id}
+              onClick={() => handleQuickAccess(project)}
+              className="w-full flex items-center justify-center p-1.5 text-gray-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 rounded-md transition-colors"
+              title={project.name}
+            >
+              <FolderGit2 size={16} />
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 通知面板 */}
       <div className="mt-auto px-3 py-2 border-t border-gray-200 dark:border-gray-700">

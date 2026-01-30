@@ -225,7 +225,7 @@ fn analyze_project(name: String, path: String) -> ProjectStatsCache {
         let commit_date = date.split_whitespace().next().unwrap_or(&date).to_string();
         *commits_by_date.entry(commit_date).or_insert(0) += 1;
 
-        if recent_commits.len() < 5 {
+        if recent_commits.len() < 10 {
             recent_commits.push(RecentCommit {
                 hash,
                 short_hash,
@@ -280,7 +280,7 @@ fn aggregate_dashboard_data(
         .collect();
 
     all_recent_commits.sort_by(|a, b| b.date.cmp(&a.date));
-    let recent_commits: Vec<RecentCommit> = all_recent_commits.into_iter().take(10).collect();
+    let recent_commits: Vec<RecentCommit> = all_recent_commits.into_iter().take(30).collect();
 
     CachedDashboardData {
         stats: DashboardStats {
