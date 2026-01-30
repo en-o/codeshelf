@@ -2,7 +2,13 @@
 
 代码书架 - 本地项目管理工具
 
-一个基于 Tauri 的桌面应用，用于管理和追踪本地 Git 项目，提供可视化的项目管理、Git 状态监控和提交统计功能。
+随着开发者参与的项目日益增多，本地存储着大量的代码仓库。这些项目分散在不同目录，使用不同的远程托管平台（GitHub、Gitee、GitLab），管理和维护变得愈发困难。开发者常常面临以下困境：
+
+- 找不到某个项目在哪里
+- 忘记哪些项目有未提交或未推送的代码
+- 需要频繁在文件管理器、终端、编辑器之间切换
+- 难以直观了解自己的编码活动和贡献情况
+
 ![project_1.png](docs/images/project_1.png)
 ![project_2.png](docs/images/project_2.png)
 ![project_3.png](docs/images/project_3.png)
