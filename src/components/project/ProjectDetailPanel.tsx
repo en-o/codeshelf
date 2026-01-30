@@ -257,13 +257,13 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
               {/* 项目名称 */}
               <h1 className="font-bold text-gray-900 text-base tracking-tight">{localProject.name}</h1>
 
-              {/* 分类标签区域 - 分类和标签分开显示 */}
+              {/* 分类标签区域 - 分类和标签分开显示，限制显示数量 */}
               <div className="flex items-center gap-md flex-wrap">
-                {/* 分类 */}
+                {/* 分类 - 最多显示2个 */}
                 {localProject.tags.length > 0 && (
                   <div className="flex items-center gap-sm">
                     <span className="text-xs text-gray-400">分类:</span>
-                    {localProject.tags.map((tag) => (
+                    {localProject.tags.slice(0, 2).map((tag) => (
                       <span
                         key={tag}
                         className="category-tag"
@@ -272,6 +272,15 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                         <span>{tag}</span>
                       </span>
                     ))}
+                    {localProject.tags.length > 2 && (
+                      <span
+                        className="category-tag cursor-pointer"
+                        title={localProject.tags.slice(2).join(", ")}
+                        onClick={() => setShowCategoryModal(true)}
+                      >
+                        +{localProject.tags.length - 2}
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -280,11 +289,11 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                   <span className="text-gray-300">|</span>
                 )}
 
-                {/* 技术栈标签 */}
+                {/* 技术栈标签 - 最多显示3个 */}
                 {localProject.labels && localProject.labels.length > 0 && (
                   <div className="flex items-center gap-sm">
                     <span className="text-xs text-gray-400">标签:</span>
-                    {localProject.labels.map((label) => (
+                    {localProject.labels.slice(0, 3).map((label) => (
                       <span
                         key={label}
                         className="label-tag"
@@ -292,6 +301,15 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                         {label}
                       </span>
                     ))}
+                    {localProject.labels.length > 3 && (
+                      <span
+                        className="label-tag cursor-pointer"
+                        title={localProject.labels.slice(3).join(", ")}
+                        onClick={() => setShowCategoryModal(true)}
+                      >
+                        +{localProject.labels.length - 3}
+                      </span>
+                    )}
                   </div>
                 )}
 
