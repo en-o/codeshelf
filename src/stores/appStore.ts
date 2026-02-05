@@ -35,6 +35,10 @@ interface AppState {
   removeProject: (id: string) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
 
+  // Recent Detail Projects (最近打开详情的项目)
+  recentDetailProjectIds: string[];
+  addRecentDetailProject: (projectId: string) => void;
+
   // Stats - mark project as dirty for incremental refresh
   markProjectDirty: (projectPath: string) => void;
 
@@ -111,6 +115,16 @@ export const useAppStore = create<AppState>()(
             p.id === id ? { ...p, ...updates } : p
           ),
         })),
+
+      // Recent Detail Projects (最近打开详情的项目，最多保留9个)
+      recentDetailProjectIds: [],
+      addRecentDetailProject: (projectId) =>
+        set((state) => {
+          // 移除已存在的相同项目（如果有）
+          const filtered = state.recentDetailProjectIds.filter((id) => id !== projectId);
+          // 添加到开头，限制最多9个
+          return { recentDetailProjectIds: [projectId, ...filtered].slice(0, 9) };
+        }),
 
       // Stats - mark project as dirty (calls Rust command)
       markProjectDirty: (projectPath) => {
@@ -236,6 +250,7 @@ export const useAppStore = create<AppState>()(
       name: "codeshelf-storage",
       partialize: (state) => ({
         projects: state.projects,
+        recentDetailProjectIds: state.recentDetailProjectIds,
         viewMode: state.viewMode,
         sidebarCollapsed: state.sidebarCollapsed,
         theme: state.theme,
@@ -254,6 +269,7 @@ export const useAppStore = create<AppState>()(
           ...currentState,
           ...persisted,
           projects: persisted.projects || [],
+          recentDetailProjectIds: persisted.recentDetailProjectIds || [],
           labels: persisted.labels && persisted.labels.length > 0 ? persisted.labels : defaultLabels,
         };
       },

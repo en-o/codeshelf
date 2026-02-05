@@ -665,6 +665,7 @@ export function ShelfPage() {
           project={selectedProject}
           onClose={() => setSelectedProject(null)}
           onUpdate={handleProjectUpdate}
+          onSwitchProject={(p) => setSelectedProject(p)}
         />
       )}
 

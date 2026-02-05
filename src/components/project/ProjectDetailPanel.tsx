@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus, Trash2, Check, Copy, Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, ExternalLink, Files, Mail } from "lucide-react";
+import { X, GitBranch, History, Code, Tag as TagIcon, RefreshCw, CloudUpload, FolderOpen, User, Clock, Edit2, FileText, Database, Loader2, GitCommit, Plus, Trash2, Check, Copy, Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, ExternalLink, Files, Mail, ArrowRightLeft } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { LabelSelector } from "./LabelSelector";
 import { SyncRemoteModal } from "./SyncRemoteModal";
@@ -19,9 +19,10 @@ interface ProjectDetailPanelProps {
   project: Project;
   onClose: () => void;
   onUpdate?: (project: Project) => void;
+  onSwitchProject?: (project: Project) => void;
 }
 
-export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetailPanelProps) {
+export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject }: ProjectDetailPanelProps) {
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -40,7 +41,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
   const [selectedLabels, setSelectedLabels] = useState<string[]>(project.labels || []);
   // 用于显示的本地项目数据（编辑后立即更新）
   const [localProject, setLocalProject] = useState<Project>(project);
-  const { editors, terminalConfig, markProjectDirty } = useAppStore();
+  const { editors, terminalConfig, markProjectDirty, projects, recentDetailProjectIds, addRecentDetailProject } = useAppStore();
 
   // 提交卡片展开状态
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
@@ -48,6 +49,18 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
 
   // 窗口最大化状态
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // 获取最近打开的项目列表（排除当前项目）
+  const recentProjects = recentDetailProjectIds
+    .filter((id) => id !== project.id)
+    .map((id) => projects.find((p) => p.id === id))
+    .filter((p): p is Project => p !== undefined)
+    .slice(0, 8);
+
+  // 记录当前项目到最近打开历史
+  useEffect(() => {
+    addRecentDetailProject(project.id);
+  }, [project.id, addRecentDetailProject]);
 
   // 格式化相对时间
   function formatRelativeTime(dateStr: string): string {
@@ -511,8 +524,10 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
 
       {/* 主体内容 */}
       <div className="flex flex-1 pt-[4.5rem]">
-        {/* Sidebar - 完全按照 example-projectPanel.html */}
+        {/* Sidebar */}
         <aside className="project-detail-sidebar">
+          {/* 可滚动区域 */}
+          <div className="sidebar-scroll-area">
           {/* 分支状态卡片 */}
           <div className="sidebar-section">
             <div className="section-header">
@@ -554,7 +569,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
             </div>
 
             {remotes.length > 0 ? (
-              <div className="space-y-md">
+              <div className="remotes-scroll-area">
                 {[...remotes]
                   .sort((a, b) => {
                     // 当前远程仓库排在第一位
@@ -646,65 +661,69 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                 </button>
               </div>
             )}
+          </div>
+          </div>{/* 可滚动区域结束 */}
 
-            {/* 快捷操作 */}
-            <div className="mt-lg">
-              <div className="quick-actions-title">快捷操作</div>
-              <div className="space-y-xs">
-                <button
-                  onClick={loadReadme}
-                  className="quick-action-btn"
-                >
-                  <FileText size={14} />
-                  <span>查看 README</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const editorPath = editors.length > 0 ? editors[0].path : undefined;
-                    openInEditor(project.path, editorPath);
-                  }}
-                  className="quick-action-btn"
-                >
-                  <Code size={14} />
-                  <span>在编辑器中打开</span>
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      await openInExplorer(project.path);
-                    } catch (error) {
-                      console.error("Failed to open explorer:", error);
-                      showToast("error", "打开文件夹失败", String(error));
-                    }
-                  }}
-                  className="quick-action-btn"
-                >
-                  <FolderOpen size={14} />
-                  <span>打开文件夹</span>
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
-                      const termPath = terminalConfig.paths?.[terminalConfig.type as keyof typeof terminalConfig.paths];
-                      console.log("Opening terminal:", { path: project.path, termType, customPath: terminalConfig.customPath, termPath });
-                      await openInTerminal(project.path, termType, terminalConfig.customPath, termPath);
-                    } catch (error) {
-                      console.error("Failed to open terminal:", error);
-                      showToast("error", "打开终端失败", String(error));
-                    }
-                  }}
-                  className="quick-action-btn"
-                >
-                  <TagIcon size={14} />
-                  <span>打开终端</span>
-                </button>
-              </div>
+          {/* 快捷操作 - 固定在侧边栏底部 */}
+          <div className="sidebar-section-bottom">
+            <div className="quick-actions-title">快捷操作</div>
+            <div className="quick-actions-grid">
+              <button
+                onClick={loadReadme}
+                className="quick-action-btn-compact"
+                title="查看 README"
+              >
+                <FileText size={14} />
+                <span>README</span>
+              </button>
+              <button
+                onClick={() => {
+                  const editorPath = editors.length > 0 ? editors[0].path : undefined;
+                  openInEditor(project.path, editorPath);
+                }}
+                className="quick-action-btn-compact"
+                title="在编辑器中打开"
+              >
+                <Code size={14} />
+                <span>编辑器</span>
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await openInExplorer(project.path);
+                  } catch (error) {
+                    console.error("Failed to open explorer:", error);
+                    showToast("error", "打开文件夹失败", String(error));
+                  }
+                }}
+                className="quick-action-btn-compact"
+                title="打开文件夹"
+              >
+                <FolderOpen size={14} />
+                <span>文件夹</span>
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const termType = terminalConfig.type === "default" ? undefined : terminalConfig.type;
+                    const termPath = terminalConfig.paths?.[terminalConfig.type as keyof typeof terminalConfig.paths];
+                    await openInTerminal(project.path, termType, terminalConfig.customPath, termPath);
+                  } catch (error) {
+                    console.error("Failed to open terminal:", error);
+                    showToast("error", "打开终端失败", String(error));
+                  }
+                }}
+                className="quick-action-btn-compact"
+                title="打开终端"
+              >
+                <TagIcon size={14} />
+                <span>终端</span>
+              </button>
             </div>
           </div>
         </aside>
 
-        {/* Main Content - 完全按照示例 */}
+        {/* Main Content */}
         <main className="project-detail-main">
           {/* 提交历史头部 */}
           <div className="commits-header">
@@ -880,6 +899,29 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
           </div>
         </main>
       </div>
+
+      {/* 快速切换页脚 */}
+      {recentProjects.length > 0 && onSwitchProject && (
+        <footer className="panel-footer">
+          <div className="panel-footer-label">
+            <ArrowRightLeft size={12} />
+            <span>快速切换</span>
+          </div>
+          <div className="panel-footer-projects">
+            {recentProjects.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => onSwitchProject(p)}
+                className="footer-project-btn"
+                title={p.path}
+              >
+                <GitBranch size={12} />
+                <span>{p.name}</span>
+              </button>
+            ))}
+          </div>
+        </footer>
+      )}
 
       {/* Category Modal */}
       {showCategoryModal && (
