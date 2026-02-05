@@ -12,7 +12,8 @@
 /.idea/git_toolbox_prj.xml
 /.claude/settings.local.json
 /node_modules/
-/package-lock.json
+# 不再忽略 package-lock.json，确保 CI 依赖版本一致
+# /package-lock.json
 /dist/
 /.idea/workspace.xml
 
