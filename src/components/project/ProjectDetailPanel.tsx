@@ -446,8 +446,8 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
               <div className="branch-meta">
                 <div className="branch-indicator"></div>
                 <span className="branch-changes">
-                  {gitStatus?.isClean 
-                    ? "0 个修改" 
+                  {gitStatus?.isClean
+                    ? "0 个修改"
                     : `${(gitStatus?.unstaged.length || 0) + (gitStatus?.untracked.length || 0)} 个修改`
                   }
                 </span>
@@ -662,7 +662,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                       <div className={`commit-dot ${index === 0 ? 'commit-dot' : ''}`}></div>
                       {index !== commits.length - 1 && <div className="commit-line"></div>}
                     </div>
-                    
+
                     {/* 提交内容 */}
                     <div className="flex-1 min-w-0 pb-xs">
                       <div className="flex items-start justify-between gap-sm">
@@ -685,7 +685,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate }: ProjectDetail
                             </span>
                             <span className="commit-date">
                               <Clock size={12} />
-                              {new Date(commit.date).toLocaleDateString("zh-CN")}
+                              {new Date(commit.date).toLocaleString("zh-CN")}
                             </span>
                           </div>
                         </div>
