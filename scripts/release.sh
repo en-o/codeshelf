@@ -85,7 +85,16 @@ else
     error "找不到 package.json"
 fi
 
-# 2. 更新 src-tauri/tauri.conf.json
+# 2. 更新 package-lock.json
+info "更新 package-lock.json..."
+if [ -f "package-lock.json" ]; then
+    npm install --package-lock-only --ignore-scripts --silent 2>/dev/null
+    success "package-lock.json -> $VERSION"
+else
+    warn "找不到 package-lock.json，跳过"
+fi
+
+# 3. 更新 src-tauri/tauri.conf.json
 info "更新 src-tauri/tauri.conf.json..."
 if [ -f "src-tauri/tauri.conf.json" ]; then
     node -e "
@@ -99,7 +108,7 @@ else
     error "找不到 src-tauri/tauri.conf.json"
 fi
 
-# 3. 更新 src-tauri/Cargo.toml
+# 4. 更新 src-tauri/Cargo.toml
 info "更新 src-tauri/Cargo.toml..."
 if [ -f "src-tauri/Cargo.toml" ]; then
     # 使用 sed 更新 version（只更新 [package] 下的第一个 version）
@@ -115,7 +124,7 @@ else
     error "找不到 src-tauri/Cargo.toml"
 fi
 
-# 4. 更新 src-tauri/Cargo.lock
+# 5. 更新 src-tauri/Cargo.lock
 info "更新 src-tauri/Cargo.lock..."
 if [ -f "src-tauri/Cargo.lock" ]; then
     cd src-tauri
@@ -129,26 +138,26 @@ fi
 echo ""
 info "版本号更新完成，开始 Git 操作..."
 
-# 5. Git add
+# 6. Git add
 info "暂存更改..."
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 
-# 6. Git commit
+# 7. Git commit
 info "提交更改..."
 git commit -m "chore: release v$VERSION"
 success "提交完成"
 
-# 7. 创建 release 分支
+# 8. 创建 release 分支
 info "创建分支 $BRANCH_NAME..."
 git checkout -b "$BRANCH_NAME"
 success "分支创建完成"
 
-# 8. 推送到远程
+# 9. 推送到远程
 info "推送到远程 origin/$BRANCH_NAME..."
 git push origin "$BRANCH_NAME"
 success "推送完成"
 
-# 9. 切回 main 分支
+# 10. 切回 main 分支
 info "切回 main 分支..."
 git checkout main
 
