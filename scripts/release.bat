@@ -75,7 +75,20 @@ if errorlevel 1 (
 )
 echo [SUCCESS] package.json -^> %VERSION%
 
-:: 2. 更新 src-tauri/tauri.conf.json
+:: 2. 更新 package-lock.json
+echo [INFO] 更新 package-lock.json...
+if exist "package-lock.json" (
+    npm install --package-lock-only --ignore-scripts --silent 2>nul
+    if errorlevel 1 (
+        echo [ERROR] 更新 package-lock.json 失败
+        exit /b 1
+    )
+    echo [SUCCESS] package-lock.json -^> %VERSION%
+) else (
+    echo [WARN] 找不到 package-lock.json，跳过
+)
+
+:: 3. 更新 src-tauri/tauri.conf.json
 echo [INFO] 更新 src-tauri/tauri.conf.json...
 if not exist "src-tauri\tauri.conf.json" (
     echo [ERROR] 找不到 src-tauri/tauri.conf.json
@@ -89,7 +102,7 @@ if errorlevel 1 (
 )
 echo [SUCCESS] src-tauri/tauri.conf.json -^> %VERSION%
 
-:: 3. 更新 src-tauri/Cargo.toml
+:: 4. 更新 src-tauri/Cargo.toml
 echo [INFO] 更新 src-tauri/Cargo.toml...
 if not exist "src-tauri\Cargo.toml" (
     echo [ERROR] 找不到 src-tauri/Cargo.toml
@@ -103,7 +116,7 @@ if errorlevel 1 (
 )
 echo [SUCCESS] src-tauri/Cargo.toml -^> %VERSION%
 
-:: 4. 更新 src-tauri/Cargo.lock
+:: 5. 更新 src-tauri/Cargo.lock
 echo [INFO] 更新 src-tauri/Cargo.lock...
 if exist "src-tauri\Cargo.lock" (
     pushd src-tauri
@@ -121,15 +134,15 @@ if exist "src-tauri\Cargo.lock" (
 echo.
 echo [INFO] 版本号更新完成，开始 Git 操作...
 
-:: 5. Git add
+:: 6. Git add
 echo [INFO] 暂存更改...
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 if errorlevel 1 (
     echo [ERROR] git add 失败
     exit /b 1
 )
 
-:: 6. Git commit
+:: 7. Git commit
 echo [INFO] 提交更改...
 git commit -m "chore: release v%VERSION%"
 if errorlevel 1 (
