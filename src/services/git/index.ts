@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   GitStatus,
   CommitInfo,
+  CommitFileChange,
   BranchInfo,
   RemoteInfo,
   GitRepo,
@@ -21,6 +22,29 @@ export async function getCommitHistory(
   refName?: string
 ): Promise<CommitInfo[]> {
   return invoke("get_commit_history", { path, limit, refName });
+}
+
+export async function getCommitDetail(
+  path: string,
+  commitHash: string
+): Promise<CommitInfo> {
+  return invoke("get_commit_detail", { path, commitHash });
+}
+
+export async function getCommitFiles(
+  path: string,
+  commitHash: string
+): Promise<CommitFileChange[]> {
+  return invoke("get_commit_files", { path, commitHash });
+}
+
+export async function searchCommits(
+  path: string,
+  query: string,
+  searchType?: "author" | "message" | "hash",
+  limit?: number
+): Promise<CommitInfo[]> {
+  return invoke("search_commits", { path, query, searchType, limit });
 }
 
 export async function getBranches(path: string): Promise<BranchInfo[]> {

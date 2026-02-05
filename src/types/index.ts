@@ -39,12 +39,26 @@ export interface GitStatus {
 }
 
 export interface CommitInfo {
-  hash: string;
-  shortHash: string;
-  message: string;
-  author: string;
-  email: string;
-  date: string;
+  hash: string;           // 完整哈希值
+  shortHash: string;      // 短哈希值（通常前7位）
+  message: string;        // 提交标题（第一行）
+  author: string;         // 作者名称
+  email: string;          // 作者邮箱
+  date: string;           // 提交日期（ISO 8601格式）
+
+  // 扩展字段 - 提供更丰富的信息
+  body?: string;          // 完整提交信息（包含多行描述）
+  filesChanged?: number;  // 修改的文件数量
+  insertions?: number;    // 新增的行数
+  deletions?: number;     // 删除的行数
+  refs?: string[];        // 分支/标签引用（如 HEAD -> main, origin/main）
+  parentHashes?: string[]; // 父提交的哈希值（用于merge提交）
+}
+
+export interface CommitFileChange {
+  insertions: number;
+  deletions: number;
+  filename: string;
 }
 
 export interface BranchInfo {
