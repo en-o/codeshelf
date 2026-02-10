@@ -130,8 +130,12 @@ export function ShelfPage() {
       }
     };
 
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+    // 滚动容器是 main 元素，不是 window
+    const scrollContainer = document.querySelector('main.overflow-auto');
+    if (scrollContainer) {
+      scrollContainer.addEventListener("scroll", handleScroll);
+      return () => scrollContainer.removeEventListener("scroll", handleScroll);
+    }
   }, []);
 
   // Extract unique categories (tags) from projects and stored categories
