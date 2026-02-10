@@ -6,6 +6,8 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/app-icon-circle.ico",
+        "headerImage": "icons/installer-header.bmp",
+        "sidebarImage": "icons/installer-sidebar.bmp",
         "installMode": "currentUser",
         "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false,

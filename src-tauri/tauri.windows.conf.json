@@ -4,8 +4,8 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/app-icon-circle.ico",
-        "headerImage": null,
-        "sidebarImage": null,
+        "headerImage": "icons/installer-header.bmp",
+        "sidebarImage": "icons/installer-sidebar.bmp",
         "installMode": "currentUser",
         "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false,
