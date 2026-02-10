@@ -705,9 +705,17 @@ pub async fn sync_to_remote(
     run_git_command(&path, &["fetch", &source_remote, "--prune"])?;
 
     if sync_all_branches {
+        // Get the default branch of source remote (HEAD points to)
+        let default_branch = run_git_command(&path, &["symbolic-ref", &format!("refs/remotes/{}/HEAD", source_remote)])
+            .ok()
+            .and_then(|output| {
+                // Output is like: refs/remotes/origin/main
+                output.trim().split('/').last().map(|s| s.to_string())
+            });
+
         // Get all branches from source remote (excluding HEAD)
         let branches_output = run_git_command(&path, &["branch", "-r"])?;
-        let branches: Vec<String> = branches_output
+        let mut branches: Vec<String> = branches_output
             .lines()
             .filter_map(|line| {
                 let branch = line.trim();
@@ -723,6 +731,19 @@ pub async fn sync_to_remote(
             return Err("No branches found to sync".to_string());
         }
 
+        // Sort branches to push default branch first (important for new repos)
+        if let Some(ref default_br) = default_branch {
+            branches.sort_by(|a, b| {
+                if a == default_br {
+                    std::cmp::Ordering::Less
+                } else if b == default_br {
+                    std::cmp::Ordering::Greater
+                } else {
+                    a.cmp(b)
+                }
+            });
+        }
+
         // Push each branch using remote tracking ref
         // Use: refs/remotes/origin/branch:refs/heads/branch
         let mut results = Vec::new();
@@ -733,8 +754,15 @@ pub async fn sync_to_remote(
                 args.push("--force");
             }
 
+            let is_default = default_branch.as_ref().map_or(false, |d| d == branch);
             match run_git_command(&path, &args) {
-                Ok(_) => results.push(format!("✓ {}", branch)),
+                Ok(_) => {
+                    if is_default {
+                        results.push(format!("✓ {} (默认分支)", branch));
+                    } else {
+                        results.push(format!("✓ {}", branch));
+                    }
+                }
                 Err(e) => results.push(format!("✗ {}: {}", branch, e)),
             }
         }
