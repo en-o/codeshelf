@@ -35,6 +35,16 @@ body {
   background: #94a3b8;
 }
 
+/* 静默滚动 - 隐藏滚动条但保持滚动功能 */
+.silent-scroll {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.silent-scroll::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
 /* ============================================
    书架页面组件样式 (re- 前缀)
    ============================================ */

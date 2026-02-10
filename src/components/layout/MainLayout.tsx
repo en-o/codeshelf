@@ -31,7 +31,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       <Sidebar currentPage={currentPage} onPageChange={setCurrentPage} />
 
       <div className={`re-main-wrap ${sidebarCollapsed ? 'expanded' : ''}`}>
-        <main className="flex-1 min-h-0 overflow-auto">
+        <main className="flex-1 min-h-0 overflow-auto silent-scroll">
           {children(currentPage)}
         </main>
 
