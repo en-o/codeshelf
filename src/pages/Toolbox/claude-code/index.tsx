@@ -558,9 +558,11 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
     }
   }
 
-  // 导出配置档案
-  async function handleExportProfiles() {
-    if (profiles.length === 0) {
+  // 导出配置档案（全部或单个）
+  async function handleExportProfiles(profile?: ConfigProfile) {
+    const profilesToExport = profile ? [profile] : profiles;
+
+    if (profilesToExport.length === 0) {
       alert("没有可导出的配置档案");
       return;
     }
@@ -569,31 +571,28 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
       const exportData = {
         version: 1,
         exportedAt: new Date().toISOString(),
-        profiles: profiles.map(p => ({
+        profiles: profilesToExport.map(p => ({
           name: p.name,
           description: p.description,
           settings: p.settings,
         })),
       };
 
-      const defaultFileName = `claude-profiles-${selectedEnv?.envName?.replace(/[^a-zA-Z0-9]/g, "_") || "export"}.json`;
-      console.log("[DEBUG] Export default filename:", defaultFileName);
+      const defaultFileName = profile
+        ? `claude-profile-${profile.name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, "_")}.json`
+        : `claude-profiles-${selectedEnv?.envName?.replace(/[^a-zA-Z0-9]/g, "_") || "export"}.json`;
 
       const filePath = await save({
-        title: "导出配置档案",
+        title: profile ? `导出配置档案: ${profile.name}` : "导出全部配置档案",
         defaultPath: defaultFileName,
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
 
-      console.log("[DEBUG] Save dialog returned:", filePath);
-
       if (filePath) {
         const content = JSON.stringify(exportData, null, 2);
-        console.log("[DEBUG] Writing to file:", filePath, "content length:", content.length);
         await writeTextFile(filePath, content);
-        alert(`成功导出 ${profiles.length} 个配置档案`);
+        alert(profile ? `已导出配置档案: ${profile.name}` : `成功导出 ${profilesToExport.length} 个配置档案`);
       }
-      // 用户取消时 filePath 为 null，不显示错误
     } catch (err) {
       console.error("导出失败:", err);
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -623,7 +622,21 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
         return;
       }
 
+      // 检查是否有重复的档案
+      const duplicates = importData.profiles.filter(
+        (p: { name: string }) => profiles.find(existing => existing.name === p.name)
+      );
+
+      let overwrite = false;
+      if (duplicates.length > 0) {
+        const duplicateNames = duplicates.map((p: { name: string }) => p.name).join(", ");
+        overwrite = confirm(
+          `以下配置档案已存在：\n${duplicateNames}\n\n是否覆盖这些档案？\n\n点击"确定"覆盖，点击"取消"跳过已存在的档案。`
+        );
+      }
+
       let imported = 0;
+      let updated = 0;
       let skipped = 0;
 
       for (const profile of importData.profiles) {
@@ -635,7 +648,20 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
         // 检查是否已存在同名档案
         const exists = profiles.find(p => p.name === profile.name);
         if (exists) {
-          skipped++;
+          if (overwrite) {
+            // 删除旧的，保存新的
+            await deleteConfigProfile(selectedEnv.envType, selectedEnv.envName, exists.id);
+            await saveConfigProfile(
+              selectedEnv.envType,
+              selectedEnv.envName,
+              profile.name,
+              profile.description,
+              profile.settings
+            );
+            updated++;
+          } else {
+            skipped++;
+          }
           continue;
         }
 
@@ -650,7 +676,12 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
       }
 
       await loadProfiles();
-      alert(`导入完成：成功 ${imported} 个，跳过 ${skipped} 个（已存在或格式无效）`);
+
+      const messages = [];
+      if (imported > 0) messages.push(`新增 ${imported} 个`);
+      if (updated > 0) messages.push(`更新 ${updated} 个`);
+      if (skipped > 0) messages.push(`跳过 ${skipped} 个`);
+      alert(`导入完成：${messages.join("，")}`);
     } catch (err) {
       console.error("导入失败:", err);
       alert(`导入配置档案失败: ${err}`);
@@ -956,10 +987,10 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                             <Upload size={14} />
                           </button>
                           <button
-                            onClick={handleExportProfiles}
+                            onClick={() => handleExportProfiles()}
                             disabled={profiles.length === 0}
                             className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-500 hover:text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="导出配置档案"
+                            title="导出全部配置档案"
                           >
                             <Download size={14} />
                           </button>
@@ -1036,6 +1067,13 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                                     >
                                       <Edit3 size={12} />
                                       <span>编辑</span>
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleExportProfiles(profile); }}
+                                      className="p-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded text-blue-500 text-xs flex items-center gap-1"
+                                      title="导出"
+                                    >
+                                      <Download size={12} />
                                     </button>
                                     {!isActive && (
                                       <button
