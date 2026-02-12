@@ -124,7 +124,22 @@ async fn check_host_claude() -> ClaudeCodeInfo {
 
 /// 获取主机上的 Claude 版本
 fn get_claude_version_host() -> Option<String> {
-    // 尝试 --version
+    // 尝试 -version (单横杠，Claude Code 实际使用的格式)
+    if let Ok(output) = Command::new("claude").arg("-version").output() {
+        if output.status.success() {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !version.is_empty() {
+                return Some(parse_version(&version));
+            }
+        }
+        // 检查 stderr
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !stderr.is_empty() && (stderr.contains("claude") || stderr.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)) {
+            return Some(parse_version(&stderr));
+        }
+    }
+
+    // 尝试 --version (双横杠)
     if let Ok(output) = Command::new("claude").arg("--version").output() {
         if output.status.success() {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -312,15 +327,53 @@ async fn check_wsl_claude(distro: &str) -> ClaudeCodeInfo {
         }
     }
 
-    // 获取版本
+    // 获取版本 - 尝试多种方式
     if info.installed {
+        // 首先尝试 claude -version (单横杠)
         if let Ok(output) = Command::new("wsl")
-            .args(["-d", distro, "--", "npm", "list", "-g", "@anthropic-ai/claude-code", "--depth=0"])
+            .args(["-d", distro, "--", "claude", "-version"])
             .output()
         {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(version) = extract_npm_version(&stdout) {
-                info.version = Some(version);
+            if output.status.success() {
+                let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !version.is_empty() {
+                    info.version = Some(parse_version(&version));
+                }
+            }
+            // 检查 stderr
+            if info.version.is_none() {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if !stderr.is_empty() && (stderr.contains("claude") || stderr.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)) {
+                    info.version = Some(parse_version(&stderr));
+                }
+            }
+        }
+
+        // 尝试 --version (双横杠)
+        if info.version.is_none() {
+            if let Ok(output) = Command::new("wsl")
+                .args(["-d", distro, "--", "claude", "--version"])
+                .output()
+            {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        info.version = Some(parse_version(&version));
+                    }
+                }
+            }
+        }
+
+        // 最后尝试 npm list
+        if info.version.is_none() {
+            if let Ok(output) = Command::new("wsl")
+                .args(["-d", distro, "--", "npm", "list", "-g", "@anthropic-ai/claude-code", "--depth=0"])
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(version) = extract_npm_version(&stdout) {
+                    info.version = Some(version);
+                }
             }
         }
     }
@@ -405,7 +458,7 @@ fn scan_config_files(config_dir: &PathBuf) -> Vec<ConfigFileInfo> {
     let mut files = vec![];
     let config_file_defs = get_config_file_definitions();
 
-    for (name, description) in config_file_defs {
+    for (name, description) in &config_file_defs {
         let path = config_dir.join(name);
         let exists = path.exists();
         let (size, modified) = if exists {

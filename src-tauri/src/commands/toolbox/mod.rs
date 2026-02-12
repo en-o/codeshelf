@@ -38,6 +38,7 @@ pub struct ScanResult {
 }
 
 /// 扫描进度
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanProgress {
     pub scanned: u32,
@@ -73,6 +74,7 @@ pub struct DownloadConfig {
 }
 
 /// 下载进度
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub id: String,
@@ -182,6 +184,7 @@ pub struct ServerConfigInput {
 }
 
 /// 服务访问日志
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessLog {
     pub timestamp: String,
@@ -285,6 +288,7 @@ pub fn current_time() -> String {
 }
 
 /// 格式化字节大小
+#[allow(dead_code)]
 pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
