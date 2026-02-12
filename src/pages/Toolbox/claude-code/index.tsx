@@ -748,6 +748,16 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                         >
                           {copiedText === "path" ? <Check size={12} className="text-green-500" /> : <Copy size={12} className="text-gray-400" />}
                         </button>
+                        {/* WSL 环境可以重新编辑路径 */}
+                        {selectedEnv.envType === "wsl" && (
+                          <button
+                            onClick={handleSelectClaudePath}
+                            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded flex-shrink-0"
+                            title="重新设置路径"
+                          >
+                            <Edit3 size={12} className="text-gray-400" />
+                          </button>
+                        )}
                       </>
                     ) : (
                       <>
