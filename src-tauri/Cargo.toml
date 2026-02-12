@@ -44,4 +44,5 @@ axum = "0.7"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "compression-gzip", "fs", "trace"] }
 sysinfo = "0.30"
+socket2 = "0.5"
 

@@ -270,6 +270,7 @@ export async function createServer(
     cors: input.cors,
     gzip: input.gzip,
     cache_control: input.cacheControl,
+    url_prefix: input.urlPrefix,
     proxies: input.proxies,
   };
   const server: any = await invoke("create_server", { input: rustInput });
@@ -309,6 +310,7 @@ export async function updateServer(
     cors: input.cors,
     gzip: input.gzip,
     cache_control: input.cacheControl,
+    url_prefix: input.urlPrefix,
     proxies: input.proxies,
   };
   const server: any = await invoke("update_server", {
@@ -327,6 +329,7 @@ function transformServerConfig(server: any): ServerConfig {
     cors: server.cors,
     gzip: server.gzip,
     cacheControl: server.cache_control,
+    urlPrefix: server.url_prefix || "/",
     proxies: server.proxies || [],
     status: server.status,
     createdAt: server.created_at,

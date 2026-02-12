@@ -311,8 +311,9 @@ export function LocalService({ onBack }: LocalServiceProps) {
   }
 
   // 在浏览器中打开
-  function handleOpenBrowser(port: number) {
-    window.open(`http://127.0.0.1:${port}`, "_blank");
+  function handleOpenBrowser(server: ServerConfig) {
+    const prefix = server.urlPrefix === "/" ? "" : server.urlPrefix;
+    window.open(`http://127.0.0.1:${server.port}${prefix}/`, "_blank");
   }
 
   // 过滤显示的服务
@@ -440,12 +441,17 @@ export function LocalService({ onBack }: LocalServiceProps) {
                           <span className="ml-2 text-xs text-gray-400">Web 服务</span>
                         </h4>
                         <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-                          <span className="font-mono">:{server.port}</span>
+                          <span className="font-mono">:{server.port}{server.urlPrefix !== "/" ? server.urlPrefix : ""}</span>
                           <span className="truncate max-w-xs" title={server.rootDir}>
                             {server.rootDir}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {server.urlPrefix && server.urlPrefix !== "/" && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
+                              前缀: {server.urlPrefix}
+                            </span>
+                          )}
                           {server.cors && (
                             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
                               CORS
@@ -474,7 +480,7 @@ export function LocalService({ onBack }: LocalServiceProps) {
                       {server.status === "running" ? (
                         <>
                           <button
-                            onClick={() => handleOpenBrowser(server.port)}
+                            onClick={() => handleOpenBrowser(server)}
                             className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors text-blue-500"
                             title="在浏览器中打开"
                           >
@@ -695,6 +701,20 @@ export function LocalService({ onBack }: LocalServiceProps) {
                         <FolderOpen size={16} />
                       </Button>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-2">
+                      访问前缀
+                    </label>
+                    <Input
+                      value={formUrlPrefix}
+                      onChange={(e) => setFormUrlPrefix(e.target.value)}
+                      placeholder="默认使用目录名，如 /dist，输入 / 表示无前缀"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      设置访问 URL 前缀，默认使用目录名。输入 "/" 表示无前缀（直接访问根路径）
+                    </p>
                   </div>
 
                   {/* 选项 */}
