@@ -35,7 +35,7 @@ pub async fn save_labels(labels: Vec<String>) -> Result<(), String> {
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
-    let content = serde_json::to_string_pretty(&labels)
+    let content = serde_json::to_string(&labels)
         .map_err(|e| format!("序列化标签失败: {}", e))?;
 
     fs::write(config.labels_file(), content)
@@ -84,7 +84,7 @@ pub async fn save_categories(categories: Vec<String>) -> Result<(), String> {
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
-    let content = serde_json::to_string_pretty(&categories)
+    let content = serde_json::to_string(&categories)
         .map_err(|e| format!("序列化分类失败: {}", e))?;
 
     fs::write(config.categories_file(), content)
@@ -140,7 +140,7 @@ async fn save_editors(editors: &[EditorConfig]) -> Result<(), String> {
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
-    let content = serde_json::to_string_pretty(editors)
+    let content = serde_json::to_string(editors)
         .map_err(|e| format!("序列化编辑器配置失败: {}", e))?;
 
     fs::write(config.editors_file(), content)
@@ -258,7 +258,7 @@ pub async fn save_terminal_config(input: TerminalInput) -> Result<(), String> {
         terminal_path: input.terminal_path,
     };
 
-    let content = serde_json::to_string_pretty(&terminal)
+    let content = serde_json::to_string(&terminal)
         .map_err(|e| format!("序列化终端配置失败: {}", e))?;
 
     fs::write(config.terminal_file(), content)
@@ -304,7 +304,7 @@ pub async fn save_app_settings(input: AppSettingsInput) -> Result<AppSettings, S
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
-    let content = serde_json::to_string_pretty(&settings)
+    let content = serde_json::to_string(&settings)
         .map_err(|e| format!("序列化应用设置失败: {}", e))?;
 
     fs::write(config.app_settings_file(), content)
@@ -347,7 +347,7 @@ pub async fn save_ui_state(input: UiStateInput) -> Result<UiState, String> {
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
-    let content = serde_json::to_string_pretty(&ui_state)
+    let content = serde_json::to_string(&ui_state)
         .map_err(|e| format!("序列化UI状态失败: {}", e))?;
 
     fs::write(config.ui_state_file(), content)
@@ -385,7 +385,7 @@ async fn save_notifications_internal(notifications: &[Notification]) -> Result<(
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
-    let content = serde_json::to_string_pretty(notifications)
+    let content = serde_json::to_string(notifications)
         .map_err(|e| format!("序列化通知失败: {}", e))?;
 
     fs::write(config.notifications_file(), content)

@@ -1351,7 +1351,7 @@ pub async fn save_quick_configs(configs: Vec<ClaudeQuickConfig>) -> Result<(), S
     config.ensure_dirs()?;
 
     // 直接保存为配置数组
-    let content = serde_json::to_string_pretty(&configs)
+    let content = serde_json::to_string(&configs)
         .map_err(|e| format!("序列化快捷配置失败: {}", e))?;
     fs::write(config.claude_quick_configs_file(), content)
         .map_err(|e| format!("保存快捷配置失败: {}", e))?;
@@ -1425,7 +1425,7 @@ pub async fn save_claude_installations_cache(installs: Vec<ClaudeCodeInfo>) -> R
     }).collect();
 
     // 直接保存为安装信息数组
-    let content = serde_json::to_string_pretty(&installations)
+    let content = serde_json::to_string(&installations)
         .map_err(|e| format!("序列化安装缓存失败: {}", e))?;
     fs::write(config.claude_installations_cache_file(), content)
         .map_err(|e| format!("保存安装缓存失败: {}", e))?;

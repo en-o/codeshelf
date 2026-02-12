@@ -67,7 +67,7 @@ fn save_projects_to_file(projects: &[Project]) -> Result<(), String> {
     }
 
     // 直接保存为项目数组
-    let content = serde_json::to_string_pretty(projects)
+    let content = serde_json::to_string(projects)
         .map_err(|e| format!("Failed to serialize projects: {}", e))?;
 
     fs::write(&path, content)

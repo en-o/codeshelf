@@ -82,7 +82,7 @@ async fn save_tasks_to_file() -> Result<(), String> {
     let tasks_vec: Vec<&DownloadTask> = tasks.values().collect();
 
     // 直接保存为任务数组
-    let content = serde_json::to_string_pretty(&tasks_vec)
+    let content = serde_json::to_string(&tasks_vec)
         .map_err(|e| format!("序列化下载任务失败: {}", e))?;
 
     let path = config.download_tasks_file();

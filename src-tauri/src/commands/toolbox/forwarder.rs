@@ -111,7 +111,7 @@ async fn save_rules_to_file() -> Result<(), String> {
         })
     }).collect();
 
-    let content = serde_json::to_string_pretty(&rules_data)
+    let content = serde_json::to_string(&rules_data)
         .map_err(|e| format!("序列化转发规则失败: {}", e))?;
 
     let path = config.forward_rules_file();
