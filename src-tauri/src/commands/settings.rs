@@ -511,3 +511,26 @@ pub async fn remove_notification(id: String) -> Result<(), String> {
 pub async fn clear_notifications() -> Result<(), String> {
     save_notifications(vec![]).await
 }
+
+// ============== 迁移状态 ==============
+
+/// 迁移结果（前端类型）
+#[derive(Debug, Serialize, Clone)]
+pub struct MigrationResultResponse {
+    pub success: bool,
+    pub migrated_items: Vec<String>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// 获取迁移结果
+#[tauri::command]
+pub async fn get_migration_result() -> Result<Option<MigrationResultResponse>, String> {
+    let result = storage::get_migration_result();
+    Ok(result.map(|r| MigrationResultResponse {
+        success: r.success,
+        migrated_items: r.migrated_items,
+        errors: r.errors,
+        warnings: r.warnings,
+    }))
+}
