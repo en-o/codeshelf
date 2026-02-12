@@ -362,17 +362,45 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
   async function handleUpdateConfigDir() {
     if (!selectedEnv || !editingConfigDir.trim()) return;
 
+    let configDir = editingConfigDir.trim();
+
+    // WSL 环境：将 Linux 路径转换为 UNC 路径
+    if (selectedEnv.envType === "wsl") {
+      const distro = selectedEnv.envName.replace("WSL: ", "");
+
+      // 如果用户输入了 ~ 开头，替换为实际 home 目录
+      if (configDir.startsWith("~")) {
+        try {
+          const configDirInfo = await getWslConfigDir(distro);
+          const homeDir = configDirInfo.linuxPath.replace("/.claude", "");
+          configDir = configDir.replace("~", homeDir);
+        } catch {
+          alert("无法获取 WSL home 目录，请使用完整路径如 /home/用户名/.claude");
+          return;
+        }
+      }
+
+      // 验证是 Linux 绝对路径
+      if (!configDir.startsWith("/")) {
+        alert("请输入 Linux 绝对路径，如 /home/用户名/.claude 或 ~/.claude");
+        return;
+      }
+
+      // 转换为 UNC 路径
+      configDir = `\\\\wsl.localhost\\${distro}${configDir.replace(/\//g, "\\")}`;
+    }
+
     try {
       const newConfigFiles = await scanClaudeConfigDir(
         selectedEnv.envType,
         selectedEnv.envName,
-        editingConfigDir.trim()
+        configDir
       );
 
       // 更新当前环境的配置目录和文件列表
       const updatedEnv = {
         ...selectedEnv,
-        configDir: editingConfigDir.trim(),
+        configDir: configDir,
         configFiles: newConfigFiles,
       };
 
@@ -771,25 +799,6 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                         >
                           手动选择
                         </button>
-                        {/* WSL 环境提供直接设置配置目录的选项 */}
-                        {selectedEnv.envType === "wsl" && (
-                          <button
-                            onClick={async () => {
-                              // 尝试自动获取配置目录
-                              const distro = selectedEnv.envName.replace("WSL: ", "");
-                              try {
-                                const configDirInfo = await getWslConfigDir(distro);
-                                setEditingConfigDir(configDirInfo.uncPath);
-                              } catch {
-                                setEditingConfigDir("");
-                              }
-                              setShowEditConfigDir(true);
-                            }}
-                            className="text-xs text-green-500 hover:underline"
-                          >
-                            直接设置配置目录
-                          </button>
-                        )}
                         <button
                           onClick={() => setShowFindClaudeHelp(true)}
                           className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
@@ -829,19 +838,8 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                       <>
                         <span className="text-gray-300">-</span>
                         <button
-                          onClick={async () => {
-                            // WSL 环境尝试自动获取配置目录
-                            if (selectedEnv.envType === "wsl") {
-                              const distro = selectedEnv.envName.replace("WSL: ", "");
-                              try {
-                                const configDirInfo = await getWslConfigDir(distro);
-                                setEditingConfigDir(configDirInfo.uncPath);
-                              } catch {
-                                setEditingConfigDir("");
-                              }
-                            } else {
-                              setEditingConfigDir("");
-                            }
+                          onClick={() => {
+                            setEditingConfigDir("");
                             setShowEditConfigDir(true);
                           }}
                           className="text-xs text-blue-500 hover:underline"
@@ -1536,46 +1534,51 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
 
             <div className="space-y-3 mb-4">
               <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">配置目录路径</label>
+                <label className="block text-sm font-medium text-gray-500 mb-1">
+                  {selectedEnv.envType === "wsl" ? "Linux 路径" : "配置目录路径"}
+                </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={editingConfigDir}
                     onChange={(e) => setEditingConfigDir(e.target.value)}
-                    placeholder={selectedEnv.envType === "wsl" ? "\\\\wsl.localhost\\Ubuntu\\.claude" : "C:\\Users\\用户名\\.claude"}
+                    placeholder={selectedEnv.envType === "wsl" ? "~/.claude 或 /home/用户名/.claude" : "C:\\Users\\用户名\\.claude"}
                     className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                   />
-                  <button
-                    onClick={async () => {
-                      try {
-                        const selected = await open({
-                          title: "选择配置目录",
-                          directory: true,
-                          multiple: false,
-                        });
-                        if (selected && typeof selected === "string") {
-                          setEditingConfigDir(selected);
+                  {selectedEnv.envType !== "wsl" && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const selected = await open({
+                            title: "选择配置目录",
+                            directory: true,
+                            multiple: false,
+                          });
+                          if (selected && typeof selected === "string") {
+                            setEditingConfigDir(selected);
+                          }
+                        } catch (err) {
+                          console.error("选择文件夹失败:", err);
                         }
-                      } catch (err) {
-                        console.error("选择文件夹失败:", err);
-                      }
-                    }}
-                    className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                    title="选择文件夹"
-                  >
-                    <FolderOpen size={16} className="text-gray-500" />
-                  </button>
+                      }}
+                      className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                      title="选择文件夹"
+                    >
+                      <FolderOpen size={16} className="text-gray-500" />
+                    </button>
+                  )}
                 </div>
               </div>
 
               {selectedEnv.envType === "wsl" && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs space-y-2">
-                  <p className="font-medium text-blue-700 dark:text-blue-400">WSL 路径格式说明：</p>
-                  <div className="text-blue-600 dark:text-blue-300 space-y-1">
-                    <p><strong>推荐：</strong>使用 Windows UNC 格式</p>
-                    <code className="block bg-white dark:bg-gray-800 px-2 py-1 rounded text-xs">\\wsl.localhost\Ubuntu-22.04\home\用户名\.claude</code>
-                    <p className="text-gray-500 mt-2">在资源管理器地址栏输入 <code className="bg-white dark:bg-gray-800 px-1 rounded">\\wsl.localhost\</code> 可浏览 WSL 文件</p>
-                  </div>
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs space-y-1">
+                  <p className="font-medium text-blue-700 dark:text-blue-400">提示</p>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    在 WSL 终端运行 <code className="bg-white dark:bg-gray-800 px-1 rounded">echo $HOME/.claude</code> 获取路径
+                  </p>
+                  <p className="text-gray-500 mt-1">
+                    <strong>发行版：</strong> {selectedEnv.envName.replace("WSL: ", "")}
+                  </p>
                 </div>
               )}
 
@@ -1583,7 +1586,8 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                 <p className="font-medium mb-1">常见配置目录位置：</p>
                 {selectedEnv.envType === "wsl" ? (
                   <ul className="list-disc list-inside space-y-0.5">
-                    <li>UNC: <code>\\wsl.localhost\发行版名\home\用户名\.claude</code></li>
+                    <li><code>~/.claude</code></li>
+                    <li><code>/home/用户名/.claude</code></li>
                   </ul>
                 ) : (
                   <ul className="list-disc list-inside space-y-0.5">
