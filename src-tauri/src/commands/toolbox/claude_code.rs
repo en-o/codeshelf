@@ -909,7 +909,7 @@ pub async fn open_claude_config_dir(env_type: EnvType, env_name: String, config_
                 .map_err(|e| format!("转换路径失败: {}", e))?;
 
             if output.status.success() {
-                let win_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let win_path = clean_wsl_output(&output.stdout);
                 Command::new("explorer")
                     .arg(&win_path)
                     .spawn()
