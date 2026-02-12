@@ -131,13 +131,40 @@ async function migrateFromLocalStorage() {
 
 // 初始化应用：从后端加载所有数据
 async function initializeApp() {
-  const { setInitialized } = useAppStore.getState();
+  const { setInitialized, addNotification } = useAppStore.getState();
 
   // 由于 store 中的 setter 会触发后端保存，我们需要直接使用 set
   const storeSet = useAppStore.setState;
 
   try {
-    // 先尝试迁移旧数据
+    // 检查后端迁移结果
+    const migrationResult = await invoke<MigrationResult | null>("get_migration_result");
+    if (migrationResult) {
+      // 显示迁移成功信息
+      if (migrationResult.migrated_items.length > 0) {
+        console.log("数据迁移完成:", migrationResult.migrated_items);
+      }
+
+      // 显示迁移警告
+      for (const warning of migrationResult.warnings) {
+        console.warn("数据迁移警告:", warning);
+      }
+
+      // 显示迁移错误（关键错误，需要用户处理）
+      if (!migrationResult.success && migrationResult.errors.length > 0) {
+        console.error("数据迁移失败:", migrationResult.errors);
+        // 延迟添加通知，等待 store 初始化完成
+        setTimeout(() => {
+          addNotification({
+            type: "error",
+            title: "数据迁移失败",
+            message: `部分旧数据迁移失败，请手动处理：\n${migrationResult.errors.join("\n")}\n\n旧数据位置：%APPDATA%/codeshelf 或 ~/.local/share/codeshelf`,
+          });
+        }, 500);
+      }
+    }
+
+    // 先尝试迁移 localStorage 旧数据
     await migrateFromLocalStorage();
 
     // 并行加载所有数据
