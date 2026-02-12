@@ -128,6 +128,13 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
     if (selectedEnv) {
       loadCurrentSettings();
       loadProfiles();
+      // 自动选中 settings.json（如果存在）
+      const settingsFile = selectedEnv.configFiles.find(f => f.name === "settings.json");
+      if (settingsFile) {
+        setSelectedFile(settingsFile);
+      } else {
+        setSelectedFile(null);
+      }
     }
   }, [selectedEnv]);
 
@@ -766,7 +773,7 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                       key={`${env.envType}-${env.envName}`}
                       onClick={() => {
                         setSelectedEnv(env);
-                        setSelectedFile(null);
+                        // selectedFile 由 useEffect 自动处理（选中 settings.json）
                         setProfiles([]);
                         setActiveProfileId(null);
                       }}
