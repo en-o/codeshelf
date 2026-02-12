@@ -434,6 +434,8 @@ pub async fn pause_download(task_id: String) -> Result<(), String> {
 /// 恢复下载
 #[tauri::command]
 pub async fn resume_download(task_id: String) -> Result<(), String> {
+    ensure_tasks_loaded().await;
+
     // 获取任务信息
     let task = {
         let tasks = DOWNLOAD_TASKS.lock().await;
@@ -467,6 +469,8 @@ pub async fn resume_download(task_id: String) -> Result<(), String> {
 /// 取消下载
 #[tauri::command]
 pub async fn cancel_download(task_id: String) -> Result<(), String> {
+    ensure_tasks_loaded().await;
+
     // 设置取消标志
     {
         let flags = DOWNLOAD_CANCELLED.lock().await;
@@ -507,6 +511,8 @@ pub async fn cancel_download(task_id: String) -> Result<(), String> {
 /// 获取所有下载任务
 #[tauri::command]
 pub async fn get_download_tasks() -> Result<Vec<DownloadTask>, String> {
+    ensure_tasks_loaded().await;
+
     let tasks = DOWNLOAD_TASKS.lock().await;
     Ok(tasks.values().cloned().collect())
 }
@@ -514,6 +520,8 @@ pub async fn get_download_tasks() -> Result<Vec<DownloadTask>, String> {
 /// 获取单个下载任务
 #[tauri::command]
 pub async fn get_download_task(task_id: String) -> Result<Option<DownloadTask>, String> {
+    ensure_tasks_loaded().await;
+
     let tasks = DOWNLOAD_TASKS.lock().await;
     Ok(tasks.get(&task_id).cloned())
 }
@@ -521,6 +529,8 @@ pub async fn get_download_task(task_id: String) -> Result<Option<DownloadTask>, 
 /// 清除已完成的下载任务
 #[tauri::command]
 pub async fn clear_completed_downloads() -> Result<u32, String> {
+    ensure_tasks_loaded().await;
+
     let mut tasks = DOWNLOAD_TASKS.lock().await;
     let initial_count = tasks.len();
 
@@ -531,7 +541,9 @@ pub async fn clear_completed_downloads() -> Result<u32, String> {
 
     // 持久化保存
     if removed_count > 0 {
-        save_tasks_to_file().await;
+        if let Err(e) = save_tasks_to_file().await {
+            log::error!("保存下载任务失败: {}", e);
+        }
     }
 
     Ok(removed_count)
@@ -540,6 +552,8 @@ pub async fn clear_completed_downloads() -> Result<u32, String> {
 /// 打开下载文件夹
 #[tauri::command]
 pub async fn open_download_folder(task_id: String) -> Result<(), String> {
+    ensure_tasks_loaded().await;
+
     let save_path = {
         let tasks = DOWNLOAD_TASKS.lock().await;
         tasks.get(&task_id).map(|t| t.save_path.clone())
