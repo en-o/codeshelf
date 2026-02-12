@@ -212,8 +212,16 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
       });
 
       if (selected && typeof selected === "string") {
-        // 检测是否是 WSL UNC 路径
-        const isWslPath = selected.startsWith("\\\\wsl.localhost\\") || selected.startsWith("\\\\wsl$\\");
+        // 调试：显示实际收到的路径
+        console.log("[DEBUG] Selected path:", selected);
+        console.log("[DEBUG] Path length:", selected.length);
+        console.log("[DEBUG] Path char codes:", Array.from(selected.slice(0, 30)).map(c => c.charCodeAt(0)));
+
+        // 检测是否是 WSL UNC 路径 - 使用更宽松的匹配
+        const lowerPath = selected.toLowerCase();
+        const isWslPath = lowerPath.includes("wsl.localhost") || lowerPath.includes("wsl$");
+
+        console.log("[DEBUG] Is WSL path:", isWslPath);
 
         try {
           const info = await checkClaudeByPath(selected);
@@ -232,14 +240,16 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
             alert("无法识别该路径为有效的 Claude Code 安装");
           }
         } catch (checkErr) {
+          console.log("[DEBUG] Check error:", checkErr);
           // 如果是 WSL 路径检测失败，提示用户手动设置配置目录
           if (isWslPath) {
             const confirmed = confirm(
-              "无法自动检测 WSL 中的 Claude Code 安装。\n\n" +
-              "这可能是因为应用无法直接访问 WSL 文件系统执行检测命令。\n\n" +
-              "您可以手动设置配置目录来管理 Claude Code 配置。\n" +
-              "配置目录通常位于: ~/.claude\n\n" +
-              "是否现在设置配置目录？"
+              `无法自动检测 WSL 中的 Claude Code 安装。\n\n` +
+              `收到的路径: ${selected}\n\n` +
+              `这可能是因为应用无法直接访问 WSL 文件系统执行检测命令。\n\n` +
+              `您可以手动设置配置目录来管理 Claude Code 配置。\n` +
+              `配置目录通常位于: ~/.claude\n\n` +
+              `是否现在设置配置目录？`
             );
             if (confirmed) {
               // 设置默认的配置目录提示
@@ -247,7 +257,7 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
               setShowEditConfigDir(true);
             }
           } else {
-            alert(`选择路径失败: ${checkErr}`);
+            alert(`选择路径失败:\n\n路径: ${selected}\n\n错误: ${checkErr}`);
           }
         }
       }
