@@ -212,20 +212,43 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
       });
 
       if (selected && typeof selected === "string") {
-        const info = await checkClaudeByPath(selected);
-        if (info.installed) {
-          // 更新当前环境的路径信息
-          const updatedInstallations = installations.map(env =>
-            env.envName === selectedEnv.envName
-              ? { ...env, ...info, envName: env.envName, envType: env.envType }
-              : env
-          );
-          setInstallations(updatedInstallations);
-          setSelectedEnv(prev => prev ? { ...prev, ...info, envName: prev.envName, envType: prev.envType } : null);
-          // 更新缓存
-          sessionStorage.setItem(CACHE_KEY, JSON.stringify(updatedInstallations));
-        } else {
-          alert("无法识别该路径为有效的 Claude Code 安装");
+        // 检测是否是 WSL UNC 路径
+        const isWslPath = selected.startsWith("\\\\wsl.localhost\\") || selected.startsWith("\\\\wsl$\\");
+
+        try {
+          const info = await checkClaudeByPath(selected);
+          if (info.installed) {
+            // 更新当前环境的路径信息
+            const updatedInstallations = installations.map(env =>
+              env.envName === selectedEnv.envName
+                ? { ...env, ...info, envName: env.envName, envType: env.envType }
+                : env
+            );
+            setInstallations(updatedInstallations);
+            setSelectedEnv(prev => prev ? { ...prev, ...info, envName: prev.envName, envType: prev.envType } : null);
+            // 更新缓存
+            sessionStorage.setItem(CACHE_KEY, JSON.stringify(updatedInstallations));
+          } else {
+            alert("无法识别该路径为有效的 Claude Code 安装");
+          }
+        } catch (checkErr) {
+          // 如果是 WSL 路径检测失败，提示用户手动设置配置目录
+          if (isWslPath) {
+            const confirmed = confirm(
+              "无法自动检测 WSL 中的 Claude Code 安装。\n\n" +
+              "这可能是因为应用无法直接访问 WSL 文件系统执行检测命令。\n\n" +
+              "您可以手动设置配置目录来管理 Claude Code 配置。\n" +
+              "配置目录通常位于: ~/.claude\n\n" +
+              "是否现在设置配置目录？"
+            );
+            if (confirmed) {
+              // 设置默认的配置目录提示
+              setEditingConfigDir("/home/用户名/.claude");
+              setShowEditConfigDir(true);
+            }
+          } else {
+            alert(`选择路径失败: ${checkErr}`);
+          }
         }
       }
     } catch (err) {
@@ -1420,13 +1443,49 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
             <div className="space-y-3 mb-4">
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1">配置目录路径</label>
-                <input
-                  type="text"
-                  value={editingConfigDir}
-                  onChange={(e) => setEditingConfigDir(e.target.value)}
-                  placeholder={selectedEnv.envType === "wsl" ? "/home/用户名/.claude" : "C:\\Users\\用户名\\.claude"}
-                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editingConfigDir}
+                    onChange={(e) => setEditingConfigDir(e.target.value)}
+                    placeholder={selectedEnv.envType === "wsl" ? "/home/用户名/.claude" : "C:\\Users\\用户名\\.claude"}
+                    className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                  />
+                  <button
+                    onClick={async () => {
+                      try {
+                        const selected = await open({
+                          title: "选择配置目录",
+                          directory: true,
+                          multiple: false,
+                        });
+                        if (selected && typeof selected === "string") {
+                          // 如果是 WSL 环境且选择了 UNC 路径，转换为 Linux 路径
+                          if (selectedEnv.envType === "wsl" && (selected.startsWith("\\\\wsl.localhost\\") || selected.startsWith("\\\\wsl$\\"))) {
+                            const pathWithoutPrefix = selected
+                              .replace(/^\\\\wsl\.localhost\\/, "")
+                              .replace(/^\\\\wsl\$\\/, "");
+                            const parts = pathWithoutPrefix.split("\\");
+                            if (parts.length > 1) {
+                              const linuxPath = "/" + parts.slice(1).join("/");
+                              setEditingConfigDir(linuxPath);
+                            } else {
+                              setEditingConfigDir(selected);
+                            }
+                          } else {
+                            setEditingConfigDir(selected);
+                          }
+                        }
+                      } catch (err) {
+                        console.error("选择文件夹失败:", err);
+                      }
+                    }}
+                    className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    title="选择文件夹"
+                  >
+                    <FolderOpen size={16} className="text-gray-500" />
+                  </button>
+                </div>
               </div>
 
               {selectedEnv.envType === "wsl" && (
