@@ -57,8 +57,13 @@ fn load_rules_from_file() -> Result<HashMap<String, ForwardRule>, String> {
         .map_err(|e| format!("读取转发规则失败: {}", e))?;
 
     // 直接解析为规则数组
-    let rules_arr: Vec<serde_json::Value> = serde_json::from_str(&content)
-        .unwrap_or_default();
+    let rules_arr: Vec<serde_json::Value> = match serde_json::from_str(&content) {
+        Ok(arr) => arr,
+        Err(e) => {
+            log::error!("解析转发规则 JSON 失败: {}，内容: {}", e, &content[..content.len().min(200)]);
+            Vec::new()
+        }
+    };
 
     let mut rules = HashMap::new();
     for rule_val in rules_arr {

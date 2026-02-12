@@ -120,9 +120,13 @@ pub struct ForwardRule {
     pub local_port: u16,
     pub remote_host: String,
     pub remote_port: u16,
+    #[serde(default = "default_stopped")]
     pub status: String, // "running", "stopped"
+    #[serde(default)]
     pub connections: u32,
+    #[serde(default)]
     pub bytes_in: u64,
+    #[serde(default)]
     pub bytes_out: u64,
     pub created_at: String,
 }
@@ -163,6 +167,7 @@ pub struct ServerConfig {
     pub index_page: Option<String>,
     /// 多个代理规则
     pub proxies: Vec<ProxyConfig>,
+    #[serde(default = "default_stopped")]
     pub status: String, // "running", "stopped"
     pub created_at: String,
 }
@@ -279,6 +284,11 @@ pub fn port_service_name(port: u16) -> Option<&'static str> {
 }
 
 // ============== 工具函数 ==============
+
+/// 默认状态为停止
+fn default_stopped() -> String {
+    "stopped".to_string()
+}
 
 /// 生成唯一 ID
 pub fn generate_id() -> String {

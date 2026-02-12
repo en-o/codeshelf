@@ -70,8 +70,13 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
         .map_err(|e| format!("读取服务配置失败: {}", e))?;
 
     // 直接解析为服务配置数组
-    let servers_arr: Vec<ServerConfig> = serde_json::from_str(&content)
-        .unwrap_or_default();
+    let servers_arr: Vec<ServerConfig> = match serde_json::from_str(&content) {
+        Ok(arr) => arr,
+        Err(e) => {
+            log::error!("解析服务配置 JSON 失败: {}，内容: {}", e, &content[..content.len().min(200)]);
+            Vec::new()
+        }
+    };
 
     let mut servers = HashMap::new();
     for mut server in servers_arr {
