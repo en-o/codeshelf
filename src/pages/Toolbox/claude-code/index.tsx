@@ -25,6 +25,7 @@ import {
   Check,
   BookOpen,
   Lock,
+  HelpCircle,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ToolPanelHeader } from "../index";
@@ -95,6 +96,9 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
+
+  // 帮助弹框
+  const [showFindClaudeHelp, setShowFindClaudeHelp] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -512,6 +516,13 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                           className="text-xs text-blue-500 hover:underline"
                         >
                           手动选择
+                        </button>
+                        <button
+                          onClick={() => setShowFindClaudeHelp(true)}
+                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                          title="如何查找 Claude"
+                        >
+                          <HelpCircle size={14} className="text-gray-400" />
                         </button>
                       </>
                     )}
@@ -1004,6 +1015,131 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
               >
                 <Trash2 size={14} className="mr-1" />
                 删除
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 查找 Claude 帮助弹框 */}
+      {showFindClaudeHelp && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                <HelpCircle size={20} className="text-blue-500" />
+                如何查找 Claude Code
+              </h3>
+              <button
+                onClick={() => setShowFindClaudeHelp(false)}
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Windows */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 flex items-center gap-2">
+                  <span className="text-lg">🪟</span>
+                  <h4 className="font-medium text-gray-900 dark:text-white">Windows</h4>
+                </div>
+                <div className="p-3 space-y-2 text-sm">
+                  <p className="text-gray-600 dark:text-gray-400">在命令提示符或 PowerShell 中运行：</p>
+                  <code className="block p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
+                    where claude
+                  </code>
+                  <p className="text-gray-500 text-xs mt-2">
+                    常见路径：
+                    <br />• <code className="text-xs">C:\Users\用户名\AppData\Roaming\npm\claude</code>
+                    <br />• <code className="text-xs">C:\Program Files\nodejs\claude</code>
+                    <br />• <code className="text-xs">~\AppData\Local\nvm\v版本号\claude</code>（使用 nvm）
+                  </p>
+                </div>
+              </div>
+
+              {/* WSL */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div className="px-4 py-2 bg-orange-50 dark:bg-orange-900/20 flex items-center gap-2">
+                  <span className="text-lg">🐧</span>
+                  <h4 className="font-medium text-gray-900 dark:text-white">WSL (Windows Subsystem for Linux)</h4>
+                </div>
+                <div className="p-3 space-y-2 text-sm">
+                  <p className="text-gray-600 dark:text-gray-400">在 WSL 终端中运行：</p>
+                  <code className="block p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
+                    which claude
+                  </code>
+                  <p className="text-gray-500 text-xs mt-2">
+                    常见路径：
+                    <br />• <code className="text-xs">/usr/bin/claude</code>
+                    <br />• <code className="text-xs">/usr/local/bin/claude</code>
+                    <br />• <code className="text-xs">~/.nvm/versions/node/v版本号/bin/claude</code>（使用 nvm）
+                    <br />• <code className="text-xs">~/.local/bin/claude</code>
+                  </p>
+                  <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded text-xs text-yellow-700 dark:text-yellow-400">
+                    <strong>提示：</strong>选择 WSL 路径时，请通过文件选择器导航到
+                    <code className="mx-1">\\wsl.localhost\发行版名称\...</code>
+                  </div>
+                </div>
+              </div>
+
+              {/* macOS */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 flex items-center gap-2">
+                  <span className="text-lg">🍎</span>
+                  <h4 className="font-medium text-gray-900 dark:text-white">macOS</h4>
+                </div>
+                <div className="p-3 space-y-2 text-sm">
+                  <p className="text-gray-600 dark:text-gray-400">在终端中运行：</p>
+                  <code className="block p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
+                    which claude
+                  </code>
+                  <p className="text-gray-500 text-xs mt-2">
+                    常见路径：
+                    <br />• <code className="text-xs">/usr/local/bin/claude</code>
+                    <br />• <code className="text-xs">/opt/homebrew/bin/claude</code>（Homebrew）
+                    <br />• <code className="text-xs">~/.nvm/versions/node/v版本号/bin/claude</code>（使用 nvm）
+                  </p>
+                </div>
+              </div>
+
+              {/* Linux */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div className="px-4 py-2 bg-green-50 dark:bg-green-900/20 flex items-center gap-2">
+                  <span className="text-lg">🐧</span>
+                  <h4 className="font-medium text-gray-900 dark:text-white">Linux</h4>
+                </div>
+                <div className="p-3 space-y-2 text-sm">
+                  <p className="text-gray-600 dark:text-gray-400">在终端中运行：</p>
+                  <code className="block p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
+                    which claude
+                  </code>
+                  <p className="text-gray-500 text-xs mt-2">
+                    常见路径：
+                    <br />• <code className="text-xs">/usr/bin/claude</code>
+                    <br />• <code className="text-xs">/usr/local/bin/claude</code>
+                    <br />• <code className="text-xs">~/.nvm/versions/node/v版本号/bin/claude</code>（使用 nvm）
+                    <br />• <code className="text-xs">~/.local/bin/claude</code>
+                  </p>
+                </div>
+              </div>
+
+              {/* 安装说明 */}
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm">
+                <p className="font-medium text-blue-700 dark:text-blue-400 mb-1">还没有安装 Claude Code？</p>
+                <p className="text-blue-600 dark:text-blue-300 text-xs">
+                  运行以下命令安装：
+                </p>
+                <code className="block p-2 mt-1 bg-white dark:bg-gray-800 rounded text-xs font-mono text-gray-700 dark:text-gray-300">
+                  npm install -g @anthropic-ai/claude-code
+                </code>
+              </div>
+            </div>
+
+            <div className="flex justify-end p-4 border-t border-gray-200 dark:border-gray-700">
+              <Button onClick={() => setShowFindClaudeHelp(false)} variant="secondary">
+                关闭
               </Button>
             </div>
           </div>
