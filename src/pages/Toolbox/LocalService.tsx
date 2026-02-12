@@ -351,29 +351,16 @@ export function LocalService({ onBack }: LocalServiceProps) {
   }
 
   // 获取服务的完整访问 URL（包含首页）
-  function getServerUrl(server: ServerConfig, includeIndex = true): string {
+  function getServerUrl(server: ServerConfig): string {
     const prefix = server.urlPrefix === "/" ? "" : server.urlPrefix;
     const base = `http://127.0.0.1:${server.port}${prefix}`;
 
-    if (includeIndex && server.indexPage) {
+    if (server.indexPage) {
       const index = server.indexPage.startsWith("/") ? server.indexPage : `/${server.indexPage}`;
       return `${base}${index}`;
     }
 
     return `${base}/`;
-  }
-
-  // 获取可通过内网访问的 URL（用于显示）
-  function getServerUrls(server: ServerConfig): { local: string; network: string } {
-    const prefix = server.urlPrefix === "/" ? "" : server.urlPrefix;
-    const indexPath = server.indexPage
-      ? (server.indexPage.startsWith("/") ? server.indexPage : `/${server.indexPage}`)
-      : "/";
-
-    return {
-      local: `http://127.0.0.1:${server.port}${prefix}${indexPath}`,
-      network: `http://0.0.0.0:${server.port}${prefix}${indexPath}`,
-    };
   }
 
   // 在浏览器中打开
