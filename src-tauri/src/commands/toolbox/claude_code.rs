@@ -81,6 +81,73 @@ pub async fn check_all_claude_installations() -> Result<Vec<ClaudeCodeInfo>, Str
     Ok(results)
 }
 
+/// 根据指定路径检查 Claude Code 安装
+#[tauri::command]
+pub async fn check_claude_by_path(claude_path: String) -> Result<ClaudeCodeInfo, String> {
+    let path = PathBuf::from(&claude_path);
+
+    // 检查路径是否存在
+    if !path.exists() {
+        return Err(format!("指定的路径不存在: {}", claude_path));
+    }
+
+    let mut info = ClaudeCodeInfo {
+        env_type: EnvType::Host,
+        env_name: "手动指定".to_string(),
+        installed: false,
+        version: None,
+        path: Some(claude_path.clone()),
+        config_dir: None,
+        config_files: vec![],
+    };
+
+    // 尝试获取版本
+    if let Ok(output) = Command::new(&claude_path).arg("-version").output() {
+        if output.status.success() {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !version.is_empty() {
+                info.installed = true;
+                info.version = Some(parse_version(&version));
+            }
+        }
+        // 检查 stderr
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !stderr.is_empty() && (stderr.contains("claude") || stderr.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)) {
+            info.installed = true;
+            info.version = Some(parse_version(&stderr));
+        }
+    }
+
+    // 如果上面的方式失败，尝试其他版本参数
+    if !info.installed {
+        for arg in &["--version", "-v", "-V"] {
+            if let Ok(output) = Command::new(&claude_path).arg(arg).output() {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        info.installed = true;
+                        info.version = Some(parse_version(&version));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 如果路径存在且可执行，标记为已安装
+    if !info.installed && path.is_file() {
+        info.installed = true;
+        info.version = Some("未知版本".to_string());
+    }
+
+    // 获取配置目录
+    let config_dir = get_host_config_dir();
+    info.config_dir = Some(config_dir.to_string_lossy().to_string());
+    info.config_files = scan_config_files(&config_dir);
+
+    Ok(info)
+}
+
 /// 检查主机上的 Claude Code
 async fn check_host_claude() -> ClaudeCodeInfo {
     let mut info = ClaudeCodeInfo {

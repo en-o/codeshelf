@@ -199,6 +199,7 @@ pub fn run() {
             toolbox::server::update_server,
             // Toolbox - Claude Code commands
             toolbox::claude_code::check_all_claude_installations,
+            toolbox::claude_code::check_claude_by_path,
             toolbox::claude_code::read_claude_config_file,
             toolbox::claude_code::write_claude_config_file,
             toolbox::claude_code::open_claude_config_dir,

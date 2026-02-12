@@ -357,6 +357,26 @@ export async function checkAllClaudeInstallations(): Promise<ClaudeCodeInfo[]> {
   }));
 }
 
+export async function checkClaudeByPath(claudePath: string): Promise<ClaudeCodeInfo> {
+  const info: any = await invoke("check_claude_by_path", { claudePath });
+  return {
+    envType: info.env_type as EnvType,
+    envName: info.env_name,
+    installed: info.installed,
+    version: info.version,
+    path: info.path,
+    configDir: info.config_dir,
+    configFiles: (info.config_files || []).map((f: any) => ({
+      name: f.name,
+      path: f.path,
+      exists: f.exists,
+      size: f.size,
+      modified: f.modified,
+      description: f.description,
+    })),
+  };
+}
+
 export async function readClaudeConfigFile(envType: EnvType, envName: string, path: string): Promise<string> {
   return invoke("read_claude_config_file", { envType, envName, path });
 }
