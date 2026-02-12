@@ -132,6 +132,7 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
       const settingsFile = selectedEnv.configFiles.find(f => f.name === "settings.json");
       if (settingsFile) {
         setSelectedFile(settingsFile);
+        setIsEditingFile(false);
       } else {
         setSelectedFile(null);
       }
