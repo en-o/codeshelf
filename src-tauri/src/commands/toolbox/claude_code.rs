@@ -1338,7 +1338,8 @@ pub async fn get_saved_quick_configs() -> Result<Vec<ClaudeQuickConfigOption>, S
                 .map_err(|e| format!("读取快捷配置失败: {}", e))?;
 
             if let Ok(versioned) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(configs) = versioned.get("data").and_then(|d| d.get("configs")) {
+                // VersionedData 使用 flatten，configs 在顶层
+                if let Some(configs) = versioned.get("configs") {
                     let configs: Vec<ClaudeQuickConfigOption> = serde_json::from_value(configs.clone())
                         .unwrap_or_default();
                     return Ok(configs);
@@ -1379,7 +1380,8 @@ pub async fn get_claude_installations_cache() -> Result<Option<Vec<ClaudeCodeInf
                 .map_err(|e| format!("读取安装缓存失败: {}", e))?;
 
             if let Ok(versioned) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(installations) = versioned.get("data").and_then(|d| d.get("installations")) {
+                // VersionedData 使用 flatten，installations 在顶层
+                if let Some(installations) = versioned.get("installations") {
                     let installations: Vec<ClaudeCodeInfo> = serde_json::from_value(installations.clone())
                         .unwrap_or_default();
                     return Ok(Some(installations));

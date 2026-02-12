@@ -55,15 +55,17 @@ fn load_tasks_from_file() -> Result<HashMap<String, DownloadTask>, String> {
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("读取下载任务失败: {}", e))?;
 
-    // 尝试解析版本化格式
     let versioned: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析下载任务失败: {}", e))?;
 
-    let tasks_arr = versioned
-        .get("data")
-        .and_then(|d| d.get("tasks"))
-        .and_then(|t| t.as_array())
-        .ok_or_else(|| "下载任务格式错误".to_string())?;
+    // VersionedData 使用 flatten，tasks 在顶层
+    let tasks_arr = match versioned.get("tasks").and_then(|t| t.as_array()) {
+        Some(arr) => arr,
+        None => {
+            log::info!("下载任务为空，返回空列表");
+            return Ok(HashMap::new());
+        }
+    };
 
     let tasks: Vec<DownloadTask> = serde_json::from_value(serde_json::Value::Array(tasks_arr.clone()))
         .unwrap_or_default();
@@ -90,12 +92,11 @@ async fn save_tasks_to_file() -> Result<(), String> {
     let tasks = DOWNLOAD_TASKS.lock().await;
     let tasks_vec: Vec<&DownloadTask> = tasks.values().collect();
 
+    // 使用与 VersionedData flatten 一致的格式
     let data = serde_json::json!({
         "version": 1,
         "last_updated": chrono::Utc::now().to_rfc3339(),
-        "data": {
-            "tasks": tasks_vec
-        }
+        "tasks": tasks_vec
     });
 
     let content = serde_json::to_string(&data)

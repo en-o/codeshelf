@@ -78,17 +78,12 @@ fn load_projects_from_file() -> Result<Vec<Project>, String> {
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read projects file: {}", e))?;
 
-    // 尝试解析带版本信息的格式
-    if let Ok(projects_file) = serde_json::from_str::<ProjectsFile>(&content) {
-        log::info!("从文件加载了 {} 个项目", projects_file.projects.len());
-        return Ok(projects_file.projects);
-    }
-
-    // 兼容旧格式：直接是项目数组
-    let projects: Vec<Project> = serde_json::from_str(&content)
+    // VersionedData 使用 flatten，格式为 {version, last_updated, projects: [...]}
+    let projects_file: ProjectsFile = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse projects file: {}", e))?;
 
-    Ok(projects)
+    log::info!("从文件加载了 {} 个项目", projects_file.projects.len());
+    Ok(projects_file.projects)
 }
 
 // 保存项目到文件

@@ -59,19 +59,11 @@ fn load_rules_from_file() -> Result<HashMap<String, ForwardRule>, String> {
     let versioned: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析转发规则失败: {}", e))?;
 
-    // 兼容两种格式：
-    // 1. 新格式: { "data": { "rules": [...] } }
-    // 2. 旧格式: { "rules": [...] }
-    let rules_arr = versioned
-        .get("data")
-        .and_then(|d| d.get("rules"))
-        .and_then(|r| r.as_array())
-        .or_else(|| versioned.get("rules").and_then(|r| r.as_array()));
-
-    let rules_arr = match rules_arr {
+    // VersionedData 使用 flatten，rules 在顶层
+    let rules_arr = match versioned.get("rules").and_then(|r| r.as_array()) {
         Some(arr) => arr,
         None => {
-            log::info!("转发规则为空或格式不匹配，返回空列表");
+            log::info!("转发规则为空，返回空列表");
             return Ok(HashMap::new());
         }
     };
@@ -129,12 +121,11 @@ async fn save_rules_to_file() -> Result<(), String> {
         })
     }).collect();
 
+    // 使用与 VersionedData flatten 一致的格式
     let data = serde_json::json!({
         "version": 1,
         "last_updated": chrono::Utc::now().to_rfc3339(),
-        "data": {
-            "rules": rules_data
-        }
+        "rules": rules_data
     });
 
     let content = serde_json::to_string(&data)

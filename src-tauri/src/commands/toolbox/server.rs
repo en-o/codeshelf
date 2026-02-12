@@ -72,19 +72,11 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
     let versioned: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析服务配置失败: {}", e))?;
 
-    // 兼容两种格式：
-    // 1. 新格式: { "data": { "servers": [...] } }
-    // 2. 旧格式: { "servers": [...] }
-    let servers_arr = versioned
-        .get("data")
-        .and_then(|d| d.get("servers"))
-        .and_then(|s| s.as_array())
-        .or_else(|| versioned.get("servers").and_then(|s| s.as_array()));
-
-    let servers_arr = match servers_arr {
+    // VersionedData 使用 flatten，servers 在顶层
+    let servers_arr = match versioned.get("servers").and_then(|s| s.as_array()) {
         Some(arr) => arr,
         None => {
-            log::info!("服务配置为空或格式不匹配，返回空列表");
+            log::info!("服务配置为空，返回空列表");
             return Ok(HashMap::new());
         }
     };
@@ -129,12 +121,11 @@ async fn save_servers_to_file() -> Result<(), String> {
         })
     }).collect();
 
+    // 使用与 VersionedData flatten 一致的格式
     let data = serde_json::json!({
         "version": 1,
         "last_updated": chrono::Utc::now().to_rfc3339(),
-        "data": {
-            "servers": servers_data
-        }
+        "servers": servers_data
     });
 
     let content = serde_json::to_string(&data)
