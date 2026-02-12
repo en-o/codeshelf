@@ -434,8 +434,28 @@ fn parse_version(raw: &str) -> String {
     // 尝试提取版本号
     let raw = raw.trim();
 
+    // 检测错误消息或无效输出，返回 None 表示无法解析
+    let lower = raw.to_lowercase();
+    if lower.contains("not found")
+        || lower.contains("error")
+        || lower.contains("wsl:")
+        || lower.contains("exec:")
+        || lower.contains("command not found")
+        || lower.contains("no such file")
+        || lower.contains("permission denied")
+        || lower.contains("cannot")
+    {
+        return "未知版本".to_string();
+    }
+
+    // 检测乱码（非ASCII字符过多）
+    let non_ascii_count = raw.chars().filter(|c| !c.is_ascii()).count();
+    if non_ascii_count > raw.len() / 3 {
+        return "未知版本".to_string();
+    }
+
     // 如果包含 "version" 关键字，提取后面的部分
-    if let Some(idx) = raw.to_lowercase().find("version") {
+    if let Some(idx) = lower.find("version") {
         let after = raw[idx + 7..].trim();
         let version: String = after.chars()
             .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '_')
@@ -469,6 +489,11 @@ fn parse_version(raw: &str) -> String {
         if version.contains('.') {
             return version.trim_end_matches(|c: char| !c.is_ascii_digit()).to_string();
         }
+    }
+
+    // 如果原始输出太长或无法解析，返回未知版本
+    if raw.len() > 50 || !raw.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        return "未知版本".to_string();
     }
 
     raw.to_string()
