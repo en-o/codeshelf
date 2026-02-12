@@ -1217,6 +1217,48 @@ pub async fn create_profile_from_current(
     save_config_profile(env_type, env_name, profile_name, description, settings).await
 }
 
+/// 获取 WSL 配置目录（返回 Linux 路径和 UNC 路径）
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub async fn get_wsl_config_dir(distro: String) -> Result<WslConfigDirResult, String> {
+    // 获取 WSL 用户的 home 目录
+    let output = Command::new("wsl")
+        .args(["-d", &distro, "--", "bash", "-c", "echo $HOME/.claude"])
+        .output()
+        .map_err(|e| format!("执行 wsl 命令失败: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("获取 WSL home 目录失败: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let linux_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    // 转换为 UNC 路径
+    let unc_path = format!("\\\\wsl.localhost\\{}{}",
+        distro,
+        linux_path.replace('/', "\\")
+    );
+
+    Ok(WslConfigDirResult {
+        linux_path,
+        unc_path,
+    })
+}
+
+/// WSL 配置目录结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WslConfigDirResult {
+    pub linux_path: String,
+    pub unc_path: String,
+}
+
+/// 非 Windows 系统的 stub
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub async fn get_wsl_config_dir(_distro: String) -> Result<WslConfigDirResult, String> {
+    Err("WSL 仅在 Windows 上可用".to_string())
+}
+
 /// 扫描指定配置目录的配置文件
 #[tauri::command]
 pub async fn scan_claude_config_dir(env_type: EnvType, env_name: String, config_dir: String) -> Result<Vec<ConfigFileInfo>, String> {

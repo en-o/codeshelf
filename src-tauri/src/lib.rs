@@ -218,6 +218,7 @@ pub fn run() {
             toolbox::claude_code::apply_config_profile,
             toolbox::claude_code::create_profile_from_current,
             toolbox::claude_code::scan_claude_config_dir,
+            toolbox::claude_code::get_wsl_config_dir,
             // Settings commands
             settings::get_labels,
             settings::save_labels,

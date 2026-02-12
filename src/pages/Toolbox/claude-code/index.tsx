@@ -43,6 +43,7 @@ import {
   deleteConfigProfile,
   saveConfigProfile,
   scanClaudeConfigDir,
+  getWslConfigDir,
 } from "@/services/toolbox";
 import type { ClaudeCodeInfo, ConfigFileInfo, ConfigProfile } from "@/types/toolbox";
 import {
@@ -233,21 +234,40 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
     }
   }
 
-  // 处理 WSL 手动输入的 Claude 路径
+  // 处理 WSL 手动输入的 Claude 路径（用户输入 Linux 路径，自动转换为 UNC）
   async function handleWslClaudePathSubmit() {
     if (!selectedEnv || !wslClaudePath.trim()) return;
 
-    const path = wslClaudePath.trim();
+    let linuxPath = wslClaudePath.trim();
 
-    // 验证路径格式 - 需要是 Windows UNC 格式
-    const isValidUncPath = path.startsWith("\\\\wsl.localhost\\") || path.startsWith("\\\\wsl$\\");
-    if (!isValidUncPath) {
-      setWslClaudePathError("请输入 Windows UNC 格式的路径，如 \\\\wsl.localhost\\Ubuntu\\usr\\bin\\claude");
+    // 如果用户输入了 ~ 开头，替换为 /home/用户名（需要查询实际路径）
+    if (linuxPath.startsWith("~")) {
+      const distro = selectedEnv.envName.replace("WSL: ", "");
+      try {
+        const configDirInfo = await getWslConfigDir(distro);
+        // 从 ~/.claude 路径推断 home 目录
+        const homeDir = configDirInfo.linuxPath.replace("/.claude", "");
+        linuxPath = linuxPath.replace("~", homeDir);
+      } catch {
+        setWslClaudePathError("无法获取 WSL home 目录，请使用完整路径如 /usr/bin/claude");
+        return;
+      }
+    }
+
+    // 验证路径格式 - 必须是 Linux 绝对路径
+    if (!linuxPath.startsWith("/")) {
+      setWslClaudePathError("请输入 Linux 绝对路径，如 /usr/bin/claude 或 ~/.nvm/versions/node/v22/bin/claude");
       return;
     }
 
+    // 从环境名称获取发行版名称
+    const distro = selectedEnv.envName.replace("WSL: ", "");
+
+    // 构建 UNC 路径
+    const uncPath = `\\\\wsl.localhost\\${distro}${linuxPath.replace(/\//g, "\\")}`;
+
     setWslClaudePathError(null);
-    await processClaudePath(path);
+    await processClaudePath(uncPath);
     setShowWslClaudePathInput(false);
   }
 
@@ -272,25 +292,8 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
         alert("无法识别该路径为有效的 Claude Code 安装");
       }
     } catch (checkErr) {
-      console.log("[DEBUG] Check error:", checkErr);
-      // 如果是 WSL 路径检测失败，提示用户手动设置配置目录
-      if (selectedEnv.envType === "wsl") {
-        const confirmed = confirm(
-          `无法自动检测 WSL 中的 Claude Code 安装。\n\n` +
-          `收到的路径: ${path}\n\n` +
-          `这可能是因为应用无法直接访问 WSL 文件系统执行检测命令。\n\n` +
-          `您可以手动设置配置目录来管理 Claude Code 配置。\n` +
-          `配置目录通常位于: ~/.claude\n\n` +
-          `是否现在设置配置目录？`
-        );
-        if (confirmed) {
-          // 设置默认的配置目录提示
-          setEditingConfigDir("/home/用户名/.claude");
-          setShowEditConfigDir(true);
-        }
-      } else {
-        alert(`选择路径失败:\n\n路径: ${path}\n\n错误: ${checkErr}`);
-      }
+      console.error("路径检测失败:", checkErr);
+      alert(`路径检测失败: ${checkErr}`);
     }
   }
 
@@ -768,6 +771,25 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                         >
                           手动选择
                         </button>
+                        {/* WSL 环境提供直接设置配置目录的选项 */}
+                        {selectedEnv.envType === "wsl" && (
+                          <button
+                            onClick={async () => {
+                              // 尝试自动获取配置目录
+                              const distro = selectedEnv.envName.replace("WSL: ", "");
+                              try {
+                                const configDirInfo = await getWslConfigDir(distro);
+                                setEditingConfigDir(configDirInfo.uncPath);
+                              } catch {
+                                setEditingConfigDir("");
+                              }
+                              setShowEditConfigDir(true);
+                            }}
+                            className="text-xs text-green-500 hover:underline"
+                          >
+                            直接设置配置目录
+                          </button>
+                        )}
                         <button
                           onClick={() => setShowFindClaudeHelp(true)}
                           className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
@@ -807,8 +829,19 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                       <>
                         <span className="text-gray-300">-</span>
                         <button
-                          onClick={() => {
-                            setEditingConfigDir("");
+                          onClick={async () => {
+                            // WSL 环境尝试自动获取配置目录
+                            if (selectedEnv.envType === "wsl") {
+                              const distro = selectedEnv.envName.replace("WSL: ", "");
+                              try {
+                                const configDirInfo = await getWslConfigDir(distro);
+                                setEditingConfigDir(configDirInfo.uncPath);
+                              } catch {
+                                setEditingConfigDir("");
+                              }
+                            } else {
+                              setEditingConfigDir("");
+                            }
                             setShowEditConfigDir(true);
                           }}
                           className="text-xs text-blue-500 hover:underline"
@@ -1509,7 +1542,7 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                     type="text"
                     value={editingConfigDir}
                     onChange={(e) => setEditingConfigDir(e.target.value)}
-                    placeholder={selectedEnv.envType === "wsl" ? "/home/用户名/.claude" : "C:\\Users\\用户名\\.claude"}
+                    placeholder={selectedEnv.envType === "wsl" ? "\\\\wsl.localhost\\Ubuntu\\.claude" : "C:\\Users\\用户名\\.claude"}
                     className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                   />
                   <button
@@ -1521,21 +1554,7 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                           multiple: false,
                         });
                         if (selected && typeof selected === "string") {
-                          // 如果是 WSL 环境且选择了 UNC 路径，转换为 Linux 路径
-                          if (selectedEnv.envType === "wsl" && (selected.startsWith("\\\\wsl.localhost\\") || selected.startsWith("\\\\wsl$\\"))) {
-                            const pathWithoutPrefix = selected
-                              .replace(/^\\\\wsl\.localhost\\/, "")
-                              .replace(/^\\\\wsl\$\\/, "");
-                            const parts = pathWithoutPrefix.split("\\");
-                            if (parts.length > 1) {
-                              const linuxPath = "/" + parts.slice(1).join("/");
-                              setEditingConfigDir(linuxPath);
-                            } else {
-                              setEditingConfigDir(selected);
-                            }
-                          } else {
-                            setEditingConfigDir(selected);
-                          }
+                          setEditingConfigDir(selected);
                         }
                       } catch (err) {
                         console.error("选择文件夹失败:", err);
@@ -1550,10 +1569,13 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
               </div>
 
               {selectedEnv.envType === "wsl" && (
-                <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-xs text-yellow-700 dark:text-yellow-400">
-                  <strong>WSL 注意：</strong>请输入 Linux 格式的路径，如 <code>/home/username/.claude</code>
-                  <br />
-                  可以在 WSL 终端运行 <code>echo $HOME/.claude</code> 获取路径。
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs space-y-2">
+                  <p className="font-medium text-blue-700 dark:text-blue-400">WSL 路径格式说明：</p>
+                  <div className="text-blue-600 dark:text-blue-300 space-y-1">
+                    <p><strong>推荐：</strong>使用 Windows UNC 格式</p>
+                    <code className="block bg-white dark:bg-gray-800 px-2 py-1 rounded text-xs">\\wsl.localhost\Ubuntu-22.04\home\用户名\.claude</code>
+                    <p className="text-gray-500 mt-2">在资源管理器地址栏输入 <code className="bg-white dark:bg-gray-800 px-1 rounded">\\wsl.localhost\</code> 可浏览 WSL 文件</p>
+                  </div>
                 </div>
               )}
 
@@ -1561,7 +1583,7 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                 <p className="font-medium mb-1">常见配置目录位置：</p>
                 {selectedEnv.envType === "wsl" ? (
                   <ul className="list-disc list-inside space-y-0.5">
-                    <li><code>~/.claude</code> 或 <code>/home/用户名/.claude</code></li>
+                    <li>UNC: <code>\\wsl.localhost\发行版名\home\用户名\.claude</code></li>
                   </ul>
                 ) : (
                   <ul className="list-disc list-inside space-y-0.5">
@@ -1598,13 +1620,13 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
               <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-full">
                 <Terminal size={18} className="text-orange-500" />
               </div>
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">输入 WSL Claude Code 路径</h3>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">设置 WSL Claude Code 路径</h3>
             </div>
 
-            {/* 内容区 - 可滚动 */}
+            {/* 内容区 */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Windows UNC 格式路径</label>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Linux 路径</label>
                 <input
                   type="text"
                   value={wslClaudePath}
@@ -1612,7 +1634,7 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                     setWslClaudePath(e.target.value);
                     setWslClaudePathError(null);
                   }}
-                  placeholder="\\wsl.localhost\Ubuntu\usr\bin\claude"
+                  placeholder="/usr/bin/claude"
                   className={`w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm ${
                     wslClaudePathError ? "border-red-500" : "border-gray-200 dark:border-gray-700"
                   }`}
@@ -1624,26 +1646,24 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
 
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs space-y-2">
                 <p className="font-medium text-blue-700 dark:text-blue-400">如何获取路径？</p>
-                <div className="grid grid-cols-1 gap-2 text-gray-600 dark:text-gray-400">
-                  <div className="flex gap-2">
-                    <span className="font-medium text-blue-600 dark:text-blue-400 flex-shrink-0">1.</span>
-                    <span>Windows 中运行 <code className="bg-white dark:bg-gray-800 px-1 rounded">wsl -l -v</code> 获取发行版名称</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <span className="font-medium text-blue-600 dark:text-blue-400 flex-shrink-0">2.</span>
-                    <span>WSL 终端运行 <code className="bg-white dark:bg-gray-800 px-1 rounded">which claude</code> 获取 Linux 路径</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <span className="font-medium text-blue-600 dark:text-blue-400 flex-shrink-0">3.</span>
-                    <span>组合格式: <code className="bg-white dark:bg-gray-800 px-1 rounded">\\wsl.localhost\发行版\路径</code></span>
-                  </div>
-                </div>
-                <p className="text-gray-500 pt-1 border-t border-blue-200 dark:border-blue-800">
-                  示例: <code>\\wsl.localhost\Ubuntu\usr\bin\claude</code>
+                <p className="text-gray-600 dark:text-gray-400">
+                  在 WSL 终端运行 <code className="bg-white dark:bg-gray-800 px-1 rounded">which claude</code>
                 </p>
-                <p className="text-gray-500">
-                  提示: 资源管理器地址栏输入 <code>\\wsl.localhost\</code> 可浏览 WSL 文件
+                <p className="text-gray-500 pt-2 border-t border-blue-200 dark:border-blue-800">
+                  常见路径：
                 </p>
+                <ul className="list-disc list-inside text-gray-500 space-y-0.5">
+                  <li><code>/usr/bin/claude</code></li>
+                  <li><code>/usr/local/bin/claude</code></li>
+                  <li><code>~/.nvm/versions/node/v版本号/bin/claude</code></li>
+                  <li><code>~/.local/bin/claude</code></li>
+                </ul>
+              </div>
+
+              <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs text-gray-500">
+                <strong>发行版：</strong> {selectedEnv.envName.replace("WSL: ", "")}
+                <br />
+                <span className="text-gray-400">路径将自动转换为 Windows 可访问格式</span>
               </div>
             </div>
 

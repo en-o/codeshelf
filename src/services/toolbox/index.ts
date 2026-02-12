@@ -464,6 +464,14 @@ export async function scanClaudeConfigDir(envType: EnvType, envName: string, con
   }));
 }
 
+export async function getWslConfigDir(distro: string): Promise<{ linuxPath: string; uncPath: string }> {
+  const result: any = await invoke("get_wsl_config_dir", { distro });
+  return {
+    linuxPath: result.linux_path,
+    uncPath: result.unc_path,
+  };
+}
+
 // ============== 工具函数 ==============
 
 export function formatBytes(bytes: number): string {
