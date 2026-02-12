@@ -57,6 +57,7 @@ export function LocalService({ onBack }: LocalServiceProps) {
   const [formPort, setFormPort] = useState("8080");
   const [formRootDir, setFormRootDir] = useState("");
   const [formUrlPrefix, setFormUrlPrefix] = useState("");
+  const [formIndexPage, setFormIndexPage] = useState("");
   const [formCors, setFormCors] = useState(true);
   const [formGzip, setFormGzip] = useState(true);
   const [formProxies, setFormProxies] = useState<ProxyConfig[]>([]);
@@ -95,6 +96,7 @@ export function LocalService({ onBack }: LocalServiceProps) {
     setFormPort("8080");
     setFormRootDir("");
     setFormUrlPrefix("");
+    setFormIndexPage("");
     setFormCors(true);
     setFormGzip(true);
     setFormProxies([]);
@@ -153,6 +155,7 @@ export function LocalService({ onBack }: LocalServiceProps) {
     setFormPort(server.port.toString());
     setFormRootDir(server.rootDir);
     setFormUrlPrefix(server.urlPrefix || "/");
+    setFormIndexPage(server.indexPage || "");
     setFormCors(server.cors);
     setFormGzip(server.gzip);
     setFormProxies(server.proxies || []);
@@ -198,6 +201,7 @@ export function LocalService({ onBack }: LocalServiceProps) {
       cors: formCors,
       gzip: formGzip,
       urlPrefix: formUrlPrefix.trim() || undefined,
+      indexPage: formIndexPage.trim() || undefined,
       proxies: validProxies.length > 0 ? validProxies : undefined,
     };
 
@@ -355,27 +359,29 @@ export function LocalService({ onBack }: LocalServiceProps) {
         icon={Globe}
         onBack={onBack}
         actions={
-          <>
-            <button
+          <div className="flex items-center gap-2">
+            <Button
               onClick={loadAll}
               disabled={loading}
-              className="re-btn flex items-center gap-2"
+              variant="secondary"
+              size="sm"
             >
-              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-              <span>刷新</span>
-            </button>
-            <button
+              <RefreshCw size={16} className={loading ? "animate-spin mr-2" : "mr-2"} />
+              刷新
+            </Button>
+            <Button
               onClick={() => {
                 resetForm();
                 setServiceType("web");
                 setShowAddDialog(true);
               }}
-              className="re-btn-primary flex items-center gap-2"
+              variant="primary"
+              size="sm"
             >
-              <Plus size={16} />
-              <span>创建服务</span>
-            </button>
-          </>
+              <Plus size={16} className="mr-2" />
+              创建服务
+            </Button>
+          </div>
         }
       />
 
@@ -763,6 +769,20 @@ export function LocalService({ onBack }: LocalServiceProps) {
                     />
                     <p className="text-xs text-gray-400 mt-1">
                       设置访问 URL 前缀，默认使用目录名。输入 "/" 表示无前缀（直接访问根路径）
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-2">
+                      首页文件 <span className="text-gray-400 font-normal">(可选)</span>
+                    </label>
+                    <Input
+                      value={formIndexPage}
+                      onChange={(e) => setFormIndexPage(e.target.value)}
+                      placeholder="如: index.html、index、home.html"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      设置默认首页文件，启动后将自动打开该页面。留空则访问根路径
                     </p>
                   </div>
 

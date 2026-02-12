@@ -102,6 +102,7 @@ async fn save_servers_to_file() -> Result<(), String> {
             "gzip": s.gzip,
             "cache_control": s.cache_control,
             "url_prefix": s.url_prefix,
+            "index_page": s.index_page,
             "proxies": s.proxies,
             "created_at": s.created_at
         })
@@ -202,6 +203,9 @@ pub async fn create_server(input: ServerConfigInput) -> Result<ServerConfig, Str
         }
     };
 
+    // 处理首页设置
+    let index_page = input.index_page.filter(|s| !s.is_empty());
+
     let server_id = generate_id();
     let config = ServerConfig {
         id: server_id.clone(),
@@ -212,6 +216,7 @@ pub async fn create_server(input: ServerConfigInput) -> Result<ServerConfig, Str
         gzip: input.gzip.unwrap_or(true),
         cache_control: input.cache_control,
         url_prefix,
+        index_page,
         proxies: input.proxies.unwrap_or_default(),
         status: "stopped".to_string(),
         created_at: current_time(),
@@ -268,6 +273,7 @@ pub async fn start_server(server_id: String) -> Result<String, String> {
     let id = server_id.clone();
     let port = config.port;
     let url_prefix = config.url_prefix.clone();
+    let index_page = config.index_page.clone();
 
     // 启动服务
     tokio::spawn(async move {
@@ -289,12 +295,33 @@ pub async fn start_server(server_id: String) -> Result<String, String> {
         }
     });
 
-    // 返回带前缀的 URL
-    if url_prefix == "/" {
-        Ok(format!("http://127.0.0.1:{}", port))
+    // 返回带前缀和首页的 URL
+    let base_url = if url_prefix == "/" {
+        format!("http://127.0.0.1:{}", port)
     } else {
-        Ok(format!("http://127.0.0.1:{}{}/", port, url_prefix))
-    }
+        format!("http://127.0.0.1:{}{}", port, url_prefix)
+    };
+
+    // 拼接首页
+    let full_url = match index_page {
+        Some(page) => {
+            let page = page.trim_start_matches('/');
+            if base_url.ends_with('/') {
+                format!("{}{}", base_url, page)
+            } else {
+                format!("{}/{}", base_url, page)
+            }
+        }
+        None => {
+            if base_url.ends_with('/') || url_prefix == "/" {
+                base_url
+            } else {
+                format!("{}/", base_url)
+            }
+        }
+    };
+
+    Ok(full_url)
 }
 
 /// 运行服务
@@ -688,6 +715,9 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> Resul
         }
     };
 
+    // 处理首页设置
+    let index_page = input.index_page.filter(|s| !s.is_empty());
+
     // 更新配置
     {
         let mut servers = SERVERS.lock().await;
@@ -699,6 +729,7 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> Resul
             server.gzip = input.gzip.unwrap_or(true);
             server.cache_control = input.cache_control;
             server.url_prefix = url_prefix;
+            server.index_page = index_page;
             server.proxies = input.proxies.unwrap_or_default();
         }
     }

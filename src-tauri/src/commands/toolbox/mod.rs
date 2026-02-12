@@ -159,6 +159,8 @@ pub struct ServerConfig {
     pub cache_control: Option<String>,
     /// URL 访问前缀，如 "/project" 或 "/" 表示无前缀
     pub url_prefix: String,
+    /// 首页文件，如 "index.html"、"index" 等，为空则不指定
+    pub index_page: Option<String>,
     /// 多个代理规则
     pub proxies: Vec<ProxyConfig>,
     pub status: String, // "running", "stopped"
@@ -183,6 +185,8 @@ pub struct ServerConfigInput {
     pub cache_control: Option<String>,
     /// URL 访问前缀，如 "/project" 或 "/" 表示无前缀
     pub url_prefix: Option<String>,
+    /// 首页文件，如 "index.html"、"index" 等，为空则不指定
+    pub index_page: Option<String>,
     /// 多个代理规则
     pub proxies: Option<Vec<ProxyConfig>>,
 }

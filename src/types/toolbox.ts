@@ -141,6 +141,8 @@ export interface ServerConfig {
   cacheControl?: string;
   /** URL 访问前缀，如 "/project" 或 "/" 表示无前缀 */
   urlPrefix: string;
+  /** 首页文件，如 "index.html"、"index" 等 */
+  indexPage?: string;
   /** 多个代理规则 */
   proxies: ProxyConfig[];
   status: "running" | "stopped";
@@ -156,6 +158,8 @@ export interface ServerConfigInput {
   cacheControl?: string;
   /** URL 访问前缀，如 "/project" 或 "/" 表示无前缀 */
   urlPrefix?: string;
+  /** 首页文件，如 "index.html"、"index" 等 */
+  indexPage?: string;
   /** 多个代理规则 */
   proxies?: ProxyConfig[];
 }
