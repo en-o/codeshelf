@@ -53,6 +53,7 @@ export function LocalService({ onBack }: LocalServiceProps) {
   const [formName, setFormName] = useState("");
   const [formPort, setFormPort] = useState("8080");
   const [formRootDir, setFormRootDir] = useState("");
+  const [formUrlPrefix, setFormUrlPrefix] = useState("");
   const [formCors, setFormCors] = useState(true);
   const [formGzip, setFormGzip] = useState(true);
   const [formProxies, setFormProxies] = useState<ProxyConfig[]>([]);
@@ -90,6 +91,7 @@ export function LocalService({ onBack }: LocalServiceProps) {
     setFormName("");
     setFormPort("8080");
     setFormRootDir("");
+    setFormUrlPrefix("");
     setFormCors(true);
     setFormGzip(true);
     setFormProxies([]);
@@ -110,6 +112,13 @@ export function LocalService({ onBack }: LocalServiceProps) {
       });
       if (selected) {
         setFormRootDir(selected as string);
+        // 自动提取目录名作为默认前缀
+        const dirPath = selected as string;
+        const parts = dirPath.replace(/\\/g, '/').split('/').filter(Boolean);
+        const dirName = parts[parts.length - 1];
+        if (dirName && !formUrlPrefix) {
+          setFormUrlPrefix(`/${dirName}`);
+        }
       }
     } catch (error) {
       console.error("选择目录失败:", error);

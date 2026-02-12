@@ -157,6 +157,8 @@ pub struct ServerConfig {
     pub cors: bool,
     pub gzip: bool,
     pub cache_control: Option<String>,
+    /// URL 访问前缀，如 "/project" 或 "/" 表示无前缀
+    pub url_prefix: String,
     /// 多个代理规则
     pub proxies: Vec<ProxyConfig>,
     pub status: String, // "running", "stopped"
@@ -179,6 +181,8 @@ pub struct ServerConfigInput {
     pub cors: Option<bool>,
     pub gzip: Option<bool>,
     pub cache_control: Option<String>,
+    /// URL 访问前缀，如 "/project" 或 "/" 表示无前缀
+    pub url_prefix: Option<String>,
     /// 多个代理规则
     pub proxies: Option<Vec<ProxyConfig>>,
 }

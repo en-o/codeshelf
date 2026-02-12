@@ -10,6 +10,7 @@ use axum::{
     Router,
 };
 use once_cell::sync::Lazy;
+use socket2::{Domain, Socket, Type};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -85,6 +86,23 @@ pub async fn create_server(input: ServerConfigInput) -> Result<ServerConfig, Str
         }
     }
 
+    // 处理 URL 前缀：默认使用目录名
+    let url_prefix = match input.url_prefix {
+        Some(ref prefix) if prefix == "/" => "/".to_string(),
+        Some(ref prefix) if !prefix.is_empty() => {
+            let p = prefix.trim_matches('/');
+            if p.is_empty() { "/".to_string() } else { format!("/{}", p) }
+        }
+        _ => {
+            // 默认使用目录名作为前缀
+            if let Some(dir_name) = root_path.file_name().and_then(|n| n.to_str()) {
+                format!("/{}", dir_name)
+            } else {
+                "/".to_string()
+            }
+        }
+    };
+
     let server_id = generate_id();
     let config = ServerConfig {
         id: server_id.clone(),
@@ -94,6 +112,7 @@ pub async fn create_server(input: ServerConfigInput) -> Result<ServerConfig, Str
         cors: input.cors.unwrap_or(true),
         gzip: input.gzip.unwrap_or(true),
         cache_control: input.cache_control,
+        url_prefix,
         proxies: input.proxies.unwrap_or_default(),
         status: "stopped".to_string(),
         created_at: current_time(),
@@ -142,6 +161,7 @@ pub async fn start_server(server_id: String) -> Result<String, String> {
 
     let id = server_id.clone();
     let port = config.port;
+    let url_prefix = config.url_prefix.clone();
 
     // 启动服务
     tokio::spawn(async move {
@@ -156,7 +176,12 @@ pub async fn start_server(server_id: String) -> Result<String, String> {
         }
     });
 
-    Ok(format!("http://127.0.0.1:{}", port))
+    // 返回带前缀的 URL
+    if url_prefix == "/" {
+        Ok(format!("http://127.0.0.1:{}", port))
+    } else {
+        Ok(format!("http://127.0.0.1:{}{}/", port, url_prefix))
+    }
 }
 
 /// 运行服务
@@ -190,8 +215,22 @@ async fn run_server(
         log::info!("代理规则: /{} -> {}", proxy.prefix.trim_matches('/'), proxy.target);
     }
 
-    // 添加静态文件服务
-    app = app.fallback_service(serve_dir);
+    // 根据 URL 前缀配置静态文件服务
+    if config.url_prefix == "/" {
+        // 无前缀，直接在根路径提供服务
+        app = app.fallback_service(serve_dir);
+    } else {
+        // 有前缀，需要在特定路径提供服务
+        let prefix = config.url_prefix.trim_matches('/');
+        let nested_router = Router::new().fallback_service(serve_dir);
+        app = app.nest(&format!("/{}", prefix), nested_router);
+
+        // 根路径重定向到前缀路径
+        let redirect_prefix = config.url_prefix.clone();
+        app = app.route("/", axum::routing::get(move || async move {
+            axum::response::Redirect::permanent(&format!("{}/", redirect_prefix))
+        }));
+    }
 
     // 添加 CORS
     if config.cors {
@@ -211,13 +250,34 @@ async fn run_server(
     // 绑定地址
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
-    log::info!("静态服务启动: http://127.0.0.1:{}", config.port);
+    log::info!("静态服务启动: http://127.0.0.1:{}{}", config.port,
+        if config.url_prefix == "/" { "".to_string() } else { format!("{}/", config.url_prefix) });
     log::info!("根目录: {}", config.root_dir);
 
-    // 创建服务器
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
+    // 使用 socket2 创建支持 SO_REUSEADDR 的 socket
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, None)
+        .map_err(|e| format!("创建 socket 失败: {}", e))?;
+
+    // 设置 SO_REUSEADDR，允许在 TIME_WAIT 状态时复用端口
+    socket.set_reuse_address(true)
+        .map_err(|e| format!("设置 SO_REUSEADDR 失败: {}", e))?;
+
+    // 设置非阻塞模式
+    socket.set_nonblocking(true)
+        .map_err(|e| format!("设置非阻塞模式失败: {}", e))?;
+
+    // 绑定地址
+    socket.bind(&addr.into())
         .map_err(|e| format!("绑定端口失败: {}", e))?;
+
+    // 监听
+    socket.listen(1024)
+        .map_err(|e| format!("监听端口失败: {}", e))?;
+
+    // 转换为 tokio TcpListener
+    let std_listener: std::net::TcpListener = socket.into();
+    let listener = tokio::net::TcpListener::from_std(std_listener)
+        .map_err(|e| format!("创建 TcpListener 失败: {}", e))?;
 
     // 使用 axum::serve 并添加 graceful shutdown
     let server = axum::serve(listener, app);
@@ -453,6 +513,24 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> Resul
         stop_server(server_id.clone()).await?;
     }
 
+    // 处理 URL 前缀
+    let root_path = PathBuf::from(&input.root_dir);
+    let url_prefix = match input.url_prefix {
+        Some(ref prefix) if prefix == "/" => "/".to_string(),
+        Some(ref prefix) if !prefix.is_empty() => {
+            let p = prefix.trim_matches('/');
+            if p.is_empty() { "/".to_string() } else { format!("/{}", p) }
+        }
+        _ => {
+            // 默认使用目录名作为前缀
+            if let Some(dir_name) = root_path.file_name().and_then(|n| n.to_str()) {
+                format!("/{}", dir_name)
+            } else {
+                "/".to_string()
+            }
+        }
+    };
+
     // 更新配置
     {
         let mut servers = SERVERS.lock().await;
@@ -463,6 +541,7 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> Resul
             server.cors = input.cors.unwrap_or(true);
             server.gzip = input.gzip.unwrap_or(true);
             server.cache_control = input.cache_control;
+            server.url_prefix = url_prefix;
             server.proxies = input.proxies.unwrap_or_default();
         }
     }

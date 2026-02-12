@@ -139,6 +139,8 @@ export interface ServerConfig {
   cors: boolean;
   gzip: boolean;
   cacheControl?: string;
+  /** URL 访问前缀，如 "/project" 或 "/" 表示无前缀 */
+  urlPrefix: string;
   /** 多个代理规则 */
   proxies: ProxyConfig[];
   status: "running" | "stopped";
@@ -152,6 +154,8 @@ export interface ServerConfigInput {
   cors?: boolean;
   gzip?: boolean;
   cacheControl?: string;
+  /** URL 访问前缀，如 "/project" 或 "/" 表示无前缀 */
+  urlPrefix?: string;
   /** 多个代理规则 */
   proxies?: ProxyConfig[];
 }
