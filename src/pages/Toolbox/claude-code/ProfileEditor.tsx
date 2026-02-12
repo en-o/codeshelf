@@ -160,7 +160,7 @@ export function ProfileEditor({
         );
 
       case "model":
-        const isCustom = value && !opt.options?.some(o => o.value === value);
+        const isCustom = Boolean(value) && !opt.options?.some(o => o.value === value);
         return (
           <div className="flex flex-col gap-1 w-full">
             <select

@@ -46,7 +46,6 @@ import {
   CONFIG_REFERENCES,
   type QuickConfigOption,
   loadQuickConfigs,
-  saveQuickConfigs,
 } from "./constants";
 import { ProfileEditor } from "./ProfileEditor";
 import { QuickConfigManager } from "./QuickConfigManager";
