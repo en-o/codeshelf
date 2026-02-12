@@ -1,9 +1,8 @@
 import { useState } from "react";
 import {
   Search,
-  Network,
+  Activity,
   Download,
-  ListTree,
   Server,
   Minus,
   X,
@@ -14,17 +13,16 @@ import { useAppStore } from "@/stores/appStore";
 import type { ToolType } from "@/types/toolbox";
 
 // 子页面组件
-import { PortScanner } from "./PortScanner";
 import { FileDownloader } from "./FileDownloader";
-import { ProcessManager } from "./ProcessManager";
 import { LocalService } from "./LocalService";
+import { SystemMonitor } from "./SystemMonitor";
 
 const tools = [
   {
-    id: "scanner" as ToolType,
-    name: "端口扫描",
-    description: "扫描目标主机的开放端口，支持并发扫描和常用端口快速检测",
-    icon: Network,
+    id: "monitor" as ToolType,
+    name: "系统监控",
+    description: "端口扫描、本地端口占用查看、进程管理和系统资源监控",
+    icon: Activity,
     color: "bg-blue-500",
   },
   {
@@ -33,13 +31,6 @@ const tools = [
     description: "下载远程文件，支持断点续传、重试机制和下载队列管理",
     icon: Download,
     color: "bg-green-500",
-  },
-  {
-    id: "process" as ToolType,
-    name: "进程管理",
-    description: "查看系统进程和端口占用情况，支持按端口过滤和终止进程",
-    icon: ListTree,
-    color: "bg-purple-500",
   },
   {
     id: "server" as ToolType,
@@ -65,12 +56,10 @@ export function ToolboxPage() {
   // 渲染工具详情页
   const renderToolPanel = () => {
     switch (activeTool) {
-      case "scanner":
-        return <PortScanner onBack={() => setActiveTool(null)} />;
+      case "monitor":
+        return <SystemMonitor onBack={() => setActiveTool(null)} />;
       case "downloader":
         return <FileDownloader onBack={() => setActiveTool(null)} />;
-      case "process":
-        return <ProcessManager onBack={() => setActiveTool(null)} />;
       case "server":
         return <LocalService onBack={() => setActiveTool(null)} />;
       default:

@@ -158,7 +158,7 @@ export interface ServerConfigInput {
 
 // ============== 工具箱页面状态 ==============
 
-export type ToolType = "scanner" | "downloader" | "process" | "server";
+export type ToolType = "monitor" | "downloader" | "server";
 
 export interface ToolInfo {
   id: ToolType;
