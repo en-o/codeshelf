@@ -40,11 +40,17 @@ static SERVER_CONTROLLERS: Lazy<Arc<Mutex<HashMap<String, Arc<ServerController>>
 async fn ensure_servers_loaded() {
     let mut loaded = SERVERS_LOADED.lock().await;
     if !*loaded {
-        if let Ok(servers) = load_servers_from_file() {
-            let mut servers_map = SERVERS.lock().await;
-            *servers_map = servers;
+        match load_servers_from_file() {
+            Ok(servers) => {
+                let mut servers_map = SERVERS.lock().await;
+                *servers_map = servers;
+                *loaded = true; // 只有成功加载才设置为 true
+            }
+            Err(e) => {
+                log::warn!("加载服务配置失败，将在下次重试: {}", e);
+                // 不设置 loaded = true，允许下次重试
+            }
         }
-        *loaded = true;
     }
 }
 
@@ -89,6 +95,10 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
 /// 保存服务配置到文件
 async fn save_servers_to_file() -> Result<(), String> {
     let config = storage::get_storage_config()?;
+
+    // 确保数据目录存在
+    config.ensure_dirs()?;
+
     let servers = SERVERS.lock().await;
 
     // 只保存持久化需要的字段
@@ -231,6 +241,10 @@ pub async fn create_server(input: ServerConfigInput) -> Result<ServerConfig, Str
     // 持久化到文件
     if let Err(e) = save_servers_to_file().await {
         log::error!("保存服务配置失败: {}", e);
+        // 移除刚添加的配置，因为无法持久化
+        let mut servers = SERVERS.lock().await;
+        servers.remove(&server_id);
+        return Err(format!("保存服务配置失败: {}", e));
     }
 
     Ok(config)
@@ -647,6 +661,12 @@ pub async fn remove_server(server_id: String) -> Result<(), String> {
     // 先停止服务
     let _ = stop_server(server_id.clone()).await;
 
+    // 保存旧配置以便回滚
+    let old_config = {
+        let servers = SERVERS.lock().await;
+        servers.get(&server_id).cloned()
+    };
+
     // 移除配置
     {
         let mut servers = SERVERS.lock().await;
@@ -656,6 +676,12 @@ pub async fn remove_server(server_id: String) -> Result<(), String> {
     // 持久化到文件
     if let Err(e) = save_servers_to_file().await {
         log::error!("保存服务配置失败: {}", e);
+        // 回滚：恢复删除的配置
+        if let Some(config) = old_config {
+            let mut servers = SERVERS.lock().await;
+            servers.insert(server_id, config);
+        }
+        return Err(format!("保存服务配置失败: {}", e));
     }
 
     Ok(())
@@ -684,13 +710,14 @@ pub async fn get_server(server_id: String) -> Result<Option<ServerConfig>, Strin
 pub async fn update_server(server_id: String, input: ServerConfigInput) -> Result<ServerConfig, String> {
     ensure_servers_loaded().await;
 
-    // 获取当前配置
+    // 获取当前配置（用于回滚）
     let current = {
         let servers = SERVERS.lock().await;
         servers.get(&server_id).cloned()
     };
 
     let current = current.ok_or_else(|| format!("服务不存在: {}", server_id))?;
+    let old_config = current.clone();
 
     // 如果正在运行，先停止
     if current.status == "running" {
@@ -737,6 +764,10 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> Resul
     // 持久化到文件
     if let Err(e) = save_servers_to_file().await {
         log::error!("保存服务配置失败: {}", e);
+        // 回滚：恢复旧配置
+        let mut servers = SERVERS.lock().await;
+        servers.insert(server_id.clone(), old_config);
+        return Err(format!("保存服务配置失败: {}", e));
     }
 
     let servers = SERVERS.lock().await;

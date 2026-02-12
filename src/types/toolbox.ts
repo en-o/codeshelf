@@ -155,11 +155,11 @@ export interface ServerConfigInput {
   rootDir: string;
   cors?: boolean;
   gzip?: boolean;
-  cacheControl?: string;
+  cacheControl?: string | null;
   /** URL 访问前缀，如 "/project" 或 "/" 表示无前缀 */
   urlPrefix?: string;
-  /** 首页文件，如 "index.html"、"index" 等 */
-  indexPage?: string;
+  /** 首页文件，如 "index.html"、"index" 等，null 表示清空 */
+  indexPage?: string | null;
   /** 多个代理规则 */
   proxies?: ProxyConfig[];
 }

@@ -27,11 +27,17 @@ static FORWARD_CONTROLLERS: Lazy<Arc<Mutex<HashMap<String, Arc<ForwardController
 async fn ensure_rules_loaded() {
     let mut loaded = RULES_LOADED.lock().await;
     if !*loaded {
-        if let Ok(rules) = load_rules_from_file() {
-            let mut rules_map = FORWARD_RULES.lock().await;
-            *rules_map = rules;
+        match load_rules_from_file() {
+            Ok(rules) => {
+                let mut rules_map = FORWARD_RULES.lock().await;
+                *rules_map = rules;
+                *loaded = true; // 只有成功加载才设置为 true
+            }
+            Err(e) => {
+                log::warn!("加载转发规则失败，将在下次重试: {}", e);
+                // 不设置 loaded = true，允许下次重试
+            }
         }
-        *loaded = true;
     }
 }
 
@@ -94,6 +100,10 @@ fn load_rules_from_file() -> Result<HashMap<String, ForwardRule>, String> {
 /// 保存转发规则到文件
 async fn save_rules_to_file() -> Result<(), String> {
     let config = storage::get_storage_config()?;
+
+    // 确保数据目录存在
+    config.ensure_dirs()?;
+
     let rules = FORWARD_RULES.lock().await;
 
     // 只保存持久化需要的字段
@@ -233,6 +243,10 @@ pub async fn add_forward_rule(input: ForwardRuleInput) -> Result<ForwardRule, St
     // 持久化到文件
     if let Err(e) = save_rules_to_file().await {
         log::error!("保存转发规则失败: {}", e);
+        // 移除刚添加的规则，因为无法持久化
+        let mut rules = FORWARD_RULES.lock().await;
+        rules.remove(&rule_id);
+        return Err(format!("保存转发规则失败: {}", e));
     }
 
     Ok(rule)
@@ -246,6 +260,12 @@ pub async fn remove_forward_rule(rule_id: String) -> Result<(), String> {
     // 先停止转发
     let _ = stop_forwarding(rule_id.clone()).await;
 
+    // 保存旧规则以便回滚
+    let old_rule = {
+        let rules = FORWARD_RULES.lock().await;
+        rules.get(&rule_id).cloned()
+    };
+
     // 移除规则
     {
         let mut rules = FORWARD_RULES.lock().await;
@@ -255,6 +275,12 @@ pub async fn remove_forward_rule(rule_id: String) -> Result<(), String> {
     // 持久化到文件
     if let Err(e) = save_rules_to_file().await {
         log::error!("保存转发规则失败: {}", e);
+        // 回滚：恢复删除的规则
+        if let Some(rule) = old_rule {
+            let mut rules = FORWARD_RULES.lock().await;
+            rules.insert(rule_id, rule);
+        }
+        return Err(format!("保存转发规则失败: {}", e));
     }
 
     Ok(())
@@ -563,13 +589,14 @@ pub async fn get_forward_stats(rule_id: String) -> Result<ForwardStats, String> 
 pub async fn update_forward_rule(rule_id: String, input: ForwardRuleInput) -> Result<ForwardRule, String> {
     ensure_rules_loaded().await;
 
-    // 获取当前规则
+    // 获取当前规则（用于回滚）
     let current_rule = {
         let rules = FORWARD_RULES.lock().await;
         rules.get(&rule_id).cloned()
     };
 
     let current = current_rule.ok_or_else(|| format!("规则不存在: {}", rule_id))?;
+    let old_rule = current.clone();
 
     // 如果正在运行，先停止
     if current.status == "running" {
@@ -590,6 +617,10 @@ pub async fn update_forward_rule(rule_id: String, input: ForwardRuleInput) -> Re
     // 持久化到文件
     if let Err(e) = save_rules_to_file().await {
         log::error!("保存转发规则失败: {}", e);
+        // 回滚：恢复旧规则
+        let mut rules = FORWARD_RULES.lock().await;
+        rules.insert(rule_id.clone(), old_rule);
+        return Err(format!("保存转发规则失败: {}", e));
     }
 
     let rules = FORWARD_RULES.lock().await;

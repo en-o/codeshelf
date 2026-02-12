@@ -35,17 +35,18 @@ pub async fn get_labels() -> Result<Vec<String>, String> {
 /// 保存标签
 #[tauri::command]
 pub async fn save_labels(labels: Vec<String>) -> Result<(), String> {
-    if let Ok(config) = storage::get_storage_config() {
-        let data = VersionedData {
-            version: 1,
-            last_updated: current_iso_time(),
-            data: LabelsData { labels },
-        };
-        let content = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("序列化标签失败: {}", e))?;
-        fs::write(config.labels_file(), content)
-            .map_err(|e| format!("保存标签失败: {}", e))?;
-    }
+    let config = storage::get_storage_config()?;
+    config.ensure_dirs()?;
+
+    let data = VersionedData {
+        version: 1,
+        last_updated: current_iso_time(),
+        data: LabelsData { labels },
+    };
+    let content = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("序列化标签失败: {}", e))?;
+    fs::write(config.labels_file(), content)
+        .map_err(|e| format!("保存标签失败: {}", e))?;
     Ok(())
 }
 
@@ -95,17 +96,18 @@ pub async fn get_categories() -> Result<Vec<String>, String> {
 /// 保存分类
 #[tauri::command]
 pub async fn save_categories(categories: Vec<String>) -> Result<(), String> {
-    if let Ok(config) = storage::get_storage_config() {
-        let data = VersionedData {
-            version: 1,
-            last_updated: current_iso_time(),
-            data: CategoriesData { categories },
-        };
-        let content = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("序列化分类失败: {}", e))?;
-        fs::write(config.categories_file(), content)
-            .map_err(|e| format!("保存分类失败: {}", e))?;
-    }
+    let config = storage::get_storage_config()?;
+    config.ensure_dirs()?;
+
+    let data = VersionedData {
+        version: 1,
+        last_updated: current_iso_time(),
+        data: CategoriesData { categories },
+    };
+    let content = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("序列化分类失败: {}", e))?;
+    fs::write(config.categories_file(), content)
+        .map_err(|e| format!("保存分类失败: {}", e))?;
     Ok(())
 }
 
@@ -163,17 +165,18 @@ pub async fn get_editors() -> Result<Vec<EditorConfig>, String> {
 
 /// 保存编辑器配置
 async fn save_editors_internal(editors: &[EditorConfig]) -> Result<(), String> {
-    if let Ok(config) = storage::get_storage_config() {
-        let data = VersionedData {
-            version: 1,
-            last_updated: current_iso_time(),
-            data: EditorsData { editors: editors.to_vec() },
-        };
-        let content = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("序列化编辑器配置失败: {}", e))?;
-        fs::write(config.editors_file(), content)
-            .map_err(|e| format!("保存编辑器配置失败: {}", e))?;
-    }
+    let config = storage::get_storage_config()?;
+    config.ensure_dirs()?;
+
+    let data = VersionedData {
+        version: 1,
+        last_updated: current_iso_time(),
+        data: EditorsData { editors: editors.to_vec() },
+    };
+    let content = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("序列化编辑器配置失败: {}", e))?;
+    fs::write(config.editors_file(), content)
+        .map_err(|e| format!("保存编辑器配置失败: {}", e))?;
     Ok(())
 }
 
@@ -285,21 +288,22 @@ pub async fn get_terminal_config() -> Result<TerminalData, String> {
 /// 保存终端配置
 #[tauri::command]
 pub async fn save_terminal_config(input: TerminalConfigInput) -> Result<(), String> {
-    if let Ok(config) = storage::get_storage_config() {
-        let data = VersionedData {
-            version: 1,
-            last_updated: current_iso_time(),
-            data: TerminalData {
-                terminal_type: input.terminal_type,
-                custom_path: input.custom_path,
-                terminal_path: input.terminal_path,
-            },
-        };
-        let content = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("序列化终端配置失败: {}", e))?;
-        fs::write(config.terminal_file(), content)
-            .map_err(|e| format!("保存终端配置失败: {}", e))?;
-    }
+    let config = storage::get_storage_config()?;
+    config.ensure_dirs()?;
+
+    let data = VersionedData {
+        version: 1,
+        last_updated: current_iso_time(),
+        data: TerminalData {
+            terminal_type: input.terminal_type,
+            custom_path: input.custom_path,
+            terminal_path: input.terminal_path,
+        },
+    };
+    let content = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("序列化终端配置失败: {}", e))?;
+    fs::write(config.terminal_file(), content)
+        .map_err(|e| format!("保存终端配置失败: {}", e))?;
     Ok(())
 }
 
@@ -353,17 +357,18 @@ pub async fn save_app_settings(input: AppSettingsInput) -> Result<AppSettingsDat
         settings.scan_depth = scan_depth;
     }
 
-    if let Ok(config) = storage::get_storage_config() {
-        let data = VersionedData {
-            version: 1,
-            last_updated: current_iso_time(),
-            data: settings.clone(),
-        };
-        let content = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("序列化应用设置失败: {}", e))?;
-        fs::write(config.app_settings_file(), content)
-            .map_err(|e| format!("保存应用设置失败: {}", e))?;
-    }
+    let config = storage::get_storage_config()?;
+    config.ensure_dirs()?;
+
+    let data = VersionedData {
+        version: 1,
+        last_updated: current_iso_time(),
+        data: settings.clone(),
+    };
+    let content = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("序列化应用设置失败: {}", e))?;
+    fs::write(config.app_settings_file(), content)
+        .map_err(|e| format!("保存应用设置失败: {}", e))?;
 
     Ok(settings)
 }

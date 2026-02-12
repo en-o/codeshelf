@@ -200,9 +200,9 @@ export function LocalService({ onBack }: LocalServiceProps) {
       rootDir: formRootDir.trim(),
       cors: formCors,
       gzip: formGzip,
-      urlPrefix: formUrlPrefix.trim() || undefined,
-      indexPage: formIndexPage.trim() || undefined,
-      proxies: validProxies.length > 0 ? validProxies : undefined,
+      urlPrefix: formUrlPrefix.trim() || "/",
+      indexPage: formIndexPage.trim() || null,
+      proxies: validProxies.length > 0 ? validProxies : [],
     };
 
     try {
