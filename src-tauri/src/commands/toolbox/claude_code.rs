@@ -220,36 +220,31 @@ async fn check_claude_by_wsl_unc_path(unc_path: &str) -> Result<ClaudeCodeInfo, 
     let distro = parts[0];
     let linux_path = format!("/{}", parts[1].replace('\\', "/"));
 
-    println!("[DEBUG] Distro: {:?}, Linux path: {:?}", distro, linux_path);
+    // 提取 UNC 前缀（保留原始大小写）
+    let unc_prefix = &clean_path[..distro_start + distro.len()];
+    println!("[DEBUG] Distro: {:?}, Linux path: {:?}, UNC prefix: {:?}", distro, linux_path, unc_prefix);
 
     let mut info = ClaudeCodeInfo {
         env_type: EnvType::Wsl,
         env_name: format!("WSL: {}", distro),
         installed: false,
         version: None,
-        path: Some(linux_path.clone()),
+        path: Some(unc_path.to_string()), // 存储完整的 UNC 路径
         config_dir: None,
         config_files: vec![],
     };
 
-    // 检查文件是否存在
-    println!("[DEBUG] Running: wsl -d {} -- test -f {}", distro, linux_path);
-    let check_output = Command::new("wsl")
-        .args(["-d", distro, "--", "test", "-f", &linux_path])
-        .output()
-        .map_err(|e| format!("执行 WSL 命令失败: {}", e))?;
+    // 检查文件是否存在（使用 Windows API 直接检查 UNC 路径）
+    let unc_file_path = PathBuf::from(unc_path);
+    println!("[DEBUG] Checking UNC path exists: {:?}", unc_file_path);
 
-    println!("[DEBUG] WSL test command status: {:?}", check_output.status);
-    println!("[DEBUG] WSL test stdout: {:?}", String::from_utf8_lossy(&check_output.stdout));
-    println!("[DEBUG] WSL test stderr: {:?}", String::from_utf8_lossy(&check_output.stderr));
-
-    if !check_output.status.success() {
-        return Err(format!("WSL 中路径不存在: {}", linux_path));
+    if !unc_file_path.exists() {
+        return Err(format!("WSL 中路径不存在: {}", unc_path));
     }
 
     info.installed = true;
 
-    // 获取版本
+    // 获取版本（仍然需要用 wsl 命令执行）
     for arg in &["-version", "--version", "-v"] {
         if let Ok(output) = Command::new("wsl")
             .args(["-d", distro, "--", &linux_path, arg])
@@ -273,15 +268,22 @@ async fn check_claude_by_wsl_unc_path(unc_path: &str) -> Result<ClaudeCodeInfo, 
         info.version = Some("未知版本".to_string());
     }
 
-    // 获取配置目录
+    // 获取配置目录 - 转换为 UNC 格式
     if let Ok(output) = Command::new("wsl")
         .args(["-d", distro, "--", "bash", "-c", "echo $HOME/.claude"])
         .output()
     {
         if output.status.success() {
-            let config_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            info.config_dir = Some(config_dir.clone());
-            info.config_files = scan_wsl_config_files(distro, &config_dir);
+            let linux_config_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // 转换为 UNC 路径：/home/user/.claude -> \\wsl.localhost\distro\home\user\.claude
+            let unc_config_dir = format!("{}{}",
+                unc_prefix,
+                linux_config_dir.replace('/', "\\")
+            );
+            println!("[DEBUG] Config dir UNC: {:?}", unc_config_dir);
+            info.config_dir = Some(unc_config_dir.clone());
+            // 使用 Windows API 扫描配置文件
+            info.config_files = scan_config_files(&PathBuf::from(&unc_config_dir));
         }
     }
 
@@ -615,22 +617,32 @@ fn scan_wsl_config_files(distro: &str, config_dir: &str) -> Vec<ConfigFileInfo> 
             description: description.to_string(),
         };
 
-        // 检查文件是否存在
+        // 分开检查文件存在性和获取文件信息
+        // 先检查文件是否存在
         if let Ok(output) = Command::new("wsl")
-            .args(["-d", distro, "--", "bash", "-c", &format!("test -f '{}' && stat -c '%s %Y' '{}'", path, path)])
+            .args(["-d", distro, "--", "test", "-f", &path])
             .output()
         {
             if output.status.success() {
-                let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let parts: Vec<&str> = stat.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    file_info.exists = true;
-                    file_info.size = parts[0].parse().unwrap_or(0);
-                    if let Ok(timestamp) = parts[1].parse::<i64>() {
-                        let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
-                            .map(|dt| dt.with_timezone(&chrono::Local))
-                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string());
-                        file_info.modified = datetime;
+                file_info.exists = true;
+
+                // 获取文件大小和修改时间
+                if let Ok(stat_output) = Command::new("wsl")
+                    .args(["-d", distro, "--", "stat", "-c", "%s %Y", &path])
+                    .output()
+                {
+                    if stat_output.status.success() {
+                        let stat = String::from_utf8_lossy(&stat_output.stdout).trim().to_string();
+                        let parts: Vec<&str> = stat.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            file_info.size = parts[0].parse().unwrap_or(0);
+                            if let Ok(timestamp) = parts[1].parse::<i64>() {
+                                let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                                    .map(|dt| dt.with_timezone(&chrono::Local))
+                                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string());
+                                file_info.modified = datetime;
+                            }
+                        }
                     }
                 }
             }
@@ -730,9 +742,21 @@ fn scan_config_files(config_dir: &PathBuf) -> Vec<ConfigFileInfo> {
     files
 }
 
+/// 检查路径是否是 WSL UNC 路径
+fn is_wsl_unc_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.starts_with("\\\\wsl.localhost\\") || lower.starts_with("\\\\wsl$\\")
+}
+
 /// 读取配置文件内容
 #[tauri::command]
 pub async fn read_claude_config_file(env_type: EnvType, env_name: String, path: String) -> Result<String, String> {
+    // 如果是 UNC 路径，直接用 Windows API 读取
+    if is_wsl_unc_path(&path) {
+        return std::fs::read_to_string(&path)
+            .map_err(|e| format!("读取配置文件失败: {}", e));
+    }
+
     match env_type {
         EnvType::Host => {
             std::fs::read_to_string(&path)
@@ -762,6 +786,16 @@ pub async fn read_claude_config_file(env_type: EnvType, env_name: String, path: 
 /// 写入配置文件内容
 #[tauri::command]
 pub async fn write_claude_config_file(env_type: EnvType, env_name: String, path: String, content: String) -> Result<(), String> {
+    // 如果是 UNC 路径，直接用 Windows API 写入
+    if is_wsl_unc_path(&path) {
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+        return std::fs::write(&path, content)
+            .map_err(|e| format!("写入配置文件失败: {}", e));
+    }
+
     match env_type {
         EnvType::Host => {
             if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -807,6 +841,20 @@ pub async fn write_claude_config_file(env_type: EnvType, env_name: String, path:
 /// 打开配置目录
 #[tauri::command]
 pub async fn open_claude_config_dir(env_type: EnvType, env_name: String, config_dir: String) -> Result<(), String> {
+    // 如果是 UNC 路径，直接用 explorer 打开
+    if is_wsl_unc_path(&config_dir) {
+        let path = PathBuf::from(&config_dir);
+        if !path.exists() {
+            std::fs::create_dir_all(&path)
+                .map_err(|e| format!("创建配置目录失败: {}", e))?;
+        }
+        Command::new("explorer")
+            .arg(&config_dir)
+            .spawn()
+            .map_err(|e| format!("打开目录失败: {}", e))?;
+        return Ok(());
+    }
+
     match env_type {
         EnvType::Host => {
             let path = PathBuf::from(&config_dir);
@@ -1164,6 +1212,12 @@ pub async fn create_profile_from_current(
 /// 扫描指定配置目录的配置文件
 #[tauri::command]
 pub async fn scan_claude_config_dir(env_type: EnvType, env_name: String, config_dir: String) -> Result<Vec<ConfigFileInfo>, String> {
+    // 如果是 UNC 路径，直接用 Windows API 扫描
+    if is_wsl_unc_path(&config_dir) {
+        let path = PathBuf::from(&config_dir);
+        return Ok(scan_config_files(&path));
+    }
+
     match env_type {
         EnvType::Host => {
             let path = PathBuf::from(&config_dir);
