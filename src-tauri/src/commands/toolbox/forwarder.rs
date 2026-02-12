@@ -59,11 +59,22 @@ fn load_rules_from_file() -> Result<HashMap<String, ForwardRule>, String> {
     let versioned: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析转发规则失败: {}", e))?;
 
+    // 兼容两种格式：
+    // 1. 新格式: { "data": { "rules": [...] } }
+    // 2. 旧格式: { "rules": [...] }
     let rules_arr = versioned
         .get("data")
         .and_then(|d| d.get("rules"))
         .and_then(|r| r.as_array())
-        .ok_or_else(|| "转发规则格式错误".to_string())?;
+        .or_else(|| versioned.get("rules").and_then(|r| r.as_array()));
+
+    let rules_arr = match rules_arr {
+        Some(arr) => arr,
+        None => {
+            log::info!("转发规则为空或格式不匹配，返回空列表");
+            return Ok(HashMap::new());
+        }
+    };
 
     let mut rules = HashMap::new();
     for rule_val in rules_arr {

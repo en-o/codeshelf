@@ -72,11 +72,22 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
     let versioned: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析服务配置失败: {}", e))?;
 
+    // 兼容两种格式：
+    // 1. 新格式: { "data": { "servers": [...] } }
+    // 2. 旧格式: { "servers": [...] }
     let servers_arr = versioned
         .get("data")
         .and_then(|d| d.get("servers"))
         .and_then(|s| s.as_array())
-        .ok_or_else(|| "服务配置格式错误".to_string())?;
+        .or_else(|| versioned.get("servers").and_then(|s| s.as_array()));
+
+    let servers_arr = match servers_arr {
+        Some(arr) => arr,
+        None => {
+            log::info!("服务配置为空或格式不匹配，返回空列表");
+            return Ok(HashMap::new());
+        }
+    };
 
     let mut servers = HashMap::new();
     for server_val in servers_arr {
