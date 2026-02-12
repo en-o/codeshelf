@@ -1,11 +1,14 @@
 // 配置档案编辑器组件
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   X,
   Save,
   Sliders,
   Lock,
+  ChevronDown,
+  Search,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import type { ConfigProfile } from "@/types/toolbox";

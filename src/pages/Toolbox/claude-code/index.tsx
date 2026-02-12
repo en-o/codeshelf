@@ -27,6 +27,7 @@ import {
   Lock,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { platform } from "@tauri-apps/plugin-os";
 import { ToolPanelHeader } from "../index";
 import { Button } from "@/components/ui";
 import {
@@ -158,12 +159,15 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
     if (!selectedEnv) return;
 
     try {
+      const currentPlatform = await platform();
+      const isWindows = currentPlatform === "windows";
+
       const selected = await open({
         title: "选择 Claude 可执行文件",
         multiple: false,
         filters: [{
           name: "可执行文件",
-          extensions: process.platform === "win32" ? ["exe", "cmd", "bat"] : ["*"],
+          extensions: isWindows ? ["exe", "cmd", "bat"] : [],
         }],
       });
 
