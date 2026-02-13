@@ -184,6 +184,11 @@ async fn handle_client_connection(
                 eprintln!("发送数据到客户端失败: {}", e);
                 break;
             }
+            // 刷新缓冲区，确保数据立即发送
+            if let Err(e) = w.flush().await {
+                eprintln!("刷新数据到客户端失败: {}", e);
+                break;
+            }
 
             // 更新统计
             let mut state = session_state_clone2.write().await;
