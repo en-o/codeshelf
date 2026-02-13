@@ -15,7 +15,7 @@ export function DeleteConfirmDialog({
   const [deleteDirectory, setDeleteDirectory] = useState(false);
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 top-8 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
         {/* Header */}
         <div className="px-8 py-6 border-b border-gray-200">

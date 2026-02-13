@@ -1,26 +1,12 @@
+// 项目管理模块
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Project {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-    #[serde(alias = "is_favorite")]
-    pub is_favorite: bool,
-    pub tags: Vec<String>,
-    pub labels: Vec<String>,
-    #[serde(alias = "created_at")]
-    pub created_at: String,
-    #[serde(alias = "updated_at")]
-    pub updated_at: String,
-    #[serde(alias = "last_opened")]
-    pub last_opened: Option<String>,
-}
+use crate::storage::{get_storage_config, generate_id, current_iso_time, Project};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateProjectInput {
@@ -38,24 +24,22 @@ pub struct UpdateProjectInput {
     pub labels: Option<Vec<String>>,
 }
 
-// 项目数据存储
+// 项目数据存储（内存缓存）
 static PROJECTS: Lazy<Mutex<Vec<Project>>> = Lazy::new(|| {
-    // 启动时从文件加载
     let projects = load_projects_from_file().unwrap_or_default();
     Mutex::new(projects)
 });
 
-// 获取数据文件路径
 fn get_data_file_path() -> PathBuf {
-    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("codeshelf");
-    // 确保目录存在
-    let _ = fs::create_dir_all(&path);
-    path.push("projects.json");
-    path
+    match get_storage_config() {
+        Ok(config) => config.projects_file(),
+        Err(e) => {
+            log::error!("获取存储配置失败: {}", e);
+            PathBuf::from("data").join("projects.json")
+        }
+    }
 }
 
-// 从文件加载项目
 fn load_projects_from_file() -> Result<Vec<Project>, String> {
     let path = get_data_file_path();
     if !path.exists() {
@@ -65,16 +49,25 @@ fn load_projects_from_file() -> Result<Vec<Project>, String> {
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read projects file: {}", e))?;
 
+    // 直接解析为项目数组
     let projects: Vec<Project> = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse projects file: {}", e))?;
 
+    log::info!("从文件加载了 {} 个项目", projects.len());
     Ok(projects)
 }
 
-// 保存项目到文件
 fn save_projects_to_file(projects: &[Project]) -> Result<(), String> {
     let path = get_data_file_path();
-    let content = serde_json::to_string_pretty(projects)
+
+    // 确保目录存在
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create data directory: {}", e))?;
+    }
+
+    // 直接保存为项目数组
+    let content = serde_json::to_string(projects)
         .map_err(|e| format!("Failed to serialize projects: {}", e))?;
 
     fs::write(&path, content)
@@ -83,20 +76,22 @@ fn save_projects_to_file(projects: &[Project]) -> Result<(), String> {
     Ok(())
 }
 
-fn generate_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let duration = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    format!("{:x}", duration.as_nanos())
-}
-
-fn get_current_time() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let duration = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    format!("{}", duration.as_secs())
+#[tauri::command]
+pub fn get_projects() -> Result<Vec<Project>, String> {
+    let projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+    Ok(projects.clone())
 }
 
 #[tauri::command]
-pub async fn add_project(input: CreateProjectInput) -> Result<Project, String> {
+pub fn create_project(input: CreateProjectInput) -> Result<Project, String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+
+    // 检查路径是否已存在
+    if projects.iter().any(|p| p.path == input.path) {
+        return Err("项目路径已存在".to_string());
+    }
+
+    let now = current_iso_time();
     let project = Project {
         id: generate_id(),
         name: input.name,
@@ -104,109 +99,180 @@ pub async fn add_project(input: CreateProjectInput) -> Result<Project, String> {
         is_favorite: false,
         tags: input.tags.unwrap_or_default(),
         labels: input.labels.unwrap_or_default(),
-        created_at: get_current_time(),
-        updated_at: get_current_time(),
+        created_at: now.clone(),
+        updated_at: now,
         last_opened: None,
     };
 
-    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
-
-    // Check if path already exists
-    if projects.iter().any(|p| p.path == project.path) {
-        return Err("Project with this path already exists".to_string());
-    }
-
     projects.push(project.clone());
-
-    // 保存到文件
     save_projects_to_file(&projects)?;
 
     Ok(project)
 }
 
 #[tauri::command]
-pub async fn remove_project(id: String) -> Result<(), String> {
+pub fn update_project(input: UpdateProjectInput) -> Result<Project, String> {
     let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
 
-    if let Some(pos) = projects.iter().position(|p| p.id == id) {
-        projects.remove(pos);
-        // 保存到文件
-        save_projects_to_file(&projects)?;
-        Ok(())
-    } else {
-        Err("Project not found".to_string())
+    let project = projects
+        .iter_mut()
+        .find(|p| p.id == input.id)
+        .ok_or("项目不存在")?;
+
+    if let Some(name) = input.name {
+        project.name = name;
     }
+    if let Some(tags) = input.tags {
+        project.tags = tags;
+    }
+    if let Some(labels) = input.labels {
+        project.labels = labels;
+    }
+    project.updated_at = current_iso_time();
+
+    let updated = project.clone();
+    save_projects_to_file(&projects)?;
+
+    Ok(updated)
 }
 
 #[tauri::command]
-pub async fn delete_project_directory(id: String) -> Result<(), String> {
+pub fn delete_project(id: String) -> Result<(), String> {
     let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
 
-    if let Some(pos) = projects.iter().position(|p| p.id == id) {
-        let project = &projects[pos];
-        let path = &project.path;
+    let index = projects.iter().position(|p| p.id == id).ok_or("项目不存在")?;
+    projects.remove(index);
 
-        // Delete the directory
-        std::fs::remove_dir_all(path).map_err(|e| format!("Failed to delete directory: {}", e))?;
-
-        // Remove from projects list
-        projects.remove(pos);
-
-        // 保存到文件
-        save_projects_to_file(&projects)?;
-
-        Ok(())
-    } else {
-        Err("Project not found".to_string())
-    }
+    save_projects_to_file(&projects)?;
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn get_projects() -> Result<Vec<Project>, String> {
-    let projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+pub fn delete_project_directory(id: String) -> Result<(), String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+
+    let index = projects.iter().position(|p| p.id == id).ok_or("项目不存在")?;
+    let project = &projects[index];
+    let path = PathBuf::from(&project.path);
+
+    // 删除目录
+    if path.exists() {
+        fs::remove_dir_all(&path)
+            .map_err(|e| format!("删除目录失败: {}", e))?;
+    }
+
+    // 从列表中移除
+    projects.remove(index);
+    save_projects_to_file(&projects)?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_favorite(id: String) -> Result<Project, String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+
+    let project = projects
+        .iter_mut()
+        .find(|p| p.id == id)
+        .ok_or("项目不存在")?;
+
+    project.is_favorite = !project.is_favorite;
+    project.updated_at = current_iso_time();
+
+    let updated = project.clone();
+    save_projects_to_file(&projects)?;
+
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn update_last_opened(id: String) -> Result<Project, String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+
+    let project = projects
+        .iter_mut()
+        .find(|p| p.id == id)
+        .ok_or("项目不存在")?;
+
+    project.last_opened = Some(current_iso_time());
+    project.updated_at = current_iso_time();
+
+    let updated = project.clone();
+    save_projects_to_file(&projects)?;
+
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn batch_update_projects(updates: Vec<UpdateProjectInput>) -> Result<Vec<Project>, String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+    let mut updated_projects = Vec::new();
+
+    for update in updates {
+        if let Some(project) = projects.iter_mut().find(|p| p.id == update.id) {
+            if let Some(name) = update.name {
+                project.name = name;
+            }
+            if let Some(tags) = update.tags {
+                project.tags = tags;
+            }
+            if let Some(labels) = update.labels {
+                project.labels = labels;
+            }
+            project.updated_at = current_iso_time();
+            updated_projects.push(project.clone());
+        }
+    }
+
+    save_projects_to_file(&projects)?;
+    Ok(updated_projects)
+}
+
+#[tauri::command]
+pub fn batch_delete_projects(ids: Vec<String>) -> Result<(), String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+    projects.retain(|p| !ids.contains(&p.id));
+    save_projects_to_file(&projects)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_projects(new_projects: Vec<CreateProjectInput>) -> Result<Vec<Project>, String> {
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+    let mut imported = Vec::new();
+
+    for input in new_projects {
+        if projects.iter().any(|p| p.path == input.path) {
+            continue;
+        }
+
+        let now = current_iso_time();
+        let project = Project {
+            id: generate_id(),
+            name: input.name,
+            path: input.path,
+            is_favorite: false,
+            tags: input.tags.unwrap_or_default(),
+            labels: input.labels.unwrap_or_default(),
+            created_at: now.clone(),
+            updated_at: now,
+            last_opened: None,
+        };
+
+        projects.push(project.clone());
+        imported.push(project);
+    }
+
+    save_projects_to_file(&projects)?;
+    Ok(imported)
+}
+
+/// 重新加载项目（从文件同步）
+#[tauri::command]
+pub fn reload_projects() -> Result<Vec<Project>, String> {
+    let new_projects = load_projects_from_file()?;
+    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
+    *projects = new_projects;
     Ok(projects.clone())
-}
-
-#[tauri::command]
-pub async fn update_project(input: UpdateProjectInput) -> Result<Project, String> {
-    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
-
-    if let Some(project) = projects.iter_mut().find(|p| p.id == input.id) {
-        if let Some(name) = input.name {
-            project.name = name;
-        }
-        if let Some(tags) = input.tags {
-            project.tags = tags;
-        }
-        if let Some(labels) = input.labels {
-            project.labels = labels;
-        }
-        project.updated_at = get_current_time();
-        let updated = project.clone();
-
-        // 保存到文件
-        save_projects_to_file(&projects)?;
-
-        Ok(updated)
-    } else {
-        Err("Project not found".to_string())
-    }
-}
-
-#[tauri::command]
-pub async fn toggle_favorite(id: String) -> Result<Project, String> {
-    let mut projects = PROJECTS.lock().map_err(|e| e.to_string())?;
-
-    if let Some(project) = projects.iter_mut().find(|p| p.id == id) {
-        project.is_favorite = !project.is_favorite;
-        project.updated_at = get_current_time();
-        let updated = project.clone();
-
-        // 保存到文件
-        save_projects_to_file(&projects)?;
-
-        Ok(updated)
-    } else {
-        Err("Project not found".to_string())
-    }
 }

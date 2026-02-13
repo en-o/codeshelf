@@ -30,8 +30,20 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "time", "sync"] }
 once_cell = "1.19"
 chrono = "0.4"
 dirs = "5"
+
+# 工具箱模块依赖
+futures = "0.3"
+reqwest = { version = "0.12", features = ["stream"] }
+url = "2.5"
+urlencoding = "2.1"
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "compression-gzip", "fs", "trace"] }
+sysinfo = "0.30"
+socket2 = "0.5"
+base64 = "0.22"
 

@@ -30,12 +30,38 @@ jobs:
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Read release notes
+        id: release_notes
+        run: |
+          DEFAULT_NOTES="日常更新"
+          if [ -f "RELEASE_NOTES.md" ]; then
+            # 读取文件内容
+            NOTES=$(cat RELEASE_NOTES.md)
+            # 去除空白字符后检查是否为空
+            TRIMMED=$(echo "$NOTES" | tr -d '[:space:]')
+            if [ -z "$TRIMMED" ]; then
+              # 文件为空，使用默认说明
+              echo "notes=$DEFAULT_NOTES" >> $GITHUB_OUTPUT
+            else
+              # 文件有内容，使用 EOF 分隔符处理多行内容
+              echo "notes<<EOF" >> $GITHUB_OUTPUT
+              echo "$NOTES" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+            fi
+          else
+            # 文件不存在，使用默认说明
+            echo "notes=$DEFAULT_NOTES" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create or Get Draft Release
         id: create_release
         uses: actions/github-script@v7
+        env:
+          RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
         with:
           script: |
             const tagName = `v${{ steps.get_version.outputs.version }}`;
+            const releaseNotes = process.env.RELEASE_NOTES || '日常更新';
 
             // 先检查是否已存在 release
             try {
@@ -45,8 +71,14 @@ jobs:
                 tag: tagName
               });
               console.log(`Found existing release: ${release.id}`);
-              // 如果存在且是草稿，直接使用
+              // 如果存在且是草稿，更新 body 并返回
               if (release.draft) {
+                await github.rest.repos.updateRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  body: releaseNotes
+                });
                 return release.id;
               }
               // 如果已发布，报错
@@ -63,7 +95,7 @@ jobs:
               repo: context.repo.repo,
               tag_name: tagName,
               name: `CodeShelf ${tagName}`,
-              body: 'See the assets to download this version and install.',
+              body: releaseNotes,
               draft: true,
               prerelease: false
             });

@@ -7,6 +7,8 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use tokio::task;
 
+use crate::storage;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -77,11 +79,15 @@ static STATS_CACHE: Lazy<Mutex<PersistedStatsCache>> = Lazy::new(|| {
 
 /// 获取统计缓存文件路径
 fn get_stats_cache_path() -> PathBuf {
-    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("codeshelf");
-    let _ = fs::create_dir_all(&path);
-    path.push("stats_cache.json");
-    path
+    // 使用安装目录的 data 文件夹
+    match storage::get_storage_config() {
+        Ok(config) => config.stats_cache_file(),
+        Err(e) => {
+            log::error!("获取存储配置失败: {}", e);
+            // 如果无法获取配置，使用当前目录的 data 文件夹
+            PathBuf::from("data").join("stats_cache.json")
+        }
+    }
 }
 
 /// 从文件加载统计缓存
@@ -101,7 +107,7 @@ fn load_stats_from_file() -> Result<PersistedStatsCache, String> {
 /// 保存统计缓存到文件
 fn save_stats_to_file(cache: &PersistedStatsCache) -> Result<(), String> {
     let path = get_stats_cache_path();
-    let content = serde_json::to_string_pretty(cache)
+    let content = serde_json::to_string(cache)
         .map_err(|e| format!("Failed to serialize stats: {}", e))?;
 
     fs::write(&path, content)

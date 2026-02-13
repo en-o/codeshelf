@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { invoke } from "@tauri-apps/api/core";
 import type { Project, ViewMode, Notification } from "@/types";
 import { markProjectDirty as markDirty } from "@/services/stats";
 
@@ -10,6 +10,7 @@ export interface EditorConfig {
   name: string;
   path: string;
   icon?: string;
+  is_default?: boolean;
 }
 
 export interface TerminalConfig {
@@ -22,12 +23,17 @@ export interface TerminalConfig {
     terminal?: string;
     iterm?: string;
     default?: string;
+    custom?: string;
   };
 }
 
-export type PageType = "shelf" | "dashboard" | "settings";
+export type PageType = "shelf" | "dashboard" | "settings" | "toolbox";
 
 interface AppState {
+  // Initialization
+  initialized: boolean;
+  setInitialized: (initialized: boolean) => void;
+
   // Projects
   projects: Project[];
   setProjects: (projects: Project[]) => void;
@@ -71,16 +77,19 @@ interface AppState {
 
   // Categories (项目分类)
   categories: string[];
+  setCategories: (categories: string[]) => void;
   addCategory: (category: string) => void;
   removeCategory: (category: string) => void;
 
   // Labels (技术栈标签)
   labels: string[];
+  setLabels: (labels: string[]) => void;
   addLabel: (label: string) => void;
   removeLabel: (label: string) => void;
 
   // Editor Settings
   editors: EditorConfig[];
+  setEditors: (editors: EditorConfig[]) => void;
   addEditor: (editor: EditorConfig) => void;
   removeEditor: (id: string) => void;
   updateEditor: (id: string, updates: Partial<EditorConfig>) => void;
@@ -92,187 +101,275 @@ interface AppState {
 
   // Notifications (消息通知)
   notifications: Notification[];
+  setNotifications: (notifications: Notification[]) => void;
   addNotification: (notification: Omit<Notification, "id" | "createdAt">) => void;
   removeNotification: (id: string) => void;
   clearAllNotifications: () => void;
 }
 
-export const useAppStore = create<AppState>()(
-  persist(
-    (set) => ({
-      // Projects
-      projects: [],
-      setProjects: (projects) => set({ projects }),
-      addProject: (project) =>
-        set((state) => ({ projects: [...state.projects, project] })),
-      removeProject: (id) =>
-        set((state) => ({
-          projects: state.projects.filter((p) => p.id !== id),
-        })),
-      updateProject: (id, updates) =>
-        set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === id ? { ...p, ...updates } : p
-          ),
-        })),
+// 防抖保存辅助函数
+const debounce = <T extends unknown[]>(fn: (...args: T) => void, delay: number) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (...args: T) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+};
 
-      // Recent Detail Projects (最近打开详情的项目，最多保留9个)
-      recentDetailProjectIds: [],
-      addRecentDetailProject: (projectId) =>
-        set((state) => {
-          // 移除已存在的相同项目（如果有）
-          const filtered = state.recentDetailProjectIds.filter((id) => id !== projectId);
-          // 添加到开头，限制最多9个
-          return { recentDetailProjectIds: [projectId, ...filtered].slice(0, 9) };
-        }),
+// 后端同步辅助函数
+const saveAppSettings = debounce(async (settings: {
+  theme?: string;
+  view_mode?: string;
+  sidebar_collapsed?: boolean;
+  scan_depth?: number;
+}) => {
+  try {
+    await invoke("save_app_settings", { input: settings });
+  } catch (err) {
+    console.error("保存应用设置失败:", err);
+  }
+}, 300);
 
-      // Stats - mark project as dirty (calls Rust command)
-      markProjectDirty: (projectPath) => {
-        // Fire and forget - don't need to await
-        markDirty(projectPath).catch(console.error);
-      },
+const saveUiState = debounce(async (state: { recent_detail_project_ids?: string[] }) => {
+  try {
+    await invoke("save_ui_state", { input: state });
+  } catch (err) {
+    console.error("保存UI状态失败:", err);
+  }
+}, 300);
 
-      // Navigation
-      currentPage: "shelf",
-      setCurrentPage: (currentPage) => set({ currentPage }),
-      navigateToProject: (projectPath) => set((state) => {
-        const project = state.projects.find((p) => p.path === projectPath);
-        if (project) {
-          return { currentPage: "shelf" as PageType, selectedProjectId: project.id };
-        }
-        return { currentPage: "shelf" as PageType };
-      }),
+export const useAppStore = create<AppState>()((set, get) => ({
+  // Initialization
+  initialized: false,
+  setInitialized: (initialized) => set({ initialized }),
 
-      // UI State
-      viewMode: "grid",
-      setViewMode: (viewMode) => set({ viewMode }),
-      selectedProjectId: null,
-      setSelectedProjectId: (selectedProjectId) => set({ selectedProjectId }),
-      searchQuery: "",
-      setSearchQuery: (searchQuery) => set({ searchQuery }),
-      selectedTags: [],
-      setSelectedTags: (selectedTags) => set({ selectedTags }),
+  // Projects
+  projects: [],
+  setProjects: (projects) => set({ projects }),
+  addProject: (project) =>
+    set((state) => ({ projects: [...state.projects, project] })),
+  removeProject: (id) =>
+    set((state) => ({
+      projects: state.projects.filter((p) => p.id !== id),
+    })),
+  updateProject: (id, updates) =>
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === id ? { ...p, ...updates } : p
+      ),
+    })),
 
-      // Theme
-      theme: "light",
-      setTheme: (theme) => set({ theme }),
+  // Recent Detail Projects (最近打开详情的项目，最多保留9个)
+  recentDetailProjectIds: [],
+  addRecentDetailProject: (projectId) => {
+    set((state) => {
+      const filtered = state.recentDetailProjectIds.filter((id) => id !== projectId);
+      const updated = [projectId, ...filtered].slice(0, 9);
+      // 同步到后端
+      saveUiState({ recent_detail_project_ids: updated });
+      return { recentDetailProjectIds: updated };
+    });
+  },
 
-      // Sidebar
-      sidebarCollapsed: false,
-      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+  // Stats - mark project as dirty (calls Rust command)
+  markProjectDirty: (projectPath) => {
+    markDirty(projectPath).catch(console.error);
+  },
 
-      // Settings
-      scanDepth: 3,
-      setScanDepth: (scanDepth) => set({ scanDepth }),
-
-      // Categories (项目分类)
-      categories: [],
-      addCategory: (category) =>
-        set((state) => ({
-          categories: state.categories.includes(category)
-            ? state.categories
-            : [...state.categories, category],
-        })),
-      removeCategory: (category) =>
-        set((state) => ({
-          categories: state.categories.filter((c) => c !== category),
-          // Also remove from projects
-          projects: state.projects.map((p) => ({
-            ...p,
-            tags: p.tags.filter((t) => t !== category),
-          })),
-        })),
-
-      // Labels (技术栈标签)
-      labels: ["Java", "Python", "JavaScript", "TypeScript", "React", "Vue", "Node.js", "Go", "Rust", "Spring Boot"],
-      addLabel: (label) =>
-        set((state) => ({
-          labels: state.labels.includes(label)
-            ? state.labels
-            : [...state.labels, label],
-        })),
-      removeLabel: (label) =>
-        set((state) => ({
-          labels: state.labels.filter((l) => l !== label),
-          // Also remove from projects
-          projects: state.projects.map((p) => ({
-            ...p,
-            labels: p.labels?.filter((l) => l !== label),
-          })),
-        })),
-
-      // Editor Settings
-      editors: [],
-      addEditor: (editor) =>
-        set((state) => ({ editors: [...state.editors, editor] })),
-      removeEditor: (id) =>
-        set((state) => ({
-          editors: state.editors.filter((e) => e.id !== id),
-        })),
-      updateEditor: (id, updates) =>
-        set((state) => ({
-          editors: state.editors.map((e) =>
-            e.id === id ? { ...e, ...updates } : e
-          ),
-        })),
-      setDefaultEditor: (id) =>
-        set((state) => {
-          const editor = state.editors.find((e) => e.id === id);
-          if (!editor) return state;
-          const others = state.editors.filter((e) => e.id !== id);
-          return { editors: [editor, ...others] };
-        }),
-
-      // Terminal Settings
-      terminalConfig: { type: "default" },
-      setTerminalConfig: (terminalConfig) => set({ terminalConfig }),
-
-      // Notifications (消息通知)
-      notifications: [],
-      addNotification: (notification) =>
-        set((state) => {
-          const newNotification: Notification = {
-            ...notification,
-            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            createdAt: new Date().toISOString(),
-          };
-          const updated = [newNotification, ...state.notifications];
-          // 默认保留最近10条
-          return { notifications: updated.slice(0, 10) };
-        }),
-      removeNotification: (id) =>
-        set((state) => ({
-          notifications: state.notifications.filter((n) => n.id !== id),
-        })),
-      clearAllNotifications: () => set({ notifications: [] }),
-    }),
-    {
-      name: "codeshelf-storage",
-      partialize: (state) => ({
-        projects: state.projects,
-        recentDetailProjectIds: state.recentDetailProjectIds,
-        viewMode: state.viewMode,
-        sidebarCollapsed: state.sidebarCollapsed,
-        theme: state.theme,
-        scanDepth: state.scanDepth,
-        categories: state.categories,
-        labels: state.labels,
-        editors: state.editors,
-        terminalConfig: state.terminalConfig,
-        notifications: state.notifications,
-      }),
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<AppState>;
-        // 如果 localStorage 中没有 labels 或为空数组，使用默认值
-        const defaultLabels = ["Java", "Python", "JavaScript", "TypeScript", "React", "Vue", "Node.js", "Go", "Rust", "Spring Boot"];
-        return {
-          ...currentState,
-          ...persisted,
-          projects: persisted.projects || [],
-          recentDetailProjectIds: persisted.recentDetailProjectIds || [],
-          labels: persisted.labels && persisted.labels.length > 0 ? persisted.labels : defaultLabels,
-        };
-      },
+  // Navigation
+  currentPage: "shelf",
+  setCurrentPage: (currentPage) => set({ currentPage }),
+  navigateToProject: (projectPath) => set((state) => {
+    const project = state.projects.find((p) => p.path === projectPath);
+    if (project) {
+      return { currentPage: "shelf" as PageType, selectedProjectId: project.id };
     }
-  )
-);
+    return { currentPage: "shelf" as PageType };
+  }),
+
+  // UI State
+  viewMode: "grid",
+  setViewMode: (viewMode) => {
+    set({ viewMode });
+    saveAppSettings({ view_mode: viewMode });
+  },
+  selectedProjectId: null,
+  setSelectedProjectId: (selectedProjectId) => set({ selectedProjectId }),
+  searchQuery: "",
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  selectedTags: [],
+  setSelectedTags: (selectedTags) => set({ selectedTags }),
+
+  // Theme
+  theme: "light",
+  setTheme: (theme) => {
+    set({ theme });
+    saveAppSettings({ theme });
+  },
+
+  // Sidebar
+  sidebarCollapsed: false,
+  setSidebarCollapsed: (sidebarCollapsed) => {
+    set({ sidebarCollapsed });
+    saveAppSettings({ sidebar_collapsed: sidebarCollapsed });
+  },
+
+  // Settings
+  scanDepth: 3,
+  setScanDepth: (scanDepth) => {
+    set({ scanDepth });
+    saveAppSettings({ scan_depth: scanDepth });
+  },
+
+  // Categories (项目分类)
+  categories: [],
+  setCategories: (categories) => set({ categories }),
+  addCategory: (category) => {
+    const state = get();
+    if (!state.categories.includes(category)) {
+      const updated = [...state.categories, category];
+      set({ categories: updated });
+      invoke("save_categories", { categories: updated }).catch(console.error);
+    }
+  },
+  removeCategory: (category) => {
+    const state = get();
+    const updated = state.categories.filter((c) => c !== category);
+    set({
+      categories: updated,
+      projects: state.projects.map((p) => ({
+        ...p,
+        tags: p.tags.filter((t) => t !== category),
+      })),
+    });
+    invoke("save_categories", { categories: updated }).catch(console.error);
+  },
+
+  // Labels (技术栈标签)
+  labels: ["Java", "Python", "JavaScript", "TypeScript", "React", "Vue", "Node.js", "Go", "Rust", "Spring Boot"],
+  setLabels: (labels) => set({ labels }),
+  addLabel: (label) => {
+    const state = get();
+    if (!state.labels.includes(label)) {
+      const updated = [...state.labels, label];
+      set({ labels: updated });
+      invoke("save_labels", { labels: updated }).catch(console.error);
+    }
+  },
+  removeLabel: (label) => {
+    const state = get();
+    const updated = state.labels.filter((l) => l !== label);
+    set({
+      labels: updated,
+      projects: state.projects.map((p) => ({
+        ...p,
+        labels: p.labels?.filter((l) => l !== label),
+      })),
+    });
+    invoke("save_labels", { labels: updated }).catch(console.error);
+  },
+
+  // Editor Settings
+  editors: [],
+  setEditors: (editors) => set({ editors }),
+  addEditor: (editor) => {
+    set((state) => ({ editors: [...state.editors, editor] }));
+    invoke("add_editor", {
+      input: {
+        name: editor.name,
+        path: editor.path,
+        icon: editor.icon,
+        is_default: false,
+      }
+    }).then((editors: unknown) => {
+      set({ editors: editors as EditorConfig[] });
+    }).catch(console.error);
+  },
+  removeEditor: (id) => {
+    set((state) => ({
+      editors: state.editors.filter((e) => e.id !== id),
+    }));
+    invoke("remove_editor", { id }).then((editors: unknown) => {
+      set({ editors: editors as EditorConfig[] });
+    }).catch(console.error);
+  },
+  updateEditor: (id, updates) => {
+    set((state) => ({
+      editors: state.editors.map((e) =>
+        e.id === id ? { ...e, ...updates } : e
+      ),
+    }));
+    const state = get();
+    const editor = state.editors.find((e) => e.id === id);
+    if (editor) {
+      invoke("update_editor", {
+        id,
+        input: {
+          name: editor.name,
+          path: editor.path,
+          icon: editor.icon,
+          is_default: false,
+        }
+      }).then((editors: unknown) => {
+        set({ editors: editors as EditorConfig[] });
+      }).catch(console.error);
+    }
+  },
+  setDefaultEditor: (id) => {
+    set((state) => {
+      const editor = state.editors.find((e) => e.id === id);
+      if (!editor) return state;
+      const others = state.editors.filter((e) => e.id !== id);
+      return { editors: [editor, ...others] };
+    });
+    invoke("set_default_editor", { id }).then((editors: unknown) => {
+      set({ editors: editors as EditorConfig[] });
+    }).catch(console.error);
+  },
+
+  // Terminal Settings
+  terminalConfig: { type: "default" },
+  setTerminalConfig: (terminalConfig) => {
+    set({ terminalConfig });
+    invoke("save_terminal_config", {
+      input: {
+        terminal_type: terminalConfig.type,
+        custom_path: terminalConfig.customPath,
+        terminal_path: terminalConfig.paths?.[terminalConfig.type],
+      }
+    }).catch(console.error);
+  },
+
+  // Notifications (消息通知)
+  notifications: [],
+  setNotifications: (notifications) => set({ notifications }),
+  addNotification: (notification) => {
+    const newNotification: Notification = {
+      ...notification,
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => {
+      const updated = [newNotification, ...state.notifications].slice(0, 10);
+      // 同步到后端
+      invoke("add_notification", {
+        input: {
+          notification_type: notification.type,
+          title: notification.title,
+          message: notification.message,
+        }
+      }).catch(console.error);
+      return { notifications: updated };
+    });
+  },
+  removeNotification: (id) => {
+    set((state) => ({
+      notifications: state.notifications.filter((n) => n.id !== id),
+    }));
+    invoke("remove_notification", { id }).catch(console.error);
+  },
+  clearAllNotifications: () => {
+    set({ notifications: [] });
+    invoke("clear_notifications").catch(console.error);
+  },
+}));

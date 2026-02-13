@@ -246,7 +246,7 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
   const canSubmit = mode === "local" ? !!localPath : !!gitUrl && !!gitTargetPath;
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 top-8 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="add-project-dialog bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden border border-gray-100 flex flex-col max-h-[600px]">
         {/* 头部 */}
         <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">

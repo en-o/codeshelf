@@ -85,7 +85,7 @@ export function AddCategoryDialog({ onClose }: AddCategoryDialogProps) {
 
   return (
     <>
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 top-8 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="category-dialog bg-white/[0.98] border border-slate-200/80 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
 
         {/* 头部 */}
@@ -251,7 +251,7 @@ export function AddCategoryDialog({ onClose }: AddCategoryDialogProps) {
 
     {/* 删除确认对话框 */}
     {deletingCategory && (
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+      <div className="fixed inset-0 top-8 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
         <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
           <div className="px-6 py-5 border-b border-gray-100">
             <div className="flex items-center gap-3">

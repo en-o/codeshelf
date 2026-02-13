@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use crate::storage;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -640,19 +642,28 @@ pub async fn get_app_paths(app_handle: tauri::AppHandle) -> Result<AppPaths, Str
 
     let path_resolver = app_handle.path();
 
-    let data_dir = path_resolver.app_data_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "未知".to_string());
+    // 优先使用新的存储路径
+    let (data_dir, log_dir) = if let Ok(config) = storage::get_storage_config() {
+        (
+            config.data_dir.to_string_lossy().to_string(),
+            config.logs_dir.to_string_lossy().to_string(),
+        )
+    } else {
+        (
+            path_resolver.app_data_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "未知".to_string()),
+            path_resolver.app_log_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "未知".to_string()),
+        )
+    };
 
     let config_dir = path_resolver.app_config_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "未知".to_string());
 
     let cache_dir = path_resolver.app_cache_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "未知".to_string());
-
-    let log_dir = path_resolver.app_log_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "未知".to_string());
 
@@ -675,9 +686,14 @@ pub async fn clear_logs(app_handle: tauri::AppHandle) -> Result<String, String> 
     use tauri::Manager;
     use std::fs;
 
-    let path_resolver = app_handle.path();
-    let log_dir = path_resolver.app_log_dir()
-        .map_err(|e| format!("无法获取日志目录: {}", e))?;
+    // 优先使用新的日志路径
+    let log_dir = if let Ok(config) = storage::get_storage_config() {
+        config.logs_dir.clone()
+    } else {
+        let path_resolver = app_handle.path();
+        path_resolver.app_log_dir()
+            .map_err(|e| format!("无法获取日志目录: {}", e))?
+    };
 
     if !log_dir.exists() {
         return Ok("日志目录不存在".to_string());

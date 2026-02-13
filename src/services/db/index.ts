@@ -2,11 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Project, CreateProjectInput, UpdateProjectInput } from "@/types";
 
 export async function addProject(input: CreateProjectInput): Promise<Project> {
-  return invoke("add_project", { input });
+  return invoke("create_project", { input });
 }
 
 export async function removeProject(id: string): Promise<void> {
-  return invoke("remove_project", { id });
+  return invoke("delete_project", { id });
 }
 
 export async function deleteProjectDirectory(id: string): Promise<void> {
@@ -23,6 +23,26 @@ export async function updateProject(input: UpdateProjectInput): Promise<Project>
 
 export async function toggleFavorite(id: string): Promise<Project> {
   return invoke("toggle_favorite", { id });
+}
+
+export async function updateLastOpened(id: string): Promise<Project> {
+  return invoke("update_last_opened", { id });
+}
+
+export async function batchUpdateProjects(updates: UpdateProjectInput[]): Promise<Project[]> {
+  return invoke("batch_update_projects", { updates });
+}
+
+export async function batchDeleteProjects(ids: string[]): Promise<void> {
+  return invoke("batch_delete_projects", { ids });
+}
+
+export async function importProjects(newProjects: CreateProjectInput[]): Promise<Project[]> {
+  return invoke("import_projects", { newProjects });
+}
+
+export async function reloadProjects(): Promise<Project[]> {
+  return invoke("reload_projects");
 }
 
 export async function openInEditor(path: string, editorPath?: string): Promise<void> {

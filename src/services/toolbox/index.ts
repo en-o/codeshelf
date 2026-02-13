@@ -1,0 +1,478 @@
+// 工具箱服务层 - 封装所有 Tauri 命令
+
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  ScanConfig,
+  ScanResult,
+  DownloadConfig,
+  DownloadTask,
+  ProcessInfo,
+  ProcessFilter,
+  SystemStats,
+  PortOccupation,
+  ForwardRule,
+  ForwardRuleInput,
+  ForwardStats,
+  ServerConfig,
+  ServerConfigInput,
+} from "@/types/toolbox";
+
+// ============== 端口扫描服务 ==============
+
+export async function scanPorts(config: ScanConfig): Promise<ScanResult[]> {
+  // 后端已配置 rename_all = "camelCase"，直接发送
+  return invoke("scan_ports", { config });
+}
+
+export async function stopScan(): Promise<void> {
+  return invoke("stop_scan");
+}
+
+export async function getCommonPorts(): Promise<number[]> {
+  return invoke("get_common_ports");
+}
+
+export async function checkPort(
+  target: string,
+  port: number,
+  timeoutMs?: number
+): Promise<ScanResult> {
+  return invoke("check_port", { target, port, timeoutMs });
+}
+
+export async function scanLocalDevPorts(): Promise<ScanResult[]> {
+  return invoke("scan_local_dev_ports");
+}
+
+// ============== 文件下载服务 ==============
+
+export async function startDownload(config: DownloadConfig): Promise<string> {
+  // 后端已配置 rename_all = "camelCase"，直接发送
+  return invoke("start_download", { config });
+}
+
+export async function pauseDownload(taskId: string): Promise<void> {
+  return invoke("pause_download", { taskId });
+}
+
+export async function resumeDownload(taskId: string): Promise<void> {
+  return invoke("resume_download", { taskId });
+}
+
+export async function cancelDownload(taskId: string): Promise<void> {
+  return invoke("cancel_download", { taskId });
+}
+
+export async function getDownloadTasks(): Promise<DownloadTask[]> {
+  return invoke("get_download_tasks");
+}
+
+export async function getDownloadTask(
+  taskId: string
+): Promise<DownloadTask | null> {
+  return invoke("get_download_task", { taskId });
+}
+
+export async function clearCompletedDownloads(): Promise<number> {
+  return invoke("clear_completed_downloads");
+}
+
+export async function openDownloadFolder(taskId: string): Promise<void> {
+  return invoke("open_download_folder", { taskId });
+}
+
+export async function removeDownloadTask(taskId: string, deleteFile?: boolean): Promise<void> {
+  return invoke("remove_download_task", { taskId, deleteFile });
+}
+
+// ============== 进程管理服务 ==============
+
+export async function getProcesses(
+  filter?: ProcessFilter
+): Promise<ProcessInfo[]> {
+  return invoke("get_processes", { filter });
+}
+
+export async function getPortProcesses(port: number): Promise<ProcessInfo[]> {
+  return invoke("get_port_processes", { port });
+}
+
+export async function killProcess(
+  pid: number,
+  force?: boolean
+): Promise<void> {
+  return invoke("kill_process", { pid, force });
+}
+
+export async function getSystemStats(): Promise<SystemStats> {
+  return invoke("get_system_stats");
+}
+
+export async function getLocalPortOccupation(): Promise<PortOccupation[]> {
+  return invoke("get_local_port_occupation");
+}
+
+// ============== 端口转发服务 ==============
+
+export async function addForwardRule(
+  input: ForwardRuleInput
+): Promise<ForwardRule> {
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("add_forward_rule", { input });
+}
+
+export async function removeForwardRule(ruleId: string): Promise<void> {
+  return invoke("remove_forward_rule", { ruleId });
+}
+
+export async function startForwarding(ruleId: string): Promise<void> {
+  return invoke("start_forwarding", { ruleId });
+}
+
+export async function stopForwarding(ruleId: string): Promise<void> {
+  return invoke("stop_forwarding", { ruleId });
+}
+
+export async function getForwardRules(): Promise<ForwardRule[]> {
+  return invoke("get_forward_rules");
+}
+
+export async function getForwardRule(
+  ruleId: string
+): Promise<ForwardRule | null> {
+  return invoke("get_forward_rule", { ruleId });
+}
+
+export async function getForwardStats(ruleId: string): Promise<ForwardStats> {
+  return invoke("get_forward_stats", { ruleId });
+}
+
+export async function updateForwardRule(
+  ruleId: string,
+  input: ForwardRuleInput
+): Promise<ForwardRule> {
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("update_forward_rule", { ruleId, input });
+}
+
+// ============== 静态服务 ==============
+
+export async function createServer(
+  input: ServerConfigInput
+): Promise<ServerConfig> {
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("create_server", { input });
+}
+
+export async function startServer(serverId: string): Promise<string> {
+  return invoke("start_server", { serverId });
+}
+
+export async function stopServer(serverId: string): Promise<void> {
+  return invoke("stop_server", { serverId });
+}
+
+export async function removeServer(serverId: string): Promise<void> {
+  return invoke("remove_server", { serverId });
+}
+
+export async function getServers(): Promise<ServerConfig[]> {
+  return invoke("get_servers");
+}
+
+export async function getServer(serverId: string): Promise<ServerConfig | null> {
+  return invoke("get_server", { serverId });
+}
+
+export async function updateServer(
+  serverId: string,
+  input: ServerConfigInput
+): Promise<ServerConfig> {
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("update_server", { serverId, input });
+}
+
+// ============== Claude Code 配置服务 ==============
+
+import type { ClaudeCodeInfo, EnvType, QuickConfigOption, ConfigProfile, ConfigFileInfo } from "@/types/toolbox";
+
+export async function checkAllClaudeInstallations(): Promise<ClaudeCodeInfo[]> {
+  const infos: any[] = await invoke("check_all_claude_installations");
+  return infos.map((info: any) => ({
+    envType: info.env_type as EnvType,
+    envName: info.env_name,
+    installed: info.installed,
+    version: info.version,
+    path: info.path,
+    configDir: info.config_dir,
+    configFiles: (info.config_files || []).map((f: any) => ({
+      name: f.name,
+      path: f.path,
+      exists: f.exists,
+      size: f.size,
+      modified: f.modified,
+      description: f.description,
+    })),
+  }));
+}
+
+export async function checkClaudeByPath(claudePath: string): Promise<ClaudeCodeInfo> {
+  const info: any = await invoke("check_claude_by_path", { claudePath });
+  return {
+    envType: info.env_type as EnvType,
+    envName: info.env_name,
+    installed: info.installed,
+    version: info.version,
+    path: info.path,
+    configDir: info.config_dir,
+    configFiles: (info.config_files || []).map((f: any) => ({
+      name: f.name,
+      path: f.path,
+      exists: f.exists,
+      size: f.size,
+      modified: f.modified,
+      description: f.description,
+    })),
+  };
+}
+
+export async function readClaudeConfigFile(envType: EnvType, envName: string, path: string): Promise<string> {
+  return invoke("read_claude_config_file", { envType, envName, path });
+}
+
+export async function writeClaudeConfigFile(envType: EnvType, envName: string, path: string, content: string): Promise<void> {
+  return invoke("write_claude_config_file", { envType, envName, path, content });
+}
+
+export async function openClaudeConfigDir(envType: EnvType, envName: string, configDir: string): Promise<void> {
+  return invoke("open_claude_config_dir", { envType, envName, configDir });
+}
+
+export async function getQuickConfigOptions(): Promise<QuickConfigOption[]> {
+  const options: any[] = await invoke("get_quick_config_options");
+  return options.map((opt: any) => ({
+    id: opt.id,
+    name: opt.name,
+    description: opt.description,
+    category: opt.category,
+    configKey: opt.config_key,
+    configValue: opt.config_value,
+  }));
+}
+
+export async function applyQuickConfig(envType: EnvType, envName: string, configPath: string, options: string[]): Promise<void> {
+  return invoke("apply_quick_config", { envType, envName, configPath, options });
+}
+
+export async function getConfigProfiles(envType: EnvType, envName: string): Promise<ConfigProfile[]> {
+  const profiles: any[] = await invoke("get_config_profiles", { envType, envName });
+  return profiles.map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    settings: p.settings,
+    createdAt: p.created_at,
+    updatedAt: p.updated_at,
+  }));
+}
+
+export async function saveConfigProfile(envType: EnvType, envName: string, name: string, description: string | undefined, settings: Record<string, unknown>): Promise<ConfigProfile> {
+  const profile: any = await invoke("save_config_profile", { envType, envName, name, description, settings });
+  return {
+    id: profile.id,
+    name: profile.name,
+    description: profile.description,
+    settings: profile.settings,
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
+  };
+}
+
+export async function deleteConfigProfile(envType: EnvType, envName: string, profileId: string): Promise<void> {
+  return invoke("delete_config_profile", { envType, envName, profileId });
+}
+
+export async function applyConfigProfile(envType: EnvType, envName: string, configPath: string, profileId: string): Promise<void> {
+  return invoke("apply_config_profile", { envType, envName, configPath, profileId });
+}
+
+export async function createProfileFromCurrent(envType: EnvType, envName: string, configPath: string, profileName: string, description?: string): Promise<ConfigProfile> {
+  const profile: any = await invoke("create_profile_from_current", { envType, envName, configPath, profileName, description });
+  return {
+    id: profile.id,
+    name: profile.name,
+    description: profile.description,
+    settings: profile.settings,
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
+  };
+}
+
+export async function scanClaudeConfigDir(envType: EnvType, envName: string, configDir: string): Promise<ConfigFileInfo[]> {
+  const files: any[] = await invoke("scan_claude_config_dir", { envType, envName, configDir });
+  return files.map((f: any) => ({
+    name: f.name,
+    path: f.path,
+    exists: f.exists,
+    size: f.size,
+    modified: f.modified,
+    description: f.description,
+  }));
+}
+
+export async function getWslConfigDir(distro: string): Promise<{ linuxPath: string; uncPath: string }> {
+  const result: any = await invoke("get_wsl_config_dir", { distro });
+  return {
+    linuxPath: result.linux_path,
+    uncPath: result.unc_path,
+  };
+}
+
+// Claude 安装信息缓存
+export async function getClaudeInstallationsCache(): Promise<ClaudeCodeInfo[] | null> {
+  const result: any = await invoke("get_claude_installations_cache");
+  if (!result) return null;
+  return result.map((info: any) => ({
+    envType: info.env_type as EnvType,
+    envName: info.env_name,
+    installed: info.installed,
+    version: info.version,
+    path: info.path,
+    configDir: info.config_dir,
+    configFiles: (info.config_files || []).map((f: any) => ({
+      name: f.name,
+      path: f.path,
+      exists: f.exists,
+      size: f.size,
+      modified: f.modified,
+      description: f.description,
+    })),
+  }));
+}
+
+export async function saveClaudeInstallationsCache(installs: ClaudeCodeInfo[]): Promise<void> {
+  // 转换为后端格式
+  const data = installs.map(info => ({
+    env_type: info.envType,
+    env_name: info.envName,
+    installed: info.installed,
+    version: info.version,
+    path: info.path,
+    config_dir: info.configDir,
+    config_files: info.configFiles.map(f => ({
+      name: f.name,
+      path: f.path,
+      exists: f.exists,
+      size: f.size,
+      modified: f.modified,
+      description: f.description,
+    })),
+  }));
+  return invoke("save_claude_installations_cache", { installs: data });
+}
+
+export async function clearClaudeInstallationsCache(): Promise<void> {
+  return invoke("clear_claude_installations_cache");
+}
+
+// ============== Netcat 协议测试服务 ==============
+
+import type {
+  NetcatSessionInput,
+  NetcatSession,
+  SendMessageInput,
+  NetcatMessage,
+  ConnectedClient,
+  AutoSendConfig,
+} from "@/types/toolbox";
+
+export async function netcatInit(): Promise<void> {
+  return invoke("netcat_init");
+}
+
+export async function netcatCreateSession(input: NetcatSessionInput): Promise<NetcatSession> {
+  return invoke("netcat_create_session", { input });
+}
+
+export async function netcatStartSession(sessionId: string): Promise<void> {
+  return invoke("netcat_start_session", { sessionId });
+}
+
+export async function netcatStopSession(sessionId: string): Promise<void> {
+  return invoke("netcat_stop_session", { sessionId });
+}
+
+export async function netcatRemoveSession(sessionId: string): Promise<void> {
+  return invoke("netcat_remove_session", { sessionId });
+}
+
+export async function netcatSendMessage(input: SendMessageInput): Promise<NetcatMessage> {
+  return invoke("netcat_send_message", { input });
+}
+
+export async function netcatGetSessions(): Promise<NetcatSession[]> {
+  return invoke("netcat_get_sessions");
+}
+
+export async function netcatGetSession(sessionId: string): Promise<NetcatSession> {
+  return invoke("netcat_get_session", { sessionId });
+}
+
+export async function netcatGetMessages(
+  sessionId: string,
+  limit?: number,
+  offset?: number
+): Promise<NetcatMessage[]> {
+  return invoke("netcat_get_messages", { sessionId, limit, offset });
+}
+
+export async function netcatGetClients(sessionId: string): Promise<ConnectedClient[]> {
+  return invoke("netcat_get_clients", { sessionId });
+}
+
+export async function netcatClearMessages(sessionId: string): Promise<void> {
+  return invoke("netcat_clear_messages", { sessionId });
+}
+
+export async function netcatDisconnectClient(sessionId: string, clientId: string): Promise<void> {
+  return invoke("netcat_disconnect_client", { sessionId, clientId });
+}
+
+export async function netcatUpdateAutoSend(sessionId: string, config: AutoSendConfig): Promise<void> {
+  return invoke("netcat_update_auto_send", { sessionId, config });
+}
+
+export interface HttpFetchConfig {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  jsonPath?: string;
+}
+
+export async function netcatFetchHttp(config: HttpFetchConfig): Promise<string> {
+  return invoke("netcat_fetch_http", { config });
+}
+
+// ============== 工具函数 ==============
+
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+export function formatSpeed(bytesPerSecond: number): string {
+  return formatBytes(bytesPerSecond) + "/s";
+}
+
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 3600000) return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+  return `${Math.floor(ms / 3600000)}h ${Math.floor((ms % 3600000) / 60000)}m`;
+}
