@@ -581,17 +581,19 @@ pub struct HttpFetchConfig {
 pub async fn netcat_fetch_http(
     config: HttpFetchConfig,
 ) -> Result<String, String> {
-    use reqwest::{Client, Method, Proxy};
+    use reqwest::{Client, Method};
     use std::time::Duration;
 
     log::info!("Netcat HTTP 请求: url={}, method={:?}",
         config.url, config.method);
 
-    // 创建 HTTP 客户端，禁用系统代理以避免代理导致的问题
+    // 创建 HTTP 客户端，配置更宽松的选项
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
         .no_proxy()  // 禁用系统代理
-        .user_agent("CodeShelf-Netcat/1.0")  // 添加 User-Agent
+        .user_agent("CodeShelf-Netcat/1.0")
+        .danger_accept_invalid_certs(true)  // 接受无效证书（用于本地测试）
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
@@ -624,8 +626,18 @@ pub async fn netcat_fetch_http(
         .send()
         .await
         .map_err(|e| {
-            log::error!("Netcat HTTP 请求失败: {}", e);
-            format!("HTTP 请求失败: {}", e)
+            // 提供更详细的错误信息
+            let err_detail = if e.is_connect() {
+                format!("连接失败 (目标服务器可能未启动或防火墙阻止): {}", e)
+            } else if e.is_timeout() {
+                format!("请求超时: {}", e)
+            } else if e.is_request() {
+                format!("请求错误: {}", e)
+            } else {
+                format!("HTTP 请求失败: {}", e)
+            };
+            log::error!("Netcat HTTP 请求失败: {}", err_detail);
+            err_detail
         })?;
 
     let status = response.status();

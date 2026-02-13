@@ -118,6 +118,7 @@ pub async fn start_tcp_client(
     let writer_clone = writer.clone();
     let session_state_clone2 = session_state.clone();
     let addr_clone = addr.clone();
+    let session_id_for_send = session_id.clone();
 
     tokio::spawn(async move {
         log::info!("Netcat Client 发送任务启动: target={}", addr_clone);
@@ -127,11 +128,15 @@ pub async fn start_tcp_client(
             let mut w = writer_clone.write().await;
             if let Err(e) = w.write_all(&data).await {
                 log::error!("发送数据失败: {}", e);
+                // 发送失败时，清理 sender 并退出
+                TCP_SENDERS.write().await.remove(&session_id_for_send);
                 break;
             }
             // 刷新缓冲区，确保数据立即发送
             if let Err(e) = w.flush().await {
                 log::error!("刷新数据失败: {}", e);
+                // 刷新失败时，清理 sender 并退出
+                TCP_SENDERS.write().await.remove(&session_id_for_send);
                 break;
             }
 
@@ -143,6 +148,8 @@ pub async fn start_tcp_client(
             state.session.last_activity = Some(current_timestamp());
         }
         log::info!("Netcat Client 发送任务结束: target={}", addr_clone);
+        // 任务结束时确保清理
+        TCP_SENDERS.write().await.remove(&session_id_for_send);
     });
 
     // 等待读取任务完成
