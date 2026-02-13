@@ -19,11 +19,14 @@ import {
   Monitor,
   X,
   ChevronUp,
+  ChevronDown,
   Loader2,
   Timer,
   Pause,
+  Settings2,
 } from "lucide-react";
 import {
+  netcatInit,
   netcatCreateSession,
   netcatStartSession,
   netcatStopSession,
@@ -34,12 +37,15 @@ import {
   netcatGetClients,
   netcatClearMessages,
   netcatDisconnectClient,
+  netcatUpdateAutoSend,
   formatBytes,
 } from "@/services/toolbox";
 import type {
   Protocol,
   SessionMode,
   DataFormat,
+  AutoSendMode,
+  AutoSendConfig,
   NetcatSession,
   NetcatMessage,
   ConnectedClient,
@@ -63,12 +69,25 @@ const statusText: Record<string, string> = {
   error: "错误",
 };
 
+// 默认自动发送配置
+const defaultAutoSendConfig: AutoSendConfig = {
+  enabled: false,
+  intervalMs: 1000,
+  mode: "fixed",
+  fixedData: "",
+  csvData: "",
+  template: "",
+  httpUrl: "",
+  httpJsonPath: "",
+};
+
 export default function NetcatTool() {
   const [sessions, setSessions] = useState<NetcatSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<NetcatMessage[]>([]);
   const [clients, setClients] = useState<ConnectedClient[]>([]);
-  const [loading, setLoading] = useState<string | null>(null); // 'start' | 'stop' | 'create' | 'delete'
+  const [loading, setLoading] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
   // 新建会话表单
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -86,18 +105,11 @@ export default function NetcatTool() {
   const [showFormatDropdown, setShowFormatDropdown] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
 
-  // 自动发送
+  // 自动发送 - 每个会话独立的自动发送状态
   const [showAutoSendPanel, setShowAutoSendPanel] = useState(false);
-  const [autoSendEnabled, setAutoSendEnabled] = useState(false);
-  const [autoSendInterval, setAutoSendInterval] = useState(1000); // 毫秒
-  const [autoSendMode, setAutoSendMode] = useState<"fixed" | "csv" | "template" | "http">("fixed");
-  const [autoSendFixedData, setAutoSendFixedData] = useState(""); // 固定内容
-  const [autoSendCsvData, setAutoSendCsvData] = useState("");
-  const [autoSendCsvIndex, setAutoSendCsvIndex] = useState(0);
-  const [autoSendTemplate, setAutoSendTemplate] = useState(""); // 支持 {{random:1-100}} {{uuid}} {{timestamp}} 等
-  const [autoSendHttpUrl, setAutoSendHttpUrl] = useState("");
-  const [autoSendCount, setAutoSendCount] = useState(0); // 已发送次数
-  const autoSendTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [autoSendCount, setAutoSendCount] = useState<Record<string, number>>({});
+  const [csvIndexes, setCsvIndexes] = useState<Record<string, number>>({});
+  const autoSendTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // 自动滚动
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -105,13 +117,25 @@ export default function NetcatTool() {
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId);
 
-  const loadSessions = useCallback(async () => {
-    try {
-      const list = await netcatGetSessions();
-      setSessions(list);
-    } catch (err) {
-      console.error("加载会话列表失败:", err);
-    }
+  // 初始化并加载会话
+  useEffect(() => {
+    const init = async () => {
+      try {
+        await netcatInit();
+        const list = await netcatGetSessions();
+        setSessions(list);
+        setInitialized(true);
+      } catch (err) {
+        console.error("初始化 Netcat 失败:", err);
+        setInitialized(true);
+      }
+    };
+    init();
+
+    return () => {
+      // 清理所有定时器
+      Object.values(autoSendTimersRef.current).forEach(clearInterval);
+    };
   }, []);
 
   const loadMessages = useCallback(async (sessionId: string) => {
@@ -133,10 +157,6 @@ export default function NetcatTool() {
   }, []);
 
   useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
-
-  useEffect(() => {
     if (selectedSessionId) {
       loadMessages(selectedSessionId);
       if (selectedSession?.mode === "server") {
@@ -148,6 +168,7 @@ export default function NetcatTool() {
     }
   }, [selectedSessionId, selectedSession?.mode, loadMessages, loadClients]);
 
+  // 事件监听
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
 
@@ -218,123 +239,6 @@ export default function NetcatTool() {
     }
   }, [messages, autoScroll]);
 
-  const handleCreateSession = async () => {
-    setLoading("create");
-    try {
-      const session = await netcatCreateSession({
-        protocol: newProtocol,
-        mode: newMode,
-        host: newHost,
-        port: parseInt(newPort, 10),
-        name: newName || undefined,
-      });
-      setSessions((prev) => [...prev, session]);
-      setSelectedSessionId(session.id);
-      setShowCreateForm(false);
-      setNewName("");
-    } catch (err) {
-      console.error("创建会话失败:", err);
-      alert(`创建会话失败: ${err}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleStartSession = async (sessionId: string) => {
-    setLoading("start");
-    // 立即更新本地状态为"连接中"
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === sessionId ? { ...s, status: "connecting" as const } : s
-      )
-    );
-    try {
-      await netcatStartSession(sessionId);
-      // 启动是异步的，状态会通过事件更新
-    } catch (err) {
-      console.error("启动会话失败:", err);
-      // 恢复状态
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === sessionId ? { ...s, status: "error" as const, errorMessage: String(err) } : s
-        )
-      );
-      alert(`启动会话失败: ${err}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleStopSession = async (sessionId: string) => {
-    setLoading("stop");
-    try {
-      await netcatStopSession(sessionId);
-      // 立即更新本地状态
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === sessionId ? { ...s, status: "disconnected" as const } : s
-        )
-      );
-    } catch (err) {
-      console.error("停止会话失败:", err);
-      alert(`停止会话失败: ${err}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleRemoveSession = async (sessionId: string) => {
-    setLoading("delete");
-    try {
-      await netcatRemoveSession(sessionId);
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      if (selectedSessionId === sessionId) {
-        setSelectedSessionId(null);
-      }
-    } catch (err) {
-      console.error("删除会话失败:", err);
-      alert(`删除会话失败: ${err}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handleSendMessage = async (dataOverride?: string) => {
-    const dataToSend = dataOverride ?? sendData;
-    if (!selectedSessionId || !dataToSend.trim()) return;
-
-    try {
-      const msg = await netcatSendMessage({
-        sessionId: selectedSessionId,
-        data: dataToSend,
-        format: sendFormat,
-        targetClient: targetClient || undefined,
-        broadcast: broadcast || undefined,
-      });
-      setMessages((prev) => [...prev, msg]);
-      if (!dataOverride) {
-        setSendData("");
-      }
-      return true;
-    } catch (err) {
-      console.error("发送消息失败:", err);
-      if (!dataOverride) {
-        alert(`发送消息失败: ${err}`);
-      }
-      return false;
-    }
-  };
-
-  const handleClearMessages = async () => {
-    if (!selectedSessionId) return;
-    try {
-      await netcatClearMessages(selectedSessionId);
-      setMessages([]);
-    } catch (err) {
-      console.error("清空消息失败:", err);
-    }
-  };
-
   // 生成模板数据
   const generateTemplateData = (template: string): string => {
     return template.replace(/\{\{(\w+)(?::([^}]+))?\}\}/g, (_, type, param) => {
@@ -361,31 +265,82 @@ export default function NetcatTool() {
           const choices = (param || "a,b,c").split(",");
           return choices[Math.floor(Math.random() * choices.length)];
         }
+        case "seq": {
+          // 序列号，每次递增
+          return String(Date.now() % 10000);
+        }
         default:
           return `{{${type}}}`;
       }
     });
   };
 
+  // 从 JSON 中提取指定路径的值
+  const extractJsonPath = (obj: unknown, path: string): string => {
+    if (!path.trim()) {
+      return typeof obj === "string" ? obj : JSON.stringify(obj);
+    }
+
+    try {
+      // 支持路径格式: "data.items[0].value" 或 "data.name,data.id" (多个值)
+      const paths = path.split(",").map((p) => p.trim());
+      const results: string[] = [];
+
+      for (const singlePath of paths) {
+        let current: unknown = obj;
+        const parts = singlePath.match(/(\w+)|\[(\d+)\]/g) || [];
+
+        for (const part of parts) {
+          if (current === null || current === undefined) break;
+
+          if (part.startsWith("[")) {
+            // 数组索引
+            const index = parseInt(part.slice(1, -1), 10);
+            current = Array.isArray(current) ? current[index] : undefined;
+          } else {
+            // 对象属性
+            current = (current as Record<string, unknown>)[part];
+          }
+        }
+
+        if (current !== null && current !== undefined) {
+          results.push(typeof current === "string" ? current : JSON.stringify(current));
+        }
+      }
+
+      return results.join(" ");
+    } catch {
+      return typeof obj === "string" ? obj : JSON.stringify(obj);
+    }
+  };
+
   // 获取下一条自动发送数据
-  const getNextAutoSendData = async (): Promise<string | null> => {
-    switch (autoSendMode) {
+  const getNextAutoSendData = async (sessionId: string, config: AutoSendConfig): Promise<string | null> => {
+    switch (config.mode) {
       case "fixed":
-        return autoSendFixedData || null;
+        return config.fixedData || null;
       case "csv": {
-        const lines = autoSendCsvData.split("\n").filter((l) => l.trim());
+        const lines = config.csvData.split("\n").filter((l) => l.trim());
         if (lines.length === 0) return null;
-        const data = lines[autoSendCsvIndex % lines.length];
-        setAutoSendCsvIndex((prev) => prev + 1);
+        const currentIndex = csvIndexes[sessionId] || 0;
+        const data = lines[currentIndex % lines.length];
+        setCsvIndexes((prev) => ({ ...prev, [sessionId]: currentIndex + 1 }));
         return data;
       }
       case "template":
-        return generateTemplateData(autoSendTemplate);
+        return generateTemplateData(config.template);
       case "http": {
-        if (!autoSendHttpUrl) return null;
+        if (!config.httpUrl) return null;
         try {
-          const response = await fetch(autoSendHttpUrl);
-          return await response.text();
+          const response = await fetch(config.httpUrl);
+          const contentType = response.headers.get("content-type") || "";
+
+          if (contentType.includes("application/json")) {
+            const json = await response.json();
+            return extractJsonPath(json, config.httpJsonPath);
+          } else {
+            return await response.text();
+          }
         } catch (err) {
           console.error("HTTP 获取失败:", err);
           return null;
@@ -396,40 +351,237 @@ export default function NetcatTool() {
     }
   };
 
-  // 自动发送逻辑
-  useEffect(() => {
-    if (autoSendEnabled && selectedSession &&
-        (selectedSession.status === "connected" || selectedSession.status === "listening")) {
-      const doAutoSend = async () => {
-        const data = await getNextAutoSendData();
-        if (data) {
-          const success = await handleSendMessage(data);
-          if (success) {
-            setAutoSendCount((prev) => prev + 1);
-          }
-        }
-      };
+  // 发送消息
+  const handleSendMessage = async (dataOverride?: string, sessionIdOverride?: string) => {
+    const targetSessionId = sessionIdOverride || selectedSessionId;
+    const dataToSend = dataOverride ?? sendData;
+    if (!targetSessionId || !dataToSend.trim()) return false;
 
-      autoSendTimerRef.current = setInterval(doAutoSend, autoSendInterval);
-      return () => {
-        if (autoSendTimerRef.current) {
-          clearInterval(autoSendTimerRef.current);
-        }
-      };
-    } else {
-      if (autoSendTimerRef.current) {
-        clearInterval(autoSendTimerRef.current);
-        autoSendTimerRef.current = null;
+    try {
+      const msg = await netcatSendMessage({
+        sessionId: targetSessionId,
+        data: dataToSend,
+        format: sendFormat,
+        targetClient: targetClient || undefined,
+        broadcast: broadcast || undefined,
+      });
+
+      if (targetSessionId === selectedSessionId) {
+        setMessages((prev) => [...prev, msg]);
       }
-    }
-  }, [autoSendEnabled, autoSendInterval, autoSendMode, selectedSession?.status, selectedSessionId]);
 
-  // 停止自动发送当会话改变
+      if (!dataOverride) {
+        setSendData("");
+      }
+      return true;
+    } catch (err) {
+      console.error("发送消息失败:", err);
+      if (!dataOverride) {
+        alert(`发送消息失败: ${err}`);
+      }
+      return false;
+    }
+  };
+
+  // 管理自动发送定时器
+  const startAutoSendTimer = useCallback((sessionId: string, config: AutoSendConfig) => {
+    // 清除现有定时器
+    if (autoSendTimersRef.current[sessionId]) {
+      clearInterval(autoSendTimersRef.current[sessionId]);
+    }
+
+    const doAutoSend = async () => {
+      const session = sessions.find((s) => s.id === sessionId);
+      if (!session || (session.status !== "connected" && session.status !== "listening")) {
+        return;
+      }
+
+      const data = await getNextAutoSendData(sessionId, config);
+      if (data) {
+        const success = await handleSendMessage(data, sessionId);
+        if (success) {
+          setAutoSendCount((prev) => ({
+            ...prev,
+            [sessionId]: (prev[sessionId] || 0) + 1,
+          }));
+        }
+      }
+    };
+
+    autoSendTimersRef.current[sessionId] = setInterval(doAutoSend, config.intervalMs);
+  }, [sessions]);
+
+  const stopAutoSendTimer = (sessionId: string) => {
+    if (autoSendTimersRef.current[sessionId]) {
+      clearInterval(autoSendTimersRef.current[sessionId]);
+      delete autoSendTimersRef.current[sessionId];
+    }
+  };
+
+  // 监听会话的自动发送状态变化
   useEffect(() => {
-    setAutoSendEnabled(false);
-    setAutoSendCount(0);
-    setAutoSendCsvIndex(0);
-  }, [selectedSessionId]);
+    sessions.forEach((session) => {
+      const isConnected = session.status === "connected" || session.status === "listening";
+
+      if (session.autoSend?.enabled && isConnected) {
+        // 如果自动发送已启用且会话已连接，启动定时器
+        if (!autoSendTimersRef.current[session.id]) {
+          startAutoSendTimer(session.id, session.autoSend);
+        }
+      } else {
+        // 否则停止定时器
+        stopAutoSendTimer(session.id);
+      }
+    });
+  }, [sessions, startAutoSendTimer]);
+
+  // 切换自动发送
+  const toggleAutoSend = async (enable: boolean) => {
+    if (!selectedSession) return;
+
+    const newConfig = {
+      ...selectedSession.autoSend,
+      enabled: enable,
+    };
+
+    // 更新本地状态
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === selectedSession.id ? { ...s, autoSend: newConfig } : s
+      )
+    );
+
+    // 重置计数
+    if (enable) {
+      setAutoSendCount((prev) => ({ ...prev, [selectedSession.id]: 0 }));
+      setCsvIndexes((prev) => ({ ...prev, [selectedSession.id]: 0 }));
+    }
+
+    // 保存到后端
+    try {
+      await netcatUpdateAutoSend(selectedSession.id, newConfig);
+    } catch (err) {
+      console.error("保存自动发送配置失败:", err);
+    }
+  };
+
+  // 更新自动发送配置
+  const updateAutoSendConfig = async (updates: Partial<AutoSendConfig>) => {
+    if (!selectedSession) return;
+
+    const newConfig = {
+      ...(selectedSession.autoSend || defaultAutoSendConfig),
+      ...updates,
+    };
+
+    // 更新本地状态
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === selectedSession.id ? { ...s, autoSend: newConfig } : s
+      )
+    );
+
+    // 如果定时器正在运行，更新定时器
+    if (newConfig.enabled && autoSendTimersRef.current[selectedSession.id]) {
+      stopAutoSendTimer(selectedSession.id);
+      startAutoSendTimer(selectedSession.id, newConfig);
+    }
+
+    // 保存到后端
+    try {
+      await netcatUpdateAutoSend(selectedSession.id, newConfig);
+    } catch (err) {
+      console.error("保存自动发送配置失败:", err);
+    }
+  };
+
+  const handleCreateSession = async () => {
+    setLoading("create");
+    try {
+      const session = await netcatCreateSession({
+        protocol: newProtocol,
+        mode: newMode,
+        host: newHost,
+        port: parseInt(newPort, 10),
+        name: newName || undefined,
+      });
+      setSessions((prev) => [...prev, session]);
+      setSelectedSessionId(session.id);
+      setShowCreateForm(false);
+      setNewName("");
+    } catch (err) {
+      console.error("创建会话失败:", err);
+      alert(`创建会话失败: ${err}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleStartSession = async (sessionId: string) => {
+    setLoading("start");
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId ? { ...s, status: "connecting" as const } : s
+      )
+    );
+    try {
+      await netcatStartSession(sessionId);
+    } catch (err) {
+      console.error("启动会话失败:", err);
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, status: "error" as const, errorMessage: String(err) } : s
+        )
+      );
+      alert(`启动会话失败: ${err}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleStopSession = async (sessionId: string) => {
+    setLoading("stop");
+    try {
+      await netcatStopSession(sessionId);
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, status: "disconnected" as const } : s
+        )
+      );
+    } catch (err) {
+      console.error("停止会话失败:", err);
+      alert(`停止会话失败: ${err}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleRemoveSession = async (sessionId: string) => {
+    setLoading("delete");
+    stopAutoSendTimer(sessionId);
+    try {
+      await netcatRemoveSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (selectedSessionId === sessionId) {
+        setSelectedSessionId(null);
+      }
+    } catch (err) {
+      console.error("删除会话失败:", err);
+      alert(`删除会话失败: ${err}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleClearMessages = async () => {
+    if (!selectedSessionId) return;
+    try {
+      await netcatClearMessages(selectedSessionId);
+      setMessages([]);
+    } catch (err) {
+      console.error("清空消息失败:", err);
+    }
+  };
 
   const handleDisconnectClient = async (clientId: string) => {
     if (!selectedSessionId) return;
@@ -443,6 +595,20 @@ export default function NetcatTool() {
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString();
   };
+
+  const currentAutoSend = selectedSession?.autoSend || defaultAutoSendConfig;
+  const currentAutoSendCount = selectedSessionId ? autoSendCount[selectedSessionId] || 0 : 0;
+
+  if (!initialized) {
+    return (
+      <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="flex items-center gap-3 text-gray-500">
+          <Loader2 className="animate-spin" size={24} />
+          <span>加载中...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex bg-gray-50 dark:bg-gray-900">
@@ -475,6 +641,7 @@ export default function NetcatTool() {
               {sessions.map((session) => {
                 const config = statusConfig[session.status] || statusConfig.disconnected;
                 const StatusIcon = config.icon;
+                const hasAutoSend = session.autoSend?.enabled;
                 return (
                   <div
                     key={session.id}
@@ -494,23 +661,19 @@ export default function NetcatTool() {
                           <span className="font-medium text-sm text-gray-900 dark:text-white truncate">
                             {session.name}
                           </span>
+                          {hasAutoSend && (
+                            <Timer size={12} className="text-orange-500 shrink-0" />
+                          )}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                           <span className={`px-1.5 py-0.5 rounded ${config.bg} ${config.color}`}>
                             {statusText[session.status]}
                           </span>
                           <span>{session.protocol.toUpperCase()}</span>
-                          <span>{session.mode === "server" ? "服务器" : "客户端"}</span>
                         </div>
                         <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                           {session.host}:{session.port}
                         </div>
-                        {session.mode === "server" && session.clientCount > 0 && (
-                          <div className="flex items-center gap-1 text-xs text-blue-500 mt-1">
-                            <Users size={12} />
-                            {session.clientCount} 个客户端
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -645,12 +808,15 @@ export default function NetcatTool() {
                       <span className={`text-xs px-2 py-0.5 rounded-full ${statusConfig[selectedSession.status]?.bg} ${statusConfig[selectedSession.status]?.color}`}>
                         {statusText[selectedSession.status]}
                       </span>
+                      {currentAutoSend.enabled && (
+                        <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">
+                          <Loader2 size={10} className="animate-spin" />
+                          自动发送中
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                       {selectedSession.protocol.toUpperCase()} · {selectedSession.host}:{selectedSession.port}
-                      {selectedSession.errorMessage && (
-                        <span className="text-red-500 ml-2">· {selectedSession.errorMessage}</span>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -662,18 +828,11 @@ export default function NetcatTool() {
                       disabled={loading === "start"}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white text-sm font-medium rounded-lg transition-colors"
                     >
-                      {loading === "start" ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <Play size={14} />
-                      )}
+                      {loading === "start" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
                       {selectedSession.mode === "server" ? "启动" : "连接"}
                     </button>
                   ) : selectedSession.status === "connecting" ? (
-                    <button
-                      disabled
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500 text-white text-sm font-medium rounded-lg"
-                    >
+                    <button disabled className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500 text-white text-sm font-medium rounded-lg">
                       <Loader2 size={14} className="animate-spin" />
                       连接中...
                     </button>
@@ -683,11 +842,7 @@ export default function NetcatTool() {
                       disabled={loading === "stop"}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white text-sm font-medium rounded-lg transition-colors"
                     >
-                      {loading === "stop" ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <Square size={14} />
-                      )}
+                      {loading === "stop" ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
                       停止
                     </button>
                   )}
@@ -705,11 +860,7 @@ export default function NetcatTool() {
                     disabled={loading === "delete"}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 disabled:opacity-50 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg transition-colors"
                   >
-                    {loading === "delete" ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Trash2 size={14} />
-                    )}
+                    {loading === "delete" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                     删除
                   </button>
                 </div>
@@ -804,30 +955,36 @@ export default function NetcatTool() {
             </div>
 
             {/* 发送区域 */}
-            <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-              {/* 自动发送配置面板 */}
+            <div className="p-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+              {/* 自动发送配置面板 - 更紧凑 */}
               {showAutoSendPanel && (
-                <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
-                      <Timer size={16} />
-                      自动发送配置
+                <div className="mb-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                      <Settings2 size={14} />
+                      自动发送
                     </h4>
-                    <button
-                      onClick={() => setShowAutoSendPanel(false)}
-                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-                    >
-                      <X size={16} className="text-gray-500" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">
+                        已发送: <span className="font-medium">{currentAutoSendCount}</span>
+                      </span>
+                      <button
+                        onClick={() => setShowAutoSendPanel(false)}
+                        className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                      >
+                        <ChevronDown size={14} className="text-gray-500" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 mb-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">发送模式</label>
+                  <div className="flex gap-3 mb-2">
+                    <div className="flex-1">
+                      <label className="block text-xs text-gray-500 mb-1">模式</label>
                       <select
-                        className="w-full px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                        value={autoSendMode}
-                        onChange={(e) => setAutoSendMode(e.target.value as typeof autoSendMode)}
+                        className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                        value={currentAutoSend.mode}
+                        onChange={(e) => updateAutoSendConfig({ mode: e.target.value as AutoSendMode })}
+                        disabled={currentAutoSend.enabled}
                       >
                         <option value="fixed">固定内容</option>
                         <option value="csv">CSV/多行</option>
@@ -835,149 +992,114 @@ export default function NetcatTool() {
                         <option value="http">HTTP 获取</option>
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">发送间隔 (ms)</label>
+                    <div className="w-28">
+                      <label className="block text-xs text-gray-500 mb-1">间隔 (ms)</label>
                       <input
                         type="number"
-                        className="w-full px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                        value={autoSendInterval}
-                        onChange={(e) => setAutoSendInterval(Math.max(100, parseInt(e.target.value) || 1000))}
+                        className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                        value={currentAutoSend.intervalMs}
+                        onChange={(e) => updateAutoSendConfig({ intervalMs: Math.max(100, parseInt(e.target.value) || 1000) })}
+                        disabled={currentAutoSend.enabled}
                         min={100}
                         step={100}
                       />
                     </div>
+                    <div className="flex items-end">
+                      <button
+                        onClick={() => toggleAutoSend(!currentAutoSend.enabled)}
+                        disabled={selectedSession.status !== "connected" && selectedSession.status !== "listening"}
+                        className={`flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded transition-colors ${
+                          currentAutoSend.enabled
+                            ? "bg-red-500 hover:bg-red-600 text-white"
+                            : "bg-green-500 hover:bg-green-600 text-white"
+                        } disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed`}
+                      >
+                        {currentAutoSend.enabled ? <><Pause size={12} /> 停止</> : <><Play size={12} /> 启动</>}
+                      </button>
+                    </div>
                   </div>
 
-                  {autoSendMode === "csv" && (
-                    <div className="mb-3">
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                        CSV 数据 (每行一条，循环发送)
-                      </label>
+                  {/* 模式特定配置 - 单行或紧凑显示 */}
+                  <div className="text-xs">
+                    {currentAutoSend.mode === "fixed" && (
                       <textarea
-                        className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono h-24 resize-none"
-                        value={autoSendCsvData}
-                        onChange={(e) => setAutoSendCsvData(e.target.value)}
-                        placeholder="第一行数据&#10;第二行数据&#10;第三行数据"
+                        className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono h-16 resize-none"
+                        value={currentAutoSend.fixedData}
+                        onChange={(e) => updateAutoSendConfig({ fixedData: e.target.value })}
+                        placeholder="输入固定发送内容..."
+                        disabled={currentAutoSend.enabled}
                       />
-                    </div>
-                  )}
-
-                  {autoSendMode === "template" && (
-                    <div className="mb-3">
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                        模板 (支持: {`{{random:1-100}}`} {`{{uuid}}`} {`{{timestamp}}`} {`{{float:0-100}}`} {`{{choice:a,b,c}}`})
-                      </label>
+                    )}
+                    {currentAutoSend.mode === "csv" && (
                       <textarea
-                        className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono h-24 resize-none"
-                        value={autoSendTemplate}
-                        onChange={(e) => setAutoSendTemplate(e.target.value)}
-                        placeholder='{"id":"{{uuid}}","value":{{random:1-100}},"time":{{timestamp}}}'
+                        className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono h-16 resize-none"
+                        value={currentAutoSend.csvData}
+                        onChange={(e) => updateAutoSendConfig({ csvData: e.target.value })}
+                        placeholder="每行一条数据，循环发送"
+                        disabled={currentAutoSend.enabled}
                       />
-                    </div>
-                  )}
-
-                  {autoSendMode === "http" && (
-                    <div className="mb-3">
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                        HTTP 接口 URL (每次发送前请求获取内容)
-                      </label>
-                      <input
-                        type="text"
-                        className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                        value={autoSendHttpUrl}
-                        onChange={(e) => setAutoSendHttpUrl(e.target.value)}
-                        placeholder="http://localhost:8080/api/mock-data"
-                      />
-                    </div>
-                  )}
-
-                  {autoSendMode === "fixed" && (
-                    <div className="mb-3">
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                        固定发送内容
-                      </label>
-                      <textarea
-                        className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono h-20 resize-none"
-                        value={autoSendFixedData}
-                        onChange={(e) => setAutoSendFixedData(e.target.value)}
-                        placeholder="输入要循环发送的固定内容..."
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">
-                      已发送: <span className="font-medium text-gray-700 dark:text-gray-300">{autoSendCount}</span> 条
-                    </span>
-                    <button
-                      onClick={() => {
-                        setAutoSendEnabled(!autoSendEnabled);
-                        if (!autoSendEnabled) {
-                          setAutoSendCount(0);
-                          setAutoSendCsvIndex(0);
-                        }
-                      }}
-                      disabled={selectedSession.status !== "connected" && selectedSession.status !== "listening"}
-                      className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                        autoSendEnabled
-                          ? "bg-red-500 hover:bg-red-600 text-white"
-                          : "bg-green-500 hover:bg-green-600 text-white"
-                      } disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed`}
-                    >
-                      {autoSendEnabled ? (
-                        <>
-                          <Pause size={14} />
-                          停止
-                        </>
-                      ) : (
-                        <>
-                          <Play size={14} />
-                          开始自动发送
-                        </>
-                      )}
-                    </button>
+                    )}
+                    {currentAutoSend.mode === "template" && (
+                      <div>
+                        <div className="text-gray-400 mb-1">
+                          变量: {`{{random:1-100}}`} {`{{uuid}}`} {`{{timestamp}}`} {`{{float:0-1}}`} {`{{choice:a,b,c}}`}
+                        </div>
+                        <textarea
+                          className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm font-mono h-16 resize-none"
+                          value={currentAutoSend.template}
+                          onChange={(e) => updateAutoSendConfig({ template: e.target.value })}
+                          placeholder='{"id":"{{uuid}}","value":{{random:1-100}}}'
+                          disabled={currentAutoSend.enabled}
+                        />
+                      </div>
+                    )}
+                    {currentAutoSend.mode === "http" && (
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                          value={currentAutoSend.httpUrl}
+                          onChange={(e) => updateAutoSendConfig({ httpUrl: e.target.value })}
+                          placeholder="HTTP URL"
+                          disabled={currentAutoSend.enabled}
+                        />
+                        <input
+                          type="text"
+                          className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                          value={currentAutoSend.httpJsonPath}
+                          onChange={(e) => updateAutoSendConfig({ httpJsonPath: e.target.value })}
+                          placeholder="JSON 路径 (留空取全部，如: data.items[0].value 或 data.name,data.id)"
+                          disabled={currentAutoSend.enabled}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
               {selectedSession.mode === "server" && clients.length > 0 && (
-                <div className="flex items-center gap-3 mb-3">
-                  {/* 自定义向上展开的客户端选择下拉框 */}
+                <div className="flex items-center gap-3 mb-2">
+                  {/* 客户端选择下拉框 */}
                   <div className="relative">
                     <button
                       type="button"
                       onClick={() => !broadcast && setShowClientDropdown(!showClientDropdown)}
                       disabled={broadcast}
-                      className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm min-w-[160px] justify-between ${
+                      className={`flex items-center gap-2 px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm min-w-[140px] justify-between ${
                         broadcast ? "opacity-50 cursor-not-allowed" : ""
                       }`}
                     >
-                      <span className="truncate">
+                      <span className="truncate text-xs">
                         {targetClient
-                          ? clients.find((c) => c.id === targetClient)?.addr || "选择客户端..."
-                          : "选择客户端..."}
+                          ? clients.find((c) => c.id === targetClient)?.addr || "选择客户端"
+                          : "选择客户端"}
                       </span>
-                      <ChevronUp size={14} className={`shrink-0 transition-transform ${showClientDropdown ? "" : "rotate-180"}`} />
+                      <ChevronUp size={12} className={`shrink-0 transition-transform ${showClientDropdown ? "" : "rotate-180"}`} />
                     </button>
                     {showClientDropdown && (
                       <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setShowClientDropdown(false)}
-                        />
-                        <div className="absolute bottom-full left-0 mb-1 w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg z-20 overflow-hidden max-h-48 overflow-y-auto">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTargetClient("");
-                              setShowClientDropdown(false);
-                            }}
-                            className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-600 ${
-                              !targetClient ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" : ""
-                            }`}
-                          >
-                            选择客户端...
-                          </button>
+                        <div className="fixed inset-0 z-10" onClick={() => setShowClientDropdown(false)} />
+                        <div className="absolute bottom-full left-0 mb-1 w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-20 overflow-hidden max-h-40 overflow-y-auto">
                           {clients.map((c) => (
                             <button
                               key={c.id}
@@ -986,8 +1108,8 @@ export default function NetcatTool() {
                                 setTargetClient(c.id);
                                 setShowClientDropdown(false);
                               }}
-                              className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-600 ${
-                                targetClient === c.id ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" : ""
+                              className={`w-full px-2 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-600 ${
+                                targetClient === c.id ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600" : ""
                               }`}
                             >
                               {c.addr}
@@ -997,36 +1119,33 @@ export default function NetcatTool() {
                       </>
                     )}
                   </div>
-                  <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={broadcast}
                       onChange={(e) => setBroadcast(e.target.checked)}
                       className="rounded"
                     />
-                    广播到所有客户端
+                    广播
                   </label>
                 </div>
               )}
 
-              <div className="flex gap-3">
-                {/* 自定义向上展开的下拉框 */}
+              <div className="flex gap-2">
+                {/* 格式下拉框 */}
                 <div className="relative">
                   <button
                     type="button"
                     onClick={() => setShowFormatDropdown(!showFormatDropdown)}
-                    className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[90px] justify-between"
+                    className="flex items-center gap-1 px-2 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm min-w-[70px] justify-between"
                   >
-                    <span>{sendFormat === "text" ? "文本" : sendFormat === "hex" ? "HEX" : "Base64"}</span>
-                    <ChevronUp size={14} className={`transition-transform ${showFormatDropdown ? "" : "rotate-180"}`} />
+                    <span className="text-xs">{sendFormat === "text" ? "文本" : sendFormat === "hex" ? "HEX" : "B64"}</span>
+                    <ChevronUp size={12} className={`transition-transform ${showFormatDropdown ? "" : "rotate-180"}`} />
                   </button>
                   {showFormatDropdown && (
                     <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setShowFormatDropdown(false)}
-                      />
-                      <div className="absolute bottom-full left-0 mb-1 w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg z-20 overflow-hidden">
+                      <div className="fixed inset-0 z-10" onClick={() => setShowFormatDropdown(false)} />
+                      <div className="absolute bottom-full left-0 mb-1 w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-20 overflow-hidden">
                         {[
                           { value: "text" as DataFormat, label: "文本" },
                           { value: "hex" as DataFormat, label: "HEX" },
@@ -1039,8 +1158,8 @@ export default function NetcatTool() {
                               setSendFormat(opt.value);
                               setShowFormatDropdown(false);
                             }}
-                            className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-600 ${
-                              sendFormat === opt.value ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" : ""
+                            className={`w-full px-2 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-600 ${
+                              sendFormat === opt.value ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600" : ""
                             }`}
                           >
                             {opt.label}
@@ -1052,15 +1171,11 @@ export default function NetcatTool() {
                 </div>
                 <input
                   type="text"
-                  className="flex-1 px-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  className="flex-1 px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
                   value={sendData}
                   onChange={(e) => setSendData(e.target.value)}
                   placeholder={
-                    sendFormat === "hex"
-                      ? "48 65 6C 6C 6F 或 48656C6C6F"
-                      : sendFormat === "base64"
-                      ? "Base64 编码内容"
-                      : "输入要发送的内容..."
+                    sendFormat === "hex" ? "48 65 6C 6C 6F" : sendFormat === "base64" ? "Base64" : "输入内容..."
                   }
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
@@ -1075,26 +1190,21 @@ export default function NetcatTool() {
                     !sendData.trim() ||
                     (selectedSession.status !== "connected" && selectedSession.status !== "listening")
                   }
-                  className="flex items-center gap-2 px-5 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white font-medium rounded-lg transition-colors disabled:cursor-not-allowed"
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white text-sm font-medium rounded transition-colors disabled:cursor-not-allowed"
                 >
-                  <Send size={16} />
+                  <Send size={14} />
                   发送
                 </button>
-                {/* 自动发送按钮 */}
                 <button
                   onClick={() => setShowAutoSendPanel(!showAutoSendPanel)}
-                  className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg text-sm font-medium transition-colors ${
-                    showAutoSendPanel || autoSendEnabled
-                      ? "bg-orange-50 dark:bg-orange-900/30 border-orange-300 dark:border-orange-700 text-orange-600 dark:text-orange-400"
-                      : "bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600"
+                  className={`flex items-center gap-1 px-2 py-1.5 border rounded text-sm transition-colors ${
+                    showAutoSendPanel || currentAutoSend.enabled
+                      ? "bg-orange-50 dark:bg-orange-900/30 border-orange-300 dark:border-orange-700 text-orange-600"
+                      : "bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 hover:bg-gray-100"
                   }`}
-                  title="自动发送配置"
+                  title="自动发送"
                 >
-                  {autoSendEnabled ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Timer size={16} />
-                  )}
+                  {currentAutoSend.enabled ? <Loader2 size={14} className="animate-spin" /> : <Timer size={14} />}
                 </button>
               </div>
             </div>

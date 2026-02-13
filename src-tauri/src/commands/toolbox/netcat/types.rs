@@ -41,6 +41,71 @@ pub enum SessionStatus {
     Error,
 }
 
+/// 自动发送模式
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoSendMode {
+    Fixed,
+    Csv,
+    Template,
+    Http,
+}
+
+impl Default for AutoSendMode {
+    fn default() -> Self {
+        Self::Fixed
+    }
+}
+
+/// 自动发送配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoSendConfig {
+    /// 是否启用
+    #[serde(default)]
+    pub enabled: bool,
+    /// 发送间隔（毫秒）
+    #[serde(default = "default_interval")]
+    pub interval_ms: u64,
+    /// 发送模式
+    #[serde(default)]
+    pub mode: AutoSendMode,
+    /// 固定内容
+    #[serde(default)]
+    pub fixed_data: String,
+    /// CSV/多行数据
+    #[serde(default)]
+    pub csv_data: String,
+    /// 模板内容
+    #[serde(default)]
+    pub template: String,
+    /// HTTP URL
+    #[serde(default)]
+    pub http_url: String,
+    /// HTTP JSON 路径（用于提取 JSON 响应中的特定字段）
+    #[serde(default)]
+    pub http_json_path: String,
+}
+
+fn default_interval() -> u64 {
+    1000
+}
+
+impl Default for AutoSendConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_ms: 1000,
+            mode: AutoSendMode::Fixed,
+            fixed_data: String::new(),
+            csv_data: String::new(),
+            template: String::new(),
+            http_url: String::new(),
+            http_json_path: String::new(),
+        }
+    }
+}
+
 /// 创建会话的输入参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +117,24 @@ pub struct NetcatSessionInput {
     pub name: Option<String>,
     pub auto_reconnect: Option<bool>,
     pub timeout_ms: Option<u64>,
+}
+
+/// 会话配置（持久化存储）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetcatSessionConfig {
+    pub id: String,
+    pub name: String,
+    pub protocol: Protocol,
+    pub mode: SessionMode,
+    pub host: String,
+    pub port: u16,
+    pub auto_reconnect: bool,
+    pub timeout_ms: u64,
+    pub created_at: u64,
+    /// 自动发送配置
+    #[serde(default)]
+    pub auto_send: AutoSendConfig,
 }
 
 /// 会话配置
@@ -76,6 +159,9 @@ pub struct NetcatSession {
     pub error_message: Option<String>,
     /// 连接的客户端数量（仅服务器模式）
     pub client_count: u32,
+    /// 自动发送配置
+    #[serde(default)]
+    pub auto_send: AutoSendConfig,
 }
 
 /// 发送消息的输入

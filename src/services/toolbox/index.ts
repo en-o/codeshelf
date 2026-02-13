@@ -383,7 +383,12 @@ import type {
   SendMessageInput,
   NetcatMessage,
   ConnectedClient,
+  AutoSendConfig,
 } from "@/types/toolbox";
+
+export async function netcatInit(): Promise<void> {
+  return invoke("netcat_init");
+}
 
 export async function netcatCreateSession(input: NetcatSessionInput): Promise<NetcatSession> {
   return invoke("netcat_create_session", { input });
@@ -431,6 +436,10 @@ export async function netcatClearMessages(sessionId: string): Promise<void> {
 
 export async function netcatDisconnectClient(sessionId: string, clientId: string): Promise<void> {
   return invoke("netcat_disconnect_client", { sessionId, clientId });
+}
+
+export async function netcatUpdateAutoSend(sessionId: string, config: AutoSendConfig): Promise<void> {
+  return invoke("netcat_update_auto_send", { sessionId, config });
 }
 
 // ============== 工具函数 ==============

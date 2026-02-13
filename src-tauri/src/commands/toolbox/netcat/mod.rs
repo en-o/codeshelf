@@ -8,6 +8,7 @@ mod udp;
 pub use types::*;
 
 use super::generate_id;
+use crate::storage::get_storage_config;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -24,12 +25,97 @@ impl NetcatState {
             sessions: create_session_manager(),
         }
     }
+
+    /// 从文件加载会话配置
+    pub async fn load_sessions(&self) -> Result<(), String> {
+        let config = get_storage_config()?;
+        let file_path = config.netcat_sessions_file();
+
+        if !file_path.exists() {
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(&file_path)
+            .map_err(|e| format!("读取 Netcat 会话文件失败: {}", e))?;
+
+        let configs: Vec<NetcatSessionConfig> = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 Netcat 会话文件失败: {}", e))?;
+
+        let mut sessions = self.sessions.write().await;
+        for cfg in configs {
+            let session = NetcatSession {
+                id: cfg.id.clone(),
+                name: cfg.name,
+                protocol: cfg.protocol,
+                mode: cfg.mode,
+                host: cfg.host,
+                port: cfg.port,
+                status: SessionStatus::Disconnected,
+                auto_reconnect: cfg.auto_reconnect,
+                timeout_ms: cfg.timeout_ms,
+                created_at: cfg.created_at,
+                connected_at: None,
+                last_activity: None,
+                bytes_sent: 0,
+                bytes_received: 0,
+                message_count: 0,
+                error_message: None,
+                client_count: 0,
+                auto_send: cfg.auto_send,
+            };
+            let session_state = Arc::new(RwLock::new(SessionState::new(session)));
+            sessions.insert(cfg.id, session_state);
+        }
+
+        Ok(())
+    }
+
+    /// 保存会话配置到文件
+    pub async fn save_sessions(&self) -> Result<(), String> {
+        let config = get_storage_config()?;
+        let file_path = config.netcat_sessions_file();
+
+        let sessions = self.sessions.read().await;
+        let mut configs: Vec<NetcatSessionConfig> = Vec::new();
+
+        for session_state in sessions.values() {
+            let s = session_state.read().await;
+            configs.push(NetcatSessionConfig {
+                id: s.session.id.clone(),
+                name: s.session.name.clone(),
+                protocol: s.session.protocol,
+                mode: s.session.mode,
+                host: s.session.host.clone(),
+                port: s.session.port,
+                auto_reconnect: s.session.auto_reconnect,
+                timeout_ms: s.session.timeout_ms,
+                created_at: s.session.created_at,
+                auto_send: s.session.auto_send.clone(),
+            });
+        }
+
+        let content = serde_json::to_string_pretty(&configs)
+            .map_err(|e| format!("序列化 Netcat 会话失败: {}", e))?;
+
+        std::fs::write(&file_path, content)
+            .map_err(|e| format!("保存 Netcat 会话文件失败: {}", e))?;
+
+        Ok(())
+    }
 }
 
 impl Default for NetcatState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// 初始化并加载已保存的会话
+#[tauri::command]
+pub async fn netcat_init(
+    state: State<'_, NetcatState>,
+) -> Result<(), String> {
+    state.load_sessions().await
 }
 
 /// 创建新会话
@@ -76,12 +162,16 @@ pub async fn netcat_create_session(
         message_count: 0,
         error_message: None,
         client_count: 0,
+        auto_send: AutoSendConfig::default(),
     };
 
     let session_state = Arc::new(RwLock::new(SessionState::new(session.clone())));
 
     // 添加到管理器
     state.sessions.write().await.insert(session_id, session_state);
+
+    // 保存到文件
+    state.save_sessions().await?;
 
     Ok(session)
 }
@@ -176,6 +266,32 @@ pub async fn netcat_remove_session(
 
     // 移除
     state.sessions.write().await.remove(&session_id);
+
+    // 保存到文件
+    state.save_sessions().await?;
+
+    Ok(())
+}
+
+/// 更新会话的自动发送配置
+#[tauri::command]
+pub async fn netcat_update_auto_send(
+    state: State<'_, NetcatState>,
+    session_id: String,
+    config: AutoSendConfig,
+) -> Result<(), String> {
+    let sessions = state.sessions.read().await;
+    let session_state = sessions.get(&session_id).ok_or("会话不存在")?;
+
+    {
+        let mut s = session_state.write().await;
+        s.session.auto_send = config;
+    }
+
+    drop(sessions);
+
+    // 保存到文件
+    state.save_sessions().await?;
 
     Ok(())
 }

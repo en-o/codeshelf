@@ -254,6 +254,7 @@ pub fn run() {
             toolbox::claude_code::save_claude_installations_cache,
             toolbox::claude_code::clear_claude_installations_cache,
             // Toolbox - Netcat commands
+            toolbox::netcat::netcat_init,
             toolbox::netcat::netcat_create_session,
             toolbox::netcat::netcat_start_session,
             toolbox::netcat::netcat_stop_session,
@@ -265,6 +266,7 @@ pub fn run() {
             toolbox::netcat::netcat_get_clients,
             toolbox::netcat::netcat_clear_messages,
             toolbox::netcat::netcat_disconnect_client,
+            toolbox::netcat::netcat_update_auto_send,
             // Settings commands
             settings::get_labels,
             settings::save_labels,

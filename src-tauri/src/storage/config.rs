@@ -97,6 +97,10 @@ impl StorageConfig {
     pub fn server_configs_file(&self) -> PathBuf {
         self.data_dir.join("server_configs.json")
     }
+
+    pub fn netcat_sessions_file(&self) -> PathBuf {
+        self.data_dir.join("netcat_sessions.json")
+    }
 }
 
 /// 初始化存储配置

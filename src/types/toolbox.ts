@@ -227,6 +227,19 @@ export type SessionMode = "client" | "server";
 export type DataFormat = "text" | "hex" | "base64";
 export type SessionStatus = "connecting" | "connected" | "listening" | "disconnected" | "error";
 export type MessageDirection = "sent" | "received";
+export type AutoSendMode = "fixed" | "csv" | "template" | "http";
+
+export interface AutoSendConfig {
+  enabled: boolean;
+  intervalMs: number;
+  mode: AutoSendMode;
+  fixedData: string;
+  csvData: string;
+  template: string;
+  httpUrl: string;
+  /** HTTP JSON 路径，用于提取 JSON 响应中的特定字段 */
+  httpJsonPath: string;
+}
 
 export interface NetcatSessionInput {
   protocol: Protocol;
@@ -256,6 +269,8 @@ export interface NetcatSession {
   messageCount: number;
   errorMessage?: string;
   clientCount: number;
+  /** 自动发送配置 */
+  autoSend: AutoSendConfig;
 }
 
 export interface SendMessageInput {
