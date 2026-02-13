@@ -205,11 +205,13 @@ export function ToolPanelHeader({
   icon: Icon,
   onBack,
   actions,
+  beta,
 }: {
   title: string;
   icon: React.ElementType;
   onBack: () => void;
   actions?: React.ReactNode;
+  beta?: boolean;
 }) {
   const { sidebarCollapsed, setSidebarCollapsed } = useAppStore();
 
@@ -230,7 +232,14 @@ export function ToolPanelHeader({
           <ChevronLeft size={20} />
         </button>
         <Icon size={20} className="text-blue-500" />
-        <span className="text-lg font-semibold">{title}</span>
+        <span className="text-lg font-semibold">
+          {title}
+          {beta && (
+            <sup className="ml-1 text-[10px] font-medium text-orange-500 dark:text-orange-400">
+              Beta
+            </sup>
+          )}
+        </span>
       </div>
 
       <div className="flex-1" data-tauri-drag-region />
@@ -265,7 +274,7 @@ export function ToolPanelHeader({
 function NetcatToolPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="flex flex-col h-full">
-      <ToolPanelHeader title="协议测试" icon={Radio} onBack={onBack} />
+      <ToolPanelHeader title="Netcat" icon={Radio} onBack={onBack} beta />
       <div className="flex-1 overflow-hidden">
         <NetcatTool />
       </div>
