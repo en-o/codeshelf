@@ -231,28 +231,32 @@ pub struct ConnectedClient {
 
 /// 会话事件（用于前端实时更新）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[serde(tag = "type")]
 pub enum NetcatEvent {
     #[serde(rename = "statusChanged")]
     StatusChanged {
+        #[serde(rename = "sessionId")]
         session_id: String,
         status: SessionStatus,
         error: Option<String>,
     },
     #[serde(rename = "messageReceived")]
     MessageReceived {
+        #[serde(rename = "sessionId")]
         session_id: String,
         message: NetcatMessage,
     },
     #[serde(rename = "clientConnected")]
     ClientConnected {
+        #[serde(rename = "sessionId")]
         session_id: String,
         client: ConnectedClient,
     },
     #[serde(rename = "clientDisconnected")]
     ClientDisconnected {
+        #[serde(rename = "sessionId")]
         session_id: String,
+        #[serde(rename = "clientId")]
         client_id: String,
     },
 }

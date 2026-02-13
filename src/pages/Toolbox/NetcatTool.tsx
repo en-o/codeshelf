@@ -208,13 +208,17 @@ export default function NetcatTool() {
     let unlisten: UnlistenFn | undefined;
 
     const setupListener = async () => {
+      console.log("Netcat: 设置事件监听器");
       unlisten = await listen<NetcatEvent>("netcat-event", (event) => {
         const data = event.payload;
         // 使用 ref 获取当前选中的会话ID，避免闭包过期问题
         const currentSessionId = selectedSessionIdRef.current;
 
+        console.log("Netcat 收到事件:", data.type, "sessionId:", data.sessionId, "当前选中:", currentSessionId);
+
         switch (data.type) {
           case "statusChanged":
+            console.log("状态变更:", data.status);
             setSessions((prev) =>
               prev.map((s) =>
                 s.id === data.sessionId
@@ -225,6 +229,7 @@ export default function NetcatTool() {
             break;
 
           case "messageReceived":
+            console.log("收到消息:", data.message.data?.substring(0, 50), "匹配当前会话:", data.sessionId === currentSessionId);
             if (data.sessionId === currentSessionId) {
               setMessages((prev) => [...prev, data.message]);
             }
@@ -242,6 +247,7 @@ export default function NetcatTool() {
             break;
 
           case "clientConnected":
+            console.log("客户端连接:", data.client.addr);
             if (data.sessionId === currentSessionId) {
               setClients((prev) => [...prev, data.client]);
             }
@@ -253,6 +259,7 @@ export default function NetcatTool() {
             break;
 
           case "clientDisconnected":
+            console.log("客户端断开:", data.clientId);
             if (data.sessionId === currentSessionId) {
               setClients((prev) => prev.filter((c) => c.id !== data.clientId));
             }
@@ -264,10 +271,14 @@ export default function NetcatTool() {
             break;
         }
       });
+      console.log("Netcat: 事件监听器已设置");
     };
 
     setupListener();
-    return () => { unlisten?.(); };
+    return () => {
+      console.log("Netcat: 清理事件监听器");
+      unlisten?.();
+    };
   }, []); // 使用空依赖数组，因为使用了 ref 来获取当前 session
 
   useEffect(() => {
@@ -314,8 +325,10 @@ export default function NetcatTool() {
 
   // 获取下一条自动发送数据
   const getNextAutoSendData = async (sessionId: string, config: AutoSendConfig): Promise<string | null> => {
+    console.log("获取自动发送数据, 模式:", config.mode);
     switch (config.mode) {
       case "fixed":
+        console.log("固定模式, 数据:", config.fixedData?.substring(0, 50));
         return config.fixedData || null;
       case "csv": {
         const lines = config.csvData.split("\n").filter((l) => l.trim());
@@ -324,13 +337,21 @@ export default function NetcatTool() {
         const currentIndex = csvIndexesRef.current[sessionId] || 0;
         const data = lines[currentIndex % lines.length];
         csvIndexesRef.current[sessionId] = currentIndex + 1;
+        console.log("CSV模式, 当前行:", currentIndex, "数据:", data?.substring(0, 50));
         return data;
       }
-      case "template":
-        return generateTemplateData(config.template);
+      case "template": {
+        const result = generateTemplateData(config.template);
+        console.log("模板模式, 生成数据:", result?.substring(0, 50));
+        return result;
+      }
       case "http": {
-        if (!config.httpUrl) return null;
+        if (!config.httpUrl) {
+          console.warn("HTTP模式但没有URL");
+          return null;
+        }
         try {
+          console.log("HTTP模式, 请求URL:", config.httpUrl);
           // 解析 headers（JSON 格式）
           let headers: Record<string, string> | undefined;
           if (config.httpHeaders?.trim()) {
@@ -349,6 +370,7 @@ export default function NetcatTool() {
             body: config.httpBody || undefined,
             jsonPath: config.httpJsonPath || undefined,
           });
+          console.log("HTTP获取成功, 数据:", data?.substring(0, 100));
           return data || null;
         } catch (err) {
           console.error("HTTP 获取失败:", err);
@@ -361,18 +383,44 @@ export default function NetcatTool() {
   };
 
   // 发送消息
-  const handleSendMessage = async (dataOverride?: string, sessionIdOverride?: string) => {
+  const handleSendMessage = async (
+    dataOverride?: string,
+    sessionIdOverride?: string,
+    options?: { forceTargetClient?: string; forceBroadcast?: boolean }
+  ) => {
     const targetSessionId = sessionIdOverride || selectedSessionId;
     const dataToSend = dataOverride ?? sendData;
     if (!targetSessionId || !dataToSend.trim()) return false;
 
+    // 获取会话信息来判断模式
+    const session = sessionsRef.current.find((s) => s.id === targetSessionId);
+    const isServerMode = session?.mode === "server";
+
+    // 确定发送目标
+    let finalTargetClient = options?.forceTargetClient ?? targetClient;
+    let finalBroadcast = options?.forceBroadcast ?? broadcast;
+
+    // 服务器模式下，如果没有指定目标且没有启用广播，默认启用广播
+    if (isServerMode && !finalTargetClient && !finalBroadcast) {
+      console.log("服务器模式自动发送，默认启用广播");
+      finalBroadcast = true;
+    }
+
     try {
+      console.log("发送消息:", {
+        sessionId: targetSessionId,
+        data: dataToSend.substring(0, 50),
+        targetClient: finalTargetClient,
+        broadcast: finalBroadcast,
+        isServerMode,
+      });
+
       const msg = await netcatSendMessage({
         sessionId: targetSessionId,
         data: dataToSend,
         format: sendFormat,
-        targetClient: targetClient || undefined,
-        broadcast: broadcast || undefined,
+        targetClient: finalTargetClient || undefined,
+        broadcast: finalBroadcast || undefined,
       });
 
       // 使用 ref 来检查当前选中的会话，避免闭包过期问题
@@ -400,22 +448,34 @@ export default function NetcatTool() {
       clearInterval(autoSendTimersRef.current[sessionId]);
     }
 
+    console.log("启动自动发送定时器:", sessionId, "间隔:", config.intervalMs, "模式:", config.mode);
+
     const doAutoSend = async () => {
       // 使用 ref 获取最新的 sessions，避免闭包过期
       const session = sessionsRef.current.find((s) => s.id === sessionId);
       if (!session || (session.status !== "connected" && session.status !== "listening")) {
+        console.log("自动发送跳过: 会话状态不对", session?.status);
         return;
       }
 
+      console.log("执行自动发送, 会话:", sessionId, "模式:", session.mode);
+
       const data = await getNextAutoSendData(sessionId, config);
       if (data) {
-        const success = await handleSendMessage(data, sessionId);
+        console.log("自动发送数据:", data.substring(0, 50), "会话模式:", session.mode);
+        // 自动发送时，服务器模式默认使用广播
+        const success = await handleSendMessage(data, sessionId, {
+          forceBroadcast: session.mode === "server" ? true : undefined,
+        });
+        console.log("自动发送结果:", success);
         if (success) {
           setAutoSendCount((prev) => ({
             ...prev,
             [sessionId]: (prev[sessionId] || 0) + 1,
           }));
         }
+      } else {
+        console.warn("自动发送: 没有获取到数据");
       }
     };
 

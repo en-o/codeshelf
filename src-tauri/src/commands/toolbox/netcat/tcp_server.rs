@@ -176,19 +176,26 @@ async fn handle_client_connection(
     let writer_clone = writer.clone();
     let session_state_clone2 = session_state.clone();
     let client_id_clone2 = client_id.clone();
+    let client_addr_clone = client_addr.clone();
 
     tokio::spawn(async move {
+        log::info!("Netcat Server 发送任务启动: client={}", client_addr_clone);
         while let Some(data) = send_rx.recv().await {
+            log::info!("Netcat Server 从通道收到数据: {} bytes, 准备写入客户端 {}",
+                data.len(), client_addr_clone);
+
             let mut w = writer_clone.write().await;
             if let Err(e) = w.write_all(&data).await {
-                eprintln!("发送数据到客户端失败: {}", e);
+                log::error!("发送数据到客户端失败: {}", e);
                 break;
             }
             // 刷新缓冲区，确保数据立即发送
             if let Err(e) = w.flush().await {
-                eprintln!("刷新数据到客户端失败: {}", e);
+                log::error!("刷新数据到客户端失败: {}", e);
                 break;
             }
+
+            log::info!("Netcat Server 数据已写入并刷新到客户端: {} bytes", data.len());
 
             // 更新统计
             let mut state = session_state_clone2.write().await;
@@ -198,6 +205,7 @@ async fn handle_client_connection(
                 client.last_activity = current_timestamp();
             }
         }
+        log::info!("Netcat Server 发送任务结束: client={}", client_addr_clone);
     });
 
     // 启动读取任务
@@ -276,6 +284,10 @@ async fn handle_received_data(
 ) {
     let now = current_timestamp();
     let message_id = generate_id();
+    let data_preview = bytes_to_display_string(&data);
+
+    log::info!("Netcat Server 收到数据: {} bytes, from={:?}, preview={}",
+        data.len(), client_addr, &data_preview[..data_preview.len().min(50)]);
 
     let (session_id, message) = {
         let mut state = session_state.write().await;
@@ -295,7 +307,7 @@ async fn handle_received_data(
             id: message_id,
             session_id: state.session.id.clone(),
             direction: MessageDirection::Received,
-            data: bytes_to_display_string(&data),
+            data: data_preview,
             format: DataFormat::Text,
             size: data.len(),
             timestamp: now,
@@ -313,38 +325,74 @@ async fn handle_received_data(
         (state.session.id.clone(), message)
     };
 
-    // 发送事件
-    let _ = app.emit("netcat-event", NetcatEvent::MessageReceived {
-        session_id,
+    // 发送事件 - 记录结果
+    let event = NetcatEvent::MessageReceived {
+        session_id: session_id.clone(),
         message,
-    });
+    };
+    match app.emit("netcat-event", &event) {
+        Ok(_) => log::info!("Netcat Server 消息事件已发送: session={}", session_id),
+        Err(e) => log::error!("Netcat Server 消息事件发送失败: {}", e),
+    }
 }
 
 /// 发送数据到指定客户端
 pub async fn send_to_client(session_id: &str, client_id: &str, data: Vec<u8>) -> Result<(), String> {
+    log::info!("Netcat Server 发送数据到客户端: session={}, client={}, size={}",
+        session_id, client_id, data.len());
+
     let servers = SERVER_CLIENTS.read().await;
+
+    // 调试：打印当前所有会话和客户端
+    log::debug!("当前会话列表: {:?}", servers.keys().collect::<Vec<_>>());
+
     if let Some(clients) = servers.get(session_id) {
+        log::debug!("会话 {} 的客户端列表: {:?}", session_id, clients.keys().collect::<Vec<_>>());
+
         if let Some(client) = clients.get(client_id) {
-            client.tx.send(data)
-                .await
-                .map_err(|e| format!("发送失败: {}", e))
+            match client.tx.send(data).await {
+                Ok(_) => {
+                    log::info!("Netcat Server 数据已发送到通道: client={}", client_id);
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("Netcat Server 发送到通道失败: {}", e);
+                    Err(format!("发送失败: {}", e))
+                }
+            }
         } else {
+            log::error!("Netcat Server 客户端不存在: {}", client_id);
             Err("客户端不存在".to_string())
         }
     } else {
+        log::error!("Netcat Server 会话不存在: {}", session_id);
         Err("会话不存在".to_string())
     }
 }
 
 /// 广播数据到所有客户端
 pub async fn broadcast_to_clients(session_id: &str, data: Vec<u8>) -> Result<(), String> {
+    log::info!("Netcat Server 广播数据: session={}, size={}", session_id, data.len());
+
     let servers = SERVER_CLIENTS.read().await;
     if let Some(clients) = servers.get(session_id) {
-        for (_, client) in clients.iter() {
-            let _ = client.tx.send(data.clone()).await;
+        let client_count = clients.len();
+        log::info!("Netcat Server 广播到 {} 个客户端", client_count);
+
+        if client_count == 0 {
+            log::warn!("Netcat Server 没有已连接的客户端");
+            return Err("没有已连接的客户端".to_string());
+        }
+
+        for (client_id, client) in clients.iter() {
+            match client.tx.send(data.clone()).await {
+                Ok(_) => log::debug!("广播到客户端 {} 成功", client_id),
+                Err(e) => log::error!("广播到客户端 {} 失败: {}", client_id, e),
+            }
         }
         Ok(())
     } else {
+        log::error!("Netcat Server 会话不存在: {}", session_id);
         Err("会话不存在".to_string())
     }
 }

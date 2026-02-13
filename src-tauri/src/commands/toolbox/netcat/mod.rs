@@ -379,36 +379,50 @@ pub async fn netcat_send_message(
     state: State<'_, NetcatState>,
     input: SendMessageInput,
 ) -> Result<NetcatMessage, String> {
+    log::info!("Netcat 发送消息: session={}, size={}, format={:?}, target_client={:?}, broadcast={:?}",
+        input.session_id, input.data.len(), input.format, input.target_client, input.broadcast);
+
     let session_state = {
         let sessions = state.sessions.read().await;
         sessions.get(&input.session_id).cloned()
     };
 
-    let session_state = session_state.ok_or("会话不存在")?;
+    let session_state = session_state.ok_or_else(|| {
+        log::error!("Netcat 发送消息失败: 会话不存在 {}", input.session_id);
+        "会话不存在".to_string()
+    })?;
 
     // 解析数据
     let data = parse_input_data(&input.data, input.format)?;
+    log::debug!("Netcat 解析后数据大小: {} bytes", data.len());
 
     let (protocol, mode) = {
         let s = session_state.read().await;
         (s.session.protocol, s.session.mode)
     };
 
+    log::info!("Netcat 发送: protocol={:?}, mode={:?}", protocol, mode);
+
     // 根据协议和模式发送
     match (protocol, mode) {
         (Protocol::Tcp, SessionMode::Client) => {
+            log::info!("Netcat TCP 客户端模式发送");
             tcp_client::send_tcp_client_data(&input.session_id, data.clone()).await?;
         }
         (Protocol::Tcp, SessionMode::Server) => {
             if input.broadcast.unwrap_or(false) {
+                log::info!("Netcat TCP 服务器模式广播");
                 tcp_server::broadcast_to_clients(&input.session_id, data.clone()).await?;
             } else if let Some(ref client_id) = input.target_client {
+                log::info!("Netcat TCP 服务器模式发送到客户端: {}", client_id);
                 tcp_server::send_to_client(&input.session_id, client_id, data.clone()).await?;
             } else {
+                log::error!("Netcat TCP 服务器模式: 未指定目标客户端或广播");
                 return Err("服务器模式需要指定目标客户端或广播".to_string());
             }
         }
         (Protocol::Udp, _) => {
+            log::info!("Netcat UDP 模式发送");
             let target = input.target_client.clone();
             udp::send_udp_data(&input.session_id, data.clone(), target).await?;
         }
@@ -442,6 +456,7 @@ pub async fn netcat_send_message(
         }
     }
 
+    log::info!("Netcat 消息发送成功");
     Ok(message)
 }
 
@@ -569,6 +584,9 @@ pub async fn netcat_fetch_http(
     use reqwest::{Client, Method};
     use std::time::Duration;
 
+    log::info!("Netcat HTTP 请求: url={}, method={:?}",
+        config.url, config.method);
+
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -602,9 +620,14 @@ pub async fn netcat_fetch_http(
     let response = request
         .send()
         .await
-        .map_err(|e| format!("HTTP 请求失败: {}", e))?;
+        .map_err(|e| {
+            log::error!("Netcat HTTP 请求失败: {}", e);
+            format!("HTTP 请求失败: {}", e)
+        })?;
 
     let status = response.status();
+    log::info!("Netcat HTTP 响应状态: {}", status);
+
     if !status.is_success() {
         return Err(format!("HTTP 请求失败: {} {}", status.as_u16(), status.canonical_reason().unwrap_or("")));
     }
@@ -621,11 +644,16 @@ pub async fn netcat_fetch_http(
         .await
         .map_err(|e| format!("读取响应失败: {}", e))?;
 
+    log::info!("Netcat HTTP 响应: {} bytes, content-type={}, preview={}",
+        text.len(), content_type, &text[..text.len().min(100)]);
+
     // 如果是 JSON 并且指定了路径，则提取
     if content_type.contains("application/json") || content_type.contains("text/json") {
         if let Some(path) = config.json_path {
             if !path.trim().is_empty() {
-                return extract_json_path(&text, &path);
+                let result = extract_json_path(&text, &path)?;
+                log::info!("Netcat HTTP JSON 提取结果: {}", &result[..result.len().min(100)]);
+                return Ok(result);
             }
         }
     }

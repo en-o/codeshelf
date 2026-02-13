@@ -117,25 +117,32 @@ pub async fn start_tcp_client(
     // 启动发送任务
     let writer_clone = writer.clone();
     let session_state_clone2 = session_state.clone();
+    let addr_clone = addr.clone();
 
     tokio::spawn(async move {
+        log::info!("Netcat Client 发送任务启动: target={}", addr_clone);
         while let Some(data) = send_rx.recv().await {
+            log::info!("Netcat Client 从通道收到数据: {} bytes, 准备写入服务器", data.len());
+
             let mut w = writer_clone.write().await;
             if let Err(e) = w.write_all(&data).await {
-                eprintln!("发送数据失败: {}", e);
+                log::error!("发送数据失败: {}", e);
                 break;
             }
             // 刷新缓冲区，确保数据立即发送
             if let Err(e) = w.flush().await {
-                eprintln!("刷新数据失败: {}", e);
+                log::error!("刷新数据失败: {}", e);
                 break;
             }
+
+            log::info!("Netcat Client 数据已写入并刷新到服务器: {} bytes", data.len());
 
             // 更新统计
             let mut state = session_state_clone2.write().await;
             state.session.bytes_sent += data.len() as u64;
             state.session.last_activity = Some(current_timestamp());
         }
+        log::info!("Netcat Client 发送任务结束: target={}", addr_clone);
     });
 
     // 等待读取任务完成
@@ -146,12 +153,26 @@ pub async fn start_tcp_client(
 
 /// 发送数据到 TCP 客户端
 pub async fn send_tcp_client_data(session_id: &str, data: Vec<u8>) -> Result<(), String> {
+    log::info!("Netcat Client 发送数据: session={}, size={}", session_id, data.len());
+
     let senders = TCP_SENDERS.read().await;
+
+    // 调试：打印当前所有会话
+    log::debug!("当前客户端会话列表: {:?}", senders.keys().collect::<Vec<_>>());
+
     if let Some(tx) = senders.get(session_id) {
-        tx.send(data)
-            .await
-            .map_err(|e| format!("发送失败: {}", e))
+        match tx.send(data).await {
+            Ok(_) => {
+                log::info!("Netcat Client 数据已发送到通道: session={}", session_id);
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("Netcat Client 发送到通道失败: {}", e);
+                Err(format!("发送失败: {}", e))
+            }
+        }
     } else {
+        log::error!("Netcat Client 会话不存在或未连接: {}", session_id);
         Err("会话不存在或未连接".to_string())
     }
 }
@@ -185,6 +206,10 @@ async fn handle_received_data(
 ) {
     let now = current_timestamp();
     let message_id = generate_id();
+    let data_preview = bytes_to_display_string(&data);
+
+    log::info!("Netcat Client 收到数据: {} bytes, preview={}",
+        data.len(), &data_preview[..data_preview.len().min(50)]);
 
     let (session_id, message) = {
         let mut state = session_state.write().await;
@@ -196,7 +221,7 @@ async fn handle_received_data(
             id: message_id,
             session_id: state.session.id.clone(),
             direction: MessageDirection::Received,
-            data: bytes_to_display_string(&data),
+            data: data_preview,
             format: DataFormat::Text,
             size: data.len(),
             timestamp: now,
@@ -214,11 +239,15 @@ async fn handle_received_data(
         (state.session.id.clone(), message)
     };
 
-    // 发送事件
-    let _ = app.emit("netcat-event", NetcatEvent::MessageReceived {
-        session_id,
+    // 发送事件 - 记录结果
+    let event = NetcatEvent::MessageReceived {
+        session_id: session_id.clone(),
         message,
-    });
+    };
+    match app.emit("netcat-event", &event) {
+        Ok(_) => log::info!("Netcat Client 消息事件已发送: session={}", session_id),
+        Err(e) => log::error!("Netcat Client 消息事件发送失败: {}", e),
+    }
 }
 
 /// 发送状态变更事件
