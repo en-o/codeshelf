@@ -43,6 +43,13 @@ if not exist ".git" (
     exit /b 1
 )
 
+:: 检查当前是否在 main 分支
+for /f "tokens=*" %%a in ('git rev-parse --abbrev-ref HEAD') do set CURRENT_BRANCH=%%a
+if not "%CURRENT_BRANCH%"=="main" (
+    echo [ERROR] 当前分支是 %CURRENT_BRANCH%，请在 main 分支上运行此脚本
+    exit /b 1
+)
+
 :: 检查 release 分支是否已存在
 set BRANCH_NAME=release/%VERSION%
 

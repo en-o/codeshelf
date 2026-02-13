@@ -52,6 +52,12 @@ if [ ! -d ".git" ]; then
     error "当前目录不是 git 仓库"
 fi
 
+# 检查当前是否在 main 分支
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    error "当前分支是 $CURRENT_BRANCH，请在 main 分支上运行此脚本"
+fi
+
 # 检查工作区是否干净（可选，允许有未提交的更改）
 # if [ -n "$(git status --porcelain)" ]; then
 #     warn "工作区有未提交的更改，将一并提交"
