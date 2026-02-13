@@ -132,19 +132,24 @@ pub struct ProcessFilter {
 pub struct ForwardRule {
     pub id: String,
     pub name: String,
+    #[serde(alias = "local_port")]
     pub local_port: u16,
+    #[serde(alias = "remote_host")]
     pub remote_host: String,
+    #[serde(alias = "remote_port")]
     pub remote_port: u16,
     /// 文档路径，如 "doc.html" 或 "swagger-ui.html"，用于快速访问
+    #[serde(alias = "doc_path")]
     pub doc_path: Option<String>,
     #[serde(default = "default_stopped")]
     pub status: String, // "running", "stopped"
     #[serde(default)]
     pub connections: u32,
-    #[serde(default)]
+    #[serde(default, alias = "bytes_in")]
     pub bytes_in: u64,
-    #[serde(default)]
+    #[serde(default, alias = "bytes_out")]
     pub bytes_out: u64,
+    #[serde(alias = "created_at")]
     pub created_at: String,
 }
 
@@ -179,18 +184,23 @@ pub struct ServerConfig {
     pub id: String,
     pub name: String,
     pub port: u16,
+    #[serde(alias = "root_dir")]
     pub root_dir: String,
     pub cors: bool,
     pub gzip: bool,
+    #[serde(alias = "cache_control")]
     pub cache_control: Option<String>,
     /// URL 访问前缀，如 "/project" 或 "/" 表示无前缀
+    #[serde(alias = "url_prefix")]
     pub url_prefix: String,
     /// 首页文件，如 "index.html"、"index" 等，为空则不指定
+    #[serde(alias = "index_page")]
     pub index_page: Option<String>,
     /// 多个代理规则
     pub proxies: Vec<ProxyConfig>,
     #[serde(default = "default_stopped")]
     pub status: String, // "running", "stopped"
+    #[serde(alias = "created_at")]
     pub created_at: String,
 }
 
