@@ -117,13 +117,22 @@ export default function NetcatTool() {
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId);
 
+  // 刷新会话状态
+  const refreshSessions = useCallback(async () => {
+    try {
+      const list = await netcatGetSessions();
+      setSessions(list);
+    } catch (err) {
+      console.error("刷新会话失败:", err);
+    }
+  }, []);
+
   // 初始化并加载会话
   useEffect(() => {
     const init = async () => {
       try {
         await netcatInit();
-        const list = await netcatGetSessions();
-        setSessions(list);
+        await refreshSessions();
         setInitialized(true);
       } catch (err) {
         console.error("初始化 Netcat 失败:", err);
@@ -132,11 +141,15 @@ export default function NetcatTool() {
     };
     init();
 
+    // 定期刷新会话状态（每2秒），确保状态同步
+    const refreshInterval = setInterval(refreshSessions, 2000);
+
     return () => {
       // 清理所有定时器
+      clearInterval(refreshInterval);
       Object.values(autoSendTimersRef.current).forEach(clearInterval);
     };
-  }, []);
+  }, [refreshSessions]);
 
   const loadMessages = useCallback(async (sessionId: string) => {
     try {

@@ -218,11 +218,16 @@ async fn handle_received_data(
 
 /// 发送状态变更事件
 fn emit_status_changed(app: &AppHandle, session_id: &str, status: SessionStatus, error: Option<String>) {
-    let _ = app.emit("netcat-event", NetcatEvent::StatusChanged {
+    let event = NetcatEvent::StatusChanged {
         session_id: session_id.to_string(),
         status,
-        error,
-    });
+        error: error.clone(),
+    };
+
+    match app.emit("netcat-event", &event) {
+        Ok(_) => log::info!("Netcat 状态变更事件已发送: session={}, status={:?}", session_id, status),
+        Err(e) => log::error!("Netcat 状态变更事件发送失败: {}", e),
+    }
 }
 
 /// 获取当前时间戳
