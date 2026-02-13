@@ -93,6 +93,18 @@ export default function NetcatTool() {
   const [loading, setLoading] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
 
+  // 用 ref 追踪当前状态，避免闭包问题
+  const selectedSessionIdRef = useRef<string | null>(null);
+  const sessionsRef = useRef<NetcatSession[]>([]);
+
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
   // 新建会话表单
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProtocol, setNewProtocol] = useState<Protocol>("tcp");
@@ -198,6 +210,8 @@ export default function NetcatTool() {
     const setupListener = async () => {
       unlisten = await listen<NetcatEvent>("netcat-event", (event) => {
         const data = event.payload;
+        // 使用 ref 获取当前选中的会话ID，避免闭包过期问题
+        const currentSessionId = selectedSessionIdRef.current;
 
         switch (data.type) {
           case "statusChanged":
@@ -211,7 +225,7 @@ export default function NetcatTool() {
             break;
 
           case "messageReceived":
-            if (data.sessionId === selectedSessionId) {
+            if (data.sessionId === currentSessionId) {
               setMessages((prev) => [...prev, data.message]);
             }
             setSessions((prev) =>
@@ -228,7 +242,7 @@ export default function NetcatTool() {
             break;
 
           case "clientConnected":
-            if (data.sessionId === selectedSessionId) {
+            if (data.sessionId === currentSessionId) {
               setClients((prev) => [...prev, data.client]);
             }
             setSessions((prev) =>
@@ -239,7 +253,7 @@ export default function NetcatTool() {
             break;
 
           case "clientDisconnected":
-            if (data.sessionId === selectedSessionId) {
+            if (data.sessionId === currentSessionId) {
               setClients((prev) => prev.filter((c) => c.id !== data.clientId));
             }
             setSessions((prev) =>
@@ -254,7 +268,7 @@ export default function NetcatTool() {
 
     setupListener();
     return () => { unlisten?.(); };
-  }, [selectedSessionId]);
+  }, []); // 使用空依赖数组，因为使用了 ref 来获取当前 session
 
   useEffect(() => {
     if (autoScroll && messagesEndRef.current) {
@@ -317,8 +331,24 @@ export default function NetcatTool() {
       case "http": {
         if (!config.httpUrl) return null;
         try {
+          // 解析 headers（JSON 格式）
+          let headers: Record<string, string> | undefined;
+          if (config.httpHeaders?.trim()) {
+            try {
+              headers = JSON.parse(config.httpHeaders);
+            } catch {
+              console.error("HTTP headers 解析失败，应为 JSON 格式");
+            }
+          }
+
           // 使用后端 HTTP 请求，避免 CORS 限制
-          const data = await netcatFetchHttp(config.httpUrl, config.httpJsonPath);
+          const data = await netcatFetchHttp({
+            url: config.httpUrl,
+            method: config.httpMethod || "GET",
+            headers,
+            body: config.httpBody || undefined,
+            jsonPath: config.httpJsonPath || undefined,
+          });
           return data || null;
         } catch (err) {
           console.error("HTTP 获取失败:", err);
@@ -345,7 +375,8 @@ export default function NetcatTool() {
         broadcast: broadcast || undefined,
       });
 
-      if (targetSessionId === selectedSessionId) {
+      // 使用 ref 来检查当前选中的会话，避免闭包过期问题
+      if (targetSessionId === selectedSessionIdRef.current) {
         setMessages((prev) => [...prev, msg]);
       }
 
@@ -370,7 +401,8 @@ export default function NetcatTool() {
     }
 
     const doAutoSend = async () => {
-      const session = sessions.find((s) => s.id === sessionId);
+      // 使用 ref 获取最新的 sessions，避免闭包过期
+      const session = sessionsRef.current.find((s) => s.id === sessionId);
       if (!session || (session.status !== "connected" && session.status !== "listening")) {
         return;
       }
@@ -388,7 +420,7 @@ export default function NetcatTool() {
     };
 
     autoSendTimersRef.current[sessionId] = setInterval(doAutoSend, config.intervalMs);
-  }, [sessions]);
+  }, []); // 移除 sessions 依赖，因为使用了 ref
 
   const stopAutoSendTimer = (sessionId: string) => {
     if (autoSendTimersRef.current[sessionId]) {
@@ -1062,20 +1094,51 @@ export default function NetcatTool() {
                     )}
                     {currentAutoSend.mode === "http" && (
                       <div className="space-y-1">
+                        <div className="flex gap-2">
+                          <select
+                            className="w-20 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                            value={currentAutoSend.httpMethod || "GET"}
+                            onChange={(e) => updateAutoSendConfig({ httpMethod: e.target.value })}
+                            disabled={currentAutoSend.enabled}
+                          >
+                            <option value="GET">GET</option>
+                            <option value="POST">POST</option>
+                            <option value="PUT">PUT</option>
+                            <option value="DELETE">DELETE</option>
+                          </select>
+                          <input
+                            type="text"
+                            className="flex-1 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                            value={currentAutoSend.httpUrl}
+                            onChange={(e) => updateAutoSendConfig({ httpUrl: e.target.value })}
+                            placeholder="HTTP URL"
+                            disabled={currentAutoSend.enabled}
+                          />
+                        </div>
                         <input
                           type="text"
                           className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                          value={currentAutoSend.httpUrl}
-                          onChange={(e) => updateAutoSendConfig({ httpUrl: e.target.value })}
-                          placeholder="HTTP URL"
+                          value={currentAutoSend.httpHeaders || ""}
+                          onChange={(e) => updateAutoSendConfig({ httpHeaders: e.target.value })}
+                          placeholder='Headers (JSON): {"Authorization": "Bearer xxx"}'
                           disabled={currentAutoSend.enabled}
                         />
+                        {(currentAutoSend.httpMethod === "POST" || currentAutoSend.httpMethod === "PUT") && (
+                          <input
+                            type="text"
+                            className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                            value={currentAutoSend.httpBody || ""}
+                            onChange={(e) => updateAutoSendConfig({ httpBody: e.target.value })}
+                            placeholder="Request Body"
+                            disabled={currentAutoSend.enabled}
+                          />
+                        )}
                         <input
                           type="text"
                           className="w-full px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                          value={currentAutoSend.httpJsonPath}
+                          value={currentAutoSend.httpJsonPath || ""}
                           onChange={(e) => updateAutoSendConfig({ httpJsonPath: e.target.value })}
-                          placeholder="JSON 路径 (留空取全部，如: data.items[0].value 或 data.name,data.id)"
+                          placeholder="JSON 路径 (如: data.items[0].value 或 data.name,data.id)"
                           disabled={currentAutoSend.enabled}
                         />
                       </div>
