@@ -250,6 +250,12 @@ async fn stop_session_internal(
 
     let session_state = session_state.ok_or("会话不存在")?;
 
+    // 获取会话模式
+    let session_mode = {
+        let s = session_state.read().await;
+        s.session.mode
+    };
+
     // 发送关闭信号
     let shutdown_tx = {
         let mut s = session_state.write().await;
@@ -261,15 +267,34 @@ async fn stop_session_internal(
         log::info!("Netcat 停止信号已发送: {}", session_id);
     }
 
+    // 根据模式清理资源
+    match session_mode {
+        SessionMode::Server => {
+            // 服务器模式：断开所有客户端连接
+            tcp_server::shutdown_all_clients(session_id).await;
+        }
+        SessionMode::Client => {
+            // 客户端模式：清理 TCP 发送器
+            tcp_client::TCP_SENDERS.write().await.remove(session_id);
+        }
+    }
+
+    // UDP 清理
+    udp::shutdown_udp_session(session_id).await;
+
     // 强制更新状态为已断开
     {
         let mut s = session_state.write().await;
         s.session.status = SessionStatus::Disconnected;
         s.session.error_message = None;
+        s.clients.clear();
+        s.session.client_count = 0;
     }
 
-    // 清理 TCP 发送器
-    tcp_client::TCP_SENDERS.write().await.remove(session_id);
+    // 等待一小段时间让资源释放
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    log::info!("Netcat 会话已停止: {}", session_id);
 
     Ok(())
 }

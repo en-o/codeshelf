@@ -117,10 +117,11 @@ export default function NetcatTool() {
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId);
 
-  // 刷新会话状态
+  // 刷新会话状态（不重新加载消息）
   const refreshSessions = useCallback(async () => {
     try {
       const list = await netcatGetSessions();
+      // 只更新会话元数据，保留当前消息状态
       setSessions(list);
     } catch (err) {
       console.error("刷新会话失败:", err);
@@ -141,11 +142,10 @@ export default function NetcatTool() {
     };
     init();
 
-    // 定期刷新会话状态（每2秒），确保状态同步
+    // 定期刷新会话状态（每2秒），但不刷新消息
     const refreshInterval = setInterval(refreshSessions, 2000);
 
     return () => {
-      // 清理所有定时器
       clearInterval(refreshInterval);
       Object.values(autoSendTimersRef.current).forEach(clearInterval);
     };
@@ -154,8 +154,6 @@ export default function NetcatTool() {
   const loadMessages = useCallback(async (sessionId: string) => {
     try {
       const msgs = await netcatGetMessages(sessionId, 200);
-      // 调试：打印消息方向
-      console.log("加载消息:", msgs.map(m => ({ id: m.id, direction: m.direction, data: m.data.substring(0, 20) })));
       setMessages(msgs.reverse());
     } catch (err) {
       console.error("加载消息失败:", err);
@@ -171,17 +169,23 @@ export default function NetcatTool() {
     }
   }, []);
 
+  // 只在切换会话时加载消息（使用 ref 跟踪上一个会话ID）
+  const prevSessionIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (selectedSessionId) {
+    if (selectedSessionId && selectedSessionId !== prevSessionIdRef.current) {
+      prevSessionIdRef.current = selectedSessionId;
       loadMessages(selectedSessionId);
-      if (selectedSession?.mode === "server") {
+      const session = sessions.find(s => s.id === selectedSessionId);
+      if (session?.mode === "server") {
         loadClients(selectedSessionId);
       }
-    } else {
+    } else if (!selectedSessionId) {
+      prevSessionIdRef.current = null;
       setMessages([]);
       setClients([]);
     }
-  }, [selectedSessionId, selectedSession?.mode, loadMessages, loadClients]);
+  }, [selectedSessionId, sessions, loadMessages, loadClients]);
 
   // 事件监听
   useEffect(() => {

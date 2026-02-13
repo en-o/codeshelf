@@ -338,6 +338,18 @@ pub async fn disconnect_client(session_id: &str, client_id: &str) -> Result<(), 
     }
 }
 
+/// 断开所有客户端连接（清理服务器资源）
+pub async fn shutdown_all_clients(session_id: &str) {
+    let mut servers = SERVER_CLIENTS.write().await;
+    if let Some(clients) = servers.get_mut(session_id) {
+        // 清空所有客户端，发送通道会被 drop，导致发送任务退出
+        clients.clear();
+        log::info!("Netcat Server 所有客户端已断开: {}", session_id);
+    }
+    // 移除整个会话的客户端存储
+    servers.remove(session_id);
+}
+
 /// 发送状态变更事件
 fn emit_status_changed(app: &AppHandle, session_id: &str, status: SessionStatus, error: Option<String>) {
     let event = NetcatEvent::StatusChanged {
