@@ -18,8 +18,13 @@ struct ClientWriter {
 /// 全局服务器客户端管理
 use once_cell::sync::Lazy;
 use tokio::sync::RwLock as TokioRwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static SERVER_CLIENTS: Lazy<TokioRwLock<HashMap<String, HashMap<String, ClientWriter>>>> =
+    Lazy::new(|| TokioRwLock::new(HashMap::new()));
+
+/// 全局 shutdown 标志 - 用于通知所有客户端任务停止
+static SERVER_SHUTDOWN_FLAGS: Lazy<TokioRwLock<HashMap<String, Arc<AtomicBool>>>> =
     Lazy::new(|| TokioRwLock::new(HashMap::new()));
 
 /// 启动 TCP 服务器
