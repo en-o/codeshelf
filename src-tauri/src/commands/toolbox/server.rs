@@ -69,8 +69,8 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("读取服务配置失败: {}", e))?;
 
-    // 直接解析为服务配置数组
-    let servers_arr: Vec<ServerConfig> = match serde_json::from_str(&content) {
+    // 解析为 JSON 数组
+    let servers_arr: Vec<serde_json::Value> = match serde_json::from_str(&content) {
         Ok(arr) => arr,
         Err(e) => {
             log::error!("解析服务配置 JSON 失败: {}，内容: {}", e, &content[..content.len().min(200)]);
@@ -79,11 +79,53 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
     };
 
     let mut servers = HashMap::new();
-    for mut server in servers_arr {
-        // 重启后默认停止
-        server.status = "stopped".to_string();
-        log::info!("加载服务: {} (端口 {})", server.name, server.port);
-        servers.insert(server.id.clone(), server);
+    for server_val in servers_arr {
+        // 支持 camelCase 和 snake_case 两种格式（兼容旧数据）
+        let id = server_val.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let name = server_val.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let port = server_val.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+        let root_dir = server_val.get("rootDir").or_else(|| server_val.get("root_dir"))
+            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let cors = server_val.get("cors").and_then(|v| v.as_bool()).unwrap_or(true);
+        let gzip = server_val.get("gzip").and_then(|v| v.as_bool()).unwrap_or(true);
+        let cache_control = server_val.get("cacheControl").or_else(|| server_val.get("cache_control"))
+            .and_then(|v| v.as_str()).map(|s| s.to_string());
+        let url_prefix = server_val.get("urlPrefix").or_else(|| server_val.get("url_prefix"))
+            .and_then(|v| v.as_str()).unwrap_or("/").to_string();
+        let index_page = server_val.get("indexPage").or_else(|| server_val.get("index_page"))
+            .and_then(|v| v.as_str()).map(|s| s.to_string());
+        let created_at = server_val.get("createdAt").or_else(|| server_val.get("created_at"))
+            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
+
+        // 解析代理配置
+        let proxies: Vec<ProxyConfig> = server_val.get("proxies")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter().filter_map(|p| {
+                    let prefix = p.get("prefix").and_then(|v| v.as_str())?.to_string();
+                    let target = p.get("target").and_then(|v| v.as_str())?.to_string();
+                    Some(ProxyConfig { prefix, target })
+                }).collect()
+            })
+            .unwrap_or_default();
+
+        if !id.is_empty() {
+            log::info!("加载服务: {} (端口 {})", name, port);
+            servers.insert(id.clone(), ServerConfig {
+                id,
+                name,
+                port,
+                root_dir,
+                cors,
+                gzip,
+                cache_control,
+                url_prefix,
+                index_page,
+                proxies,
+                status: "stopped".to_string(),
+                created_at,
+            });
+        }
     }
 
     log::info!("共加载 {} 个服务配置", servers.len());
@@ -99,20 +141,20 @@ async fn save_servers_to_file() -> Result<(), String> {
 
     let servers = SERVERS.lock().await;
 
-    // 只保存持久化需要的字段，直接保存为数组
+    // 使用 camelCase 字段名保存
     let servers_data: Vec<serde_json::Value> = servers.values().map(|s| {
         serde_json::json!({
             "id": s.id,
             "name": s.name,
             "port": s.port,
-            "root_dir": s.root_dir,
+            "rootDir": s.root_dir,
             "cors": s.cors,
             "gzip": s.gzip,
-            "cache_control": s.cache_control,
-            "url_prefix": s.url_prefix,
-            "index_page": s.index_page,
+            "cacheControl": s.cache_control,
+            "urlPrefix": s.url_prefix,
+            "indexPage": s.index_page,
             "proxies": s.proxies,
-            "created_at": s.created_at
+            "createdAt": s.created_at
         })
     }).collect();
 
@@ -488,7 +530,8 @@ async fn run_server(
             if ctrl.is_stopped() {
                 break;
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            // 减少检测间隔，更快响应停止信号
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         }
     };
 
@@ -515,7 +558,15 @@ async fn proxy_handler(
 
     // 构建目标 URL
     let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
-    let target_url = format!("{}/{}{}", state.target.trim_end_matches('/'), path, query);
+    // 如果 target 已经包含路径，则直接拼接 path
+    // 如果 path 为空，不添加额外的斜杠
+    let target_url = if path.is_empty() {
+        format!("{}{}", state.target.trim_end_matches('/'), query)
+    } else {
+        format!("{}/{}{}", state.target.trim_end_matches('/'), path, query)
+    };
+
+    log::debug!("代理请求: {} {} -> {}", method, uri, target_url);
 
     // 构建请求
     let mut proxy_req = state.client.request(
@@ -566,6 +617,7 @@ async fn proxy_handler(
     let response = match proxy_req.send().await {
         Ok(resp) => resp,
         Err(e) => {
+            log::error!("代理请求失败: {} -> 错误: {}", target_url, e);
             return (
                 StatusCode::BAD_GATEWAY,
                 format!("代理请求失败: {}", e),
@@ -573,6 +625,12 @@ async fn proxy_handler(
                 .into_response();
         }
     };
+
+    // 记录响应状态
+    let resp_status = response.status();
+    if !resp_status.is_success() {
+        log::warn!("代理响应非成功状态: {} {} -> {}", method, target_url, resp_status);
+    }
 
     // 构建响应
     let status = StatusCode::from_u16(response.status().as_u16())
@@ -654,13 +712,7 @@ pub async fn stop_server(server_id: String) -> Result<(), String> {
         }
     };
 
-    // 只有在找到控制器时才等待
-    if has_controller {
-        // 短暂等待服务响应停止信号（由于使用了 SO_LINGER=0，不需要等太久）
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-    }
-
-    // 更新状态
+    // 立即更新状态，不等待服务实际停止
     {
         let mut servers = SERVERS.lock().await;
         if let Some(server) = servers.get_mut(&server_id) {
@@ -673,6 +725,12 @@ pub async fn stop_server(server_id: String) -> Result<(), String> {
     {
         let mut controllers = SERVER_CONTROLLERS.lock().await;
         controllers.remove(&server_id);
+    }
+
+    // 只在找到控制器时短暂等待（让服务有机会清理）
+    if has_controller {
+        // 非常短的等待，让 shutdown 信号传递
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
 
     log::info!("服务停止完成: {}", server_id);

@@ -70,11 +70,17 @@ fn load_rules_from_file() -> Result<HashMap<String, ForwardRule>, String> {
     for rule_val in rules_arr {
         let id = rule_val.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let name = rule_val.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let local_port = rule_val.get("local_port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-        let remote_host = rule_val.get("remote_host").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let remote_port = rule_val.get("remote_port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-        let doc_path = rule_val.get("doc_path").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let created_at = rule_val.get("created_at").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        // 支持 camelCase 和 snake_case 两种格式（兼容旧数据）
+        let local_port = rule_val.get("localPort").or_else(|| rule_val.get("local_port"))
+            .and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+        let remote_host = rule_val.get("remoteHost").or_else(|| rule_val.get("remote_host"))
+            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let remote_port = rule_val.get("remotePort").or_else(|| rule_val.get("remote_port"))
+            .and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+        let doc_path = rule_val.get("docPath").or_else(|| rule_val.get("doc_path"))
+            .and_then(|v| v.as_str()).map(|s| s.to_string());
+        let created_at = rule_val.get("createdAt").or_else(|| rule_val.get("created_at"))
+            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
 
         if !id.is_empty() {
             log::info!("加载转发规则: {} ({}:{} -> {}:{})", name, "localhost", local_port, remote_host, remote_port);
@@ -107,16 +113,16 @@ async fn save_rules_to_file() -> Result<(), String> {
 
     let rules = FORWARD_RULES.lock().await;
 
-    // 只保存持久化需要的字段，直接保存为数组
+    // 使用 camelCase 字段名保存
     let rules_data: Vec<serde_json::Value> = rules.values().map(|r| {
         serde_json::json!({
             "id": r.id,
             "name": r.name,
-            "local_port": r.local_port,
-            "remote_host": r.remote_host,
-            "remote_port": r.remote_port,
-            "doc_path": r.doc_path,
-            "created_at": r.created_at
+            "localPort": r.local_port,
+            "remoteHost": r.remote_host,
+            "remotePort": r.remote_port,
+            "docPath": r.doc_path,
+            "createdAt": r.created_at
         })
     }).collect();
 
@@ -535,10 +541,7 @@ pub async fn stop_forwarding(rule_id: String) -> Result<(), String> {
         }
     }
 
-    // 短暂等待服务响应停止信号（由于使用了 SO_LINGER=0，不需要等太久）
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // 更新状态
+    // 立即更新状态，不等待服务实际停止
     {
         let mut rules = FORWARD_RULES.lock().await;
         if let Some(rule) = rules.get_mut(&rule_id) {
@@ -552,6 +555,9 @@ pub async fn stop_forwarding(rule_id: String) -> Result<(), String> {
         let mut controllers = FORWARD_CONTROLLERS.lock().await;
         controllers.remove(&rule_id);
     }
+
+    // 非常短的等待，让 shutdown 信号传递
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     Ok(())
 }

@@ -338,6 +338,7 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
 
 /// 系统统计信息
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SystemStats {
     pub total_memory: u64,
     pub used_memory: u64,
@@ -349,6 +350,7 @@ pub struct SystemStats {
 
 /// 端口占用信息
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PortOccupation {
     pub port: u16,
     pub protocol: String,
@@ -380,6 +382,7 @@ pub async fn get_local_port_occupation() -> Result<Vec<PortOccupation>, String> 
 /// Windows: 获取端口占用
 #[cfg(target_os = "windows")]
 async fn get_port_occupation_windows() -> Result<Vec<PortOccupation>, String> {
+    use std::collections::HashMap;
     use std::process::Command;
 
     let output = Command::new("netstat")
@@ -389,9 +392,12 @@ async fn get_port_occupation_windows() -> Result<Vec<PortOccupation>, String> {
         .map_err(|e| format!("执行 netstat 失败: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut results: Vec<PortOccupation> = Vec::new();
     let mut system = System::new_all();
     system.refresh_all();
+
+    // 使用 HashMap 按 (port, protocol, pid) 聚合，保留最重要的状态
+    // 状态优先级：LISTENING > ESTABLISHED > 其他
+    let mut port_map: HashMap<(u16, String, u32), PortOccupation> = HashMap::new();
 
     for line in stdout.lines().skip(4) {
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -412,15 +418,36 @@ async fn get_port_occupation_windows() -> Result<Vec<PortOccupation>, String> {
                             ("".to_string(), 3)
                         };
 
+                        // 过滤掉 TIME_WAIT 和 CLOSE_WAIT 等非活跃状态
+                        if state == "TIME_WAIT" || state == "CLOSE_WAIT" || state == "FIN_WAIT_1" || state == "FIN_WAIT_2" || state == "CLOSING" || state == "LAST_ACK" {
+                            continue;
+                        }
+
                         // 解析 PID
                         if let Some(pid_str) = parts.get(pid_idx) {
                             if let Ok(pid) = pid_str.parse::<u32>() {
+                                // 过滤掉 PID 为 0 的条目（已关闭的连接）
+                                if pid == 0 {
+                                    continue;
+                                }
+
                                 let process_name = system
                                     .process(Pid::from_u32(pid))
                                     .map(|p| p.name().to_string())
                                     .unwrap_or_else(|| "Unknown".to_string());
 
-                                results.push(PortOccupation {
+                                let key = (port, protocol.to_lowercase(), pid);
+
+                                // 如果已存在，根据优先级决定是否替换
+                                if let Some(existing) = port_map.get(&key) {
+                                    let existing_priority = state_priority(&existing.state);
+                                    let new_priority = state_priority(&state);
+                                    if new_priority <= existing_priority {
+                                        continue; // 现有的优先级更高或相等，不替换
+                                    }
+                                }
+
+                                port_map.insert(key, PortOccupation {
                                     port,
                                     protocol: protocol.to_lowercase(),
                                     pid,
@@ -436,11 +463,22 @@ async fn get_port_occupation_windows() -> Result<Vec<PortOccupation>, String> {
         }
     }
 
-    // 按端口排序并去重
+    // 转换为 Vec 并排序
+    let mut results: Vec<PortOccupation> = port_map.into_values().collect();
     results.sort_by_key(|r| (r.port, r.protocol.clone()));
-    results.dedup_by(|a, b| a.port == b.port && a.protocol == b.protocol && a.pid == b.pid);
 
     Ok(results)
+}
+
+/// 获取状态优先级（值越小优先级越高）
+fn state_priority(state: &str) -> u8 {
+    match state {
+        "LISTENING" => 0,
+        "ESTABLISHED" => 1,
+        "SYN_SENT" => 2,
+        "SYN_RECEIVED" => 3,
+        _ => 10,
+    }
 }
 
 /// Linux: 获取端口占用

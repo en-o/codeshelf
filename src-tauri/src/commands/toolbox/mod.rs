@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// 扫描配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScanConfig {
     /// 目标 IP 地址
     pub target: String,
@@ -40,6 +41,7 @@ pub struct ScanResult {
 /// 扫描进度
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
     pub scanned: u32,
     pub total: u32,
@@ -50,6 +52,7 @@ pub struct ScanProgress {
 
 /// 下载任务
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DownloadTask {
     pub id: String,
     pub url: String,
@@ -66,6 +69,7 @@ pub struct DownloadTask {
 
 /// 下载配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DownloadConfig {
     pub url: String,
     pub save_dir: Option<String>,
@@ -76,6 +80,7 @@ pub struct DownloadConfig {
 /// 下载进度
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DownloadProgress {
     pub id: String,
     pub downloaded: u64,
@@ -88,6 +93,7 @@ pub struct DownloadProgress {
 
 /// 进程信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
@@ -104,6 +110,7 @@ pub struct ProcessInfo {
 
 /// 进程查询过滤
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProcessFilter {
     pub port: Option<u16>,
     pub name: Option<String>,
@@ -114,6 +121,7 @@ pub struct ProcessFilter {
 
 /// 转发规则
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ForwardRule {
     pub id: String,
     pub name: String,
@@ -135,6 +143,7 @@ pub struct ForwardRule {
 
 /// 创建转发规则的输入
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ForwardRuleInput {
     pub name: String,
     pub local_port: u16,
@@ -146,6 +155,7 @@ pub struct ForwardRuleInput {
 
 /// 转发统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ForwardStats {
     pub rule_id: String,
     pub connections: u32,
@@ -157,6 +167,7 @@ pub struct ForwardStats {
 
 /// 服务配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
     pub id: String,
     pub name: String,
@@ -178,6 +189,7 @@ pub struct ServerConfig {
 
 /// 代理配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProxyConfig {
     pub prefix: String,
     pub target: String,
@@ -185,6 +197,7 @@ pub struct ProxyConfig {
 
 /// 创建服务的输入
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerConfigInput {
     pub name: String,
     pub port: u16,
@@ -203,6 +216,7 @@ pub struct ServerConfigInput {
 /// 服务访问日志
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccessLog {
     pub timestamp: String,
     pub method: String,
