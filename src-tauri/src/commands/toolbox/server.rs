@@ -69,8 +69,8 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("读取服务配置失败: {}", e))?;
 
-    // 解析为 JSON 数组
-    let servers_arr: Vec<serde_json::Value> = match serde_json::from_str(&content) {
+    // 直接解析为服务配置数组
+    let servers_arr: Vec<ServerConfig> = match serde_json::from_str(&content) {
         Ok(arr) => arr,
         Err(e) => {
             log::error!("解析服务配置 JSON 失败: {}，内容: {}", e, &content[..content.len().min(200)]);
@@ -79,53 +79,11 @@ fn load_servers_from_file() -> Result<HashMap<String, ServerConfig>, String> {
     };
 
     let mut servers = HashMap::new();
-    for server_val in servers_arr {
-        // 支持 camelCase 和 snake_case 两种格式（兼容旧数据）
-        let id = server_val.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let name = server_val.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let port = server_val.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-        let root_dir = server_val.get("rootDir").or_else(|| server_val.get("root_dir"))
-            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let cors = server_val.get("cors").and_then(|v| v.as_bool()).unwrap_or(true);
-        let gzip = server_val.get("gzip").and_then(|v| v.as_bool()).unwrap_or(true);
-        let cache_control = server_val.get("cacheControl").or_else(|| server_val.get("cache_control"))
-            .and_then(|v| v.as_str()).map(|s| s.to_string());
-        let url_prefix = server_val.get("urlPrefix").or_else(|| server_val.get("url_prefix"))
-            .and_then(|v| v.as_str()).unwrap_or("/").to_string();
-        let index_page = server_val.get("indexPage").or_else(|| server_val.get("index_page"))
-            .and_then(|v| v.as_str()).map(|s| s.to_string());
-        let created_at = server_val.get("createdAt").or_else(|| server_val.get("created_at"))
-            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
-
-        // 解析代理配置
-        let proxies: Vec<ProxyConfig> = server_val.get("proxies")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter().filter_map(|p| {
-                    let prefix = p.get("prefix").and_then(|v| v.as_str())?.to_string();
-                    let target = p.get("target").and_then(|v| v.as_str())?.to_string();
-                    Some(ProxyConfig { prefix, target })
-                }).collect()
-            })
-            .unwrap_or_default();
-
-        if !id.is_empty() {
-            log::info!("加载服务: {} (端口 {})", name, port);
-            servers.insert(id.clone(), ServerConfig {
-                id,
-                name,
-                port,
-                root_dir,
-                cors,
-                gzip,
-                cache_control,
-                url_prefix,
-                index_page,
-                proxies,
-                status: "stopped".to_string(),
-                created_at,
-            });
-        }
+    for mut server in servers_arr {
+        // 重启后默认停止
+        server.status = "stopped".to_string();
+        log::info!("加载服务: {} (端口 {})", server.name, server.port);
+        servers.insert(server.id.clone(), server);
     }
 
     log::info!("共加载 {} 个服务配置", servers.len());
@@ -141,22 +99,8 @@ async fn save_servers_to_file() -> Result<(), String> {
 
     let servers = SERVERS.lock().await;
 
-    // 使用 camelCase 字段名保存
-    let servers_data: Vec<serde_json::Value> = servers.values().map(|s| {
-        serde_json::json!({
-            "id": s.id,
-            "name": s.name,
-            "port": s.port,
-            "rootDir": s.root_dir,
-            "cors": s.cors,
-            "gzip": s.gzip,
-            "cacheControl": s.cache_control,
-            "urlPrefix": s.url_prefix,
-            "indexPage": s.index_page,
-            "proxies": s.proxies,
-            "createdAt": s.created_at
-        })
-    }).collect();
+    // 直接序列化（serde 会自动用 camelCase）
+    let servers_data: Vec<&ServerConfig> = servers.values().collect();
 
     let content = serde_json::to_string(&servers_data)
         .map_err(|e| format!("序列化服务配置失败: {}", e))?;

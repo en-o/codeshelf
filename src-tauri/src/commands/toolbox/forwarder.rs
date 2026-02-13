@@ -58,7 +58,7 @@ fn load_rules_from_file() -> Result<HashMap<String, ForwardRule>, String> {
         .map_err(|e| format!("读取转发规则失败: {}", e))?;
 
     // 直接解析为规则数组
-    let rules_arr: Vec<serde_json::Value> = match serde_json::from_str(&content) {
+    let rules_arr: Vec<ForwardRule> = match serde_json::from_str(&content) {
         Ok(arr) => arr,
         Err(e) => {
             log::error!("解析转发规则 JSON 失败: {}，内容: {}", e, &content[..content.len().min(200)]);
@@ -67,37 +67,14 @@ fn load_rules_from_file() -> Result<HashMap<String, ForwardRule>, String> {
     };
 
     let mut rules = HashMap::new();
-    for rule_val in rules_arr {
-        let id = rule_val.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let name = rule_val.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        // 支持 camelCase 和 snake_case 两种格式（兼容旧数据）
-        let local_port = rule_val.get("localPort").or_else(|| rule_val.get("local_port"))
-            .and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-        let remote_host = rule_val.get("remoteHost").or_else(|| rule_val.get("remote_host"))
-            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let remote_port = rule_val.get("remotePort").or_else(|| rule_val.get("remote_port"))
-            .and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-        let doc_path = rule_val.get("docPath").or_else(|| rule_val.get("doc_path"))
-            .and_then(|v| v.as_str()).map(|s| s.to_string());
-        let created_at = rule_val.get("createdAt").or_else(|| rule_val.get("created_at"))
-            .and_then(|v| v.as_str()).unwrap_or_default().to_string();
-
-        if !id.is_empty() {
-            log::info!("加载转发规则: {} ({}:{} -> {}:{})", name, "localhost", local_port, remote_host, remote_port);
-            rules.insert(id.clone(), ForwardRule {
-                id,
-                name,
-                local_port,
-                remote_host,
-                remote_port,
-                doc_path,
-                status: "stopped".to_string(),
-                connections: 0,
-                bytes_in: 0,
-                bytes_out: 0,
-                created_at,
-            });
-        }
+    for mut rule in rules_arr {
+        // 重启后默认停止
+        rule.status = "stopped".to_string();
+        rule.connections = 0;
+        rule.bytes_in = 0;
+        rule.bytes_out = 0;
+        log::info!("加载转发规则: {} ({}:{} -> {}:{})", rule.name, "localhost", rule.local_port, rule.remote_host, rule.remote_port);
+        rules.insert(rule.id.clone(), rule);
     }
 
     log::info!("共加载 {} 个转发规则", rules.len());
@@ -113,18 +90,8 @@ async fn save_rules_to_file() -> Result<(), String> {
 
     let rules = FORWARD_RULES.lock().await;
 
-    // 使用 camelCase 字段名保存
-    let rules_data: Vec<serde_json::Value> = rules.values().map(|r| {
-        serde_json::json!({
-            "id": r.id,
-            "name": r.name,
-            "localPort": r.local_port,
-            "remoteHost": r.remote_host,
-            "remotePort": r.remote_port,
-            "docPath": r.doc_path,
-            "createdAt": r.created_at
-        })
-    }).collect();
+    // 直接序列化（serde 会自动用 camelCase）
+    let rules_data: Vec<&ForwardRule> = rules.values().collect();
 
     let content = serde_json::to_string(&rules_data)
         .map_err(|e| format!("序列化转发规则失败: {}", e))?;

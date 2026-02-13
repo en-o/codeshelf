@@ -182,14 +182,8 @@ function transformProcessInfo(proc: any): ProcessInfo {
 export async function addForwardRule(
   input: ForwardRuleInput
 ): Promise<ForwardRule> {
-  const rustInput = {
-    name: input.name,
-    local_port: input.localPort,
-    remote_host: input.remoteHost,
-    remote_port: input.remotePort,
-  };
-  const rule: any = await invoke("add_forward_rule", { input: rustInput });
-  return transformForwardRule(rule);
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("add_forward_rule", { input });
 }
 
 export async function removeForwardRule(ruleId: string): Promise<void> {
@@ -205,57 +199,25 @@ export async function stopForwarding(ruleId: string): Promise<void> {
 }
 
 export async function getForwardRules(): Promise<ForwardRule[]> {
-  const rules: any[] = await invoke("get_forward_rules");
-  return rules.map(transformForwardRule);
+  return invoke("get_forward_rules");
 }
 
 export async function getForwardRule(
   ruleId: string
 ): Promise<ForwardRule | null> {
-  const rule: any = await invoke("get_forward_rule", { ruleId });
-  return rule ? transformForwardRule(rule) : null;
+  return invoke("get_forward_rule", { ruleId });
 }
 
 export async function getForwardStats(ruleId: string): Promise<ForwardStats> {
-  const stats: any = await invoke("get_forward_stats", { ruleId });
-  return {
-    ruleId: stats.rule_id,
-    connections: stats.connections,
-    bytesIn: stats.bytes_in,
-    bytesOut: stats.bytes_out,
-  };
+  return invoke("get_forward_stats", { ruleId });
 }
 
 export async function updateForwardRule(
   ruleId: string,
   input: ForwardRuleInput
 ): Promise<ForwardRule> {
-  const rustInput = {
-    name: input.name,
-    local_port: input.localPort,
-    remote_host: input.remoteHost,
-    remote_port: input.remotePort,
-  };
-  const rule: any = await invoke("update_forward_rule", {
-    ruleId,
-    input: rustInput,
-  });
-  return transformForwardRule(rule);
-}
-
-function transformForwardRule(rule: any): ForwardRule {
-  return {
-    id: rule.id,
-    name: rule.name,
-    localPort: rule.local_port,
-    remoteHost: rule.remote_host,
-    remotePort: rule.remote_port,
-    status: rule.status,
-    connections: rule.connections,
-    bytesIn: rule.bytes_in,
-    bytesOut: rule.bytes_out,
-    createdAt: rule.created_at,
-  };
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("update_forward_rule", { ruleId, input });
 }
 
 // ============== 静态服务 ==============
@@ -263,19 +225,8 @@ function transformForwardRule(rule: any): ForwardRule {
 export async function createServer(
   input: ServerConfigInput
 ): Promise<ServerConfig> {
-  const rustInput = {
-    name: input.name,
-    port: input.port,
-    root_dir: input.rootDir,
-    cors: input.cors,
-    gzip: input.gzip,
-    cache_control: input.cacheControl,
-    url_prefix: input.urlPrefix,
-    index_page: input.indexPage,
-    proxies: input.proxies,
-  };
-  const server: any = await invoke("create_server", { input: rustInput });
-  return transformServerConfig(server);
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("create_server", { input });
 }
 
 export async function startServer(serverId: string): Promise<string> {
@@ -291,52 +242,19 @@ export async function removeServer(serverId: string): Promise<void> {
 }
 
 export async function getServers(): Promise<ServerConfig[]> {
-  const servers: any[] = await invoke("get_servers");
-  return servers.map(transformServerConfig);
+  return invoke("get_servers");
 }
 
 export async function getServer(serverId: string): Promise<ServerConfig | null> {
-  const server: any = await invoke("get_server", { serverId });
-  return server ? transformServerConfig(server) : null;
+  return invoke("get_server", { serverId });
 }
 
 export async function updateServer(
   serverId: string,
   input: ServerConfigInput
 ): Promise<ServerConfig> {
-  const rustInput = {
-    name: input.name,
-    port: input.port,
-    root_dir: input.rootDir,
-    cors: input.cors,
-    gzip: input.gzip,
-    cache_control: input.cacheControl,
-    url_prefix: input.urlPrefix,
-    index_page: input.indexPage,
-    proxies: input.proxies,
-  };
-  const server: any = await invoke("update_server", {
-    serverId,
-    input: rustInput,
-  });
-  return transformServerConfig(server);
-}
-
-function transformServerConfig(server: any): ServerConfig {
-  return {
-    id: server.id,
-    name: server.name,
-    port: server.port,
-    rootDir: server.root_dir,
-    cors: server.cors,
-    gzip: server.gzip,
-    cacheControl: server.cache_control,
-    urlPrefix: server.url_prefix || "/",
-    indexPage: server.index_page,
-    proxies: server.proxies || [],
-    status: server.status,
-    createdAt: server.created_at,
-  };
+  // 直接发送 camelCase，后端已配置 rename_all = "camelCase"
+  return invoke("update_server", { serverId, input });
 }
 
 // ============== Claude Code 配置服务 ==============
