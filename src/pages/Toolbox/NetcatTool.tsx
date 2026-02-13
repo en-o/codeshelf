@@ -206,10 +206,13 @@ export default function NetcatTool() {
   // 事件监听
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
+    let isMounted = true;
 
     const setupListener = async () => {
       console.log("Netcat: 设置事件监听器");
-      unlisten = await listen<NetcatEvent>("netcat-event", (event) => {
+      const unlistenFn = await listen<NetcatEvent>("netcat-event", (event) => {
+        if (!isMounted) return; // 组件已卸载，忽略事件
+
         const data = event.payload;
         // 使用 ref 获取当前选中的会话ID，避免闭包过期问题
         const currentSessionId = selectedSessionIdRef.current;
@@ -271,12 +274,20 @@ export default function NetcatTool() {
             break;
         }
       });
-      console.log("Netcat: 事件监听器已设置");
+
+      if (isMounted) {
+        unlisten = unlistenFn;
+        console.log("Netcat: 事件监听器已设置");
+      } else {
+        // 组件在监听器设置完成前已卸载，立即清理
+        unlistenFn();
+      }
     };
 
     setupListener();
     return () => {
       console.log("Netcat: 清理事件监听器");
+      isMounted = false;
       unlisten?.();
     };
   }, []); // 使用空依赖数组，因为使用了 ref 来获取当前 session
