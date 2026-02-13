@@ -347,6 +347,7 @@ async fn run_server(
     for proxy in &config.proxies {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
+            .http1_only()  // 强制使用 HTTP/1.1，避免 HTTP/2 兼容性问题
             .build()
             .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
@@ -510,7 +511,7 @@ async fn proxy_handler(
         format!("{}/{}{}", state.target.trim_end_matches('/'), path, query)
     };
 
-    log::debug!("代理请求: {} {} -> {}", method, uri, target_url);
+    log::info!("代理请求: {} {} -> {}", method, uri, target_url);
 
     // 构建请求
     let mut proxy_req = state.client.request(
@@ -519,12 +520,14 @@ async fn proxy_handler(
     );
 
     // 复制请求头
+    let mut debug_headers = Vec::new();
     for (name, value) in headers.iter() {
         let name_str = name.as_str();
-        // 跳过 hop-by-hop 头和 host
-        if !is_hop_by_hop_header(name_str) && name_str != "host" {
+        // 跳过 hop-by-hop 头、host 和 content-length（reqwest 会自动设置）
+        if !is_hop_by_hop_header(name_str) && name_str != "host" && name_str != "content-length" {
             if let Ok(v) = value.to_str() {
                 proxy_req = proxy_req.header(name_str, v);
+                debug_headers.push(format!("{}: {}", name_str, v));
             }
         }
     }
@@ -537,9 +540,23 @@ async fn proxy_handler(
             } else {
                 host.to_string()
             };
-            proxy_req = proxy_req.header("Host", host_header);
+            proxy_req = proxy_req.header("Host", host_header.clone());
+            debug_headers.push(format!("host: {}", host_header));
         }
     }
+
+    // 添加代理相关的头（如果原请求中没有）
+    if !headers.contains_key("x-real-ip") {
+        proxy_req = proxy_req.header("X-Real-IP", "127.0.0.1");
+    }
+    if !headers.contains_key("x-forwarded-for") {
+        proxy_req = proxy_req.header("X-Forwarded-For", "127.0.0.1");
+    }
+    if !headers.contains_key("x-forwarded-proto") {
+        proxy_req = proxy_req.header("X-Forwarded-Proto", "http");
+    }
+
+    log::info!("代理请求头: {:?}", debug_headers);
 
     // 读取请求体
     let body_bytes = match axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await {
@@ -553,7 +570,9 @@ async fn proxy_handler(
         }
     };
 
+    // 设置 Content-Type（如果没有）
     if !body_bytes.is_empty() {
+        log::info!("代理请求体大小: {} 字节", body_bytes.len());
         proxy_req = proxy_req.body(body_bytes.to_vec());
     }
 
@@ -573,7 +592,14 @@ async fn proxy_handler(
     // 记录响应状态
     let resp_status = response.status();
     if !resp_status.is_success() {
-        log::warn!("代理响应非成功状态: {} {} -> {}", method, target_url, resp_status);
+        // 尝试读取错误响应体
+        let error_body = response.text().await.unwrap_or_default();
+        log::warn!("代理响应非成功状态: {} {} -> {} | 响应: {}", method, target_url, resp_status, &error_body[..error_body.len().min(500)]);
+
+        // 返回原始错误响应
+        let status = StatusCode::from_u16(resp_status.as_u16())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        return (status, error_body).into_response();
     }
 
     // 构建响应
