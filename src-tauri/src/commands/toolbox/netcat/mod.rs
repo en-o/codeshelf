@@ -190,6 +190,12 @@ pub async fn netcat_start_session(
 
     let session_state = session_state.ok_or("会话不存在")?;
 
+    // 获取会话模式（用于后续清理）
+    let session_mode = {
+        let s = session_state.read().await;
+        s.session.mode
+    };
+
     // 先检查是否有旧任务在运行，如果有则终止它
     {
         let mut s = session_state.write().await;
@@ -200,6 +206,20 @@ pub async fn netcat_start_session(
             s.shutdown_tx = None;
         }
     }
+
+    // 清理旧的资源
+    match session_mode {
+        SessionMode::Server => {
+            tcp_server::shutdown_all_clients(&session_id).await;
+        }
+        SessionMode::Client => {
+            tcp_client::TCP_SENDERS.write().await.remove(&session_id);
+        }
+    }
+    udp::shutdown_udp_session(&session_id).await;
+
+    // 等待端口释放
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     let (protocol, mode, host, port, timeout_ms) = {
         let s = session_state.read().await;
