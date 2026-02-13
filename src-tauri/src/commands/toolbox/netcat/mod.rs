@@ -514,13 +514,27 @@ pub async fn netcat_disconnect_client(
     Ok(())
 }
 
+/// HTTP 请求配置
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpFetchConfig {
+    pub url: String,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub headers: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub json_path: Option<String>,
+}
+
 /// HTTP 获取数据（用于自动发送的 HTTP 模式）
 #[tauri::command]
 pub async fn netcat_fetch_http(
-    url: String,
-    json_path: Option<String>,
+    config: HttpFetchConfig,
 ) -> Result<String, String> {
-    use reqwest::Client;
+    use reqwest::{Client, Method};
     use std::time::Duration;
 
     let client = Client::builder()
@@ -528,11 +542,40 @@ pub async fn netcat_fetch_http(
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    let response = client
-        .get(&url)
+    // 解析 HTTP 方法
+    let method = match config.method.as_deref().unwrap_or("GET").to_uppercase().as_str() {
+        "GET" => Method::GET,
+        "POST" => Method::POST,
+        "PUT" => Method::PUT,
+        "DELETE" => Method::DELETE,
+        "PATCH" => Method::PATCH,
+        "HEAD" => Method::HEAD,
+        other => return Err(format!("不支持的 HTTP 方法: {}", other)),
+    };
+
+    let mut request = client.request(method, &config.url);
+
+    // 添加自定义头
+    if let Some(headers) = config.headers {
+        for (key, value) in headers {
+            request = request.header(&key, &value);
+        }
+    }
+
+    // 添加请求体
+    if let Some(body) = config.body {
+        request = request.body(body);
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| format!("HTTP 请求失败: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("HTTP 请求失败: {} {}", status.as_u16(), status.canonical_reason().unwrap_or("")));
+    }
 
     let content_type = response
         .headers()
@@ -547,8 +590,8 @@ pub async fn netcat_fetch_http(
         .map_err(|e| format!("读取响应失败: {}", e))?;
 
     // 如果是 JSON 并且指定了路径，则提取
-    if content_type.contains("application/json") {
-        if let Some(path) = json_path {
+    if content_type.contains("application/json") || content_type.contains("text/json") {
+        if let Some(path) = config.json_path {
             if !path.trim().is_empty() {
                 return extract_json_path(&text, &path);
             }

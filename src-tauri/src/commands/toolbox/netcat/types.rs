@@ -82,6 +82,15 @@ pub struct AutoSendConfig {
     /// HTTP URL
     #[serde(default)]
     pub http_url: String,
+    /// HTTP 请求方法
+    #[serde(default = "default_http_method")]
+    pub http_method: String,
+    /// HTTP 请求头（JSON 格式）
+    #[serde(default)]
+    pub http_headers: String,
+    /// HTTP 请求体
+    #[serde(default)]
+    pub http_body: String,
     /// HTTP JSON 路径（用于提取 JSON 响应中的特定字段）
     #[serde(default)]
     pub http_json_path: String,
@@ -89,6 +98,10 @@ pub struct AutoSendConfig {
 
 fn default_interval() -> u64 {
     1000
+}
+
+fn default_http_method() -> String {
+    "GET".to_string()
 }
 
 impl Default for AutoSendConfig {
@@ -101,6 +114,9 @@ impl Default for AutoSendConfig {
             csv_data: String::new(),
             template: String::new(),
             http_url: String::new(),
+            http_method: "GET".to_string(),
+            http_headers: String::new(),
+            http_body: String::new(),
             http_json_path: String::new(),
         }
     }

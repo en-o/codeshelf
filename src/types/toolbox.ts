@@ -237,6 +237,12 @@ export interface AutoSendConfig {
   csvData: string;
   template: string;
   httpUrl: string;
+  /** HTTP 请求方法 */
+  httpMethod: string;
+  /** HTTP 请求头（JSON 格式，如 {"Authorization": "Bearer xxx"}） */
+  httpHeaders: string;
+  /** HTTP 请求体 */
+  httpBody: string;
   /** HTTP JSON 路径，用于提取 JSON 响应中的特定字段 */
   httpJsonPath: string;
 }

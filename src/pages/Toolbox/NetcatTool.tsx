@@ -109,7 +109,7 @@ export default function NetcatTool() {
   // 自动发送 - 每个会话独立的自动发送状态
   const [showAutoSendPanel, setShowAutoSendPanel] = useState(false);
   const [autoSendCount, setAutoSendCount] = useState<Record<string, number>>({});
-  const [csvIndexes, setCsvIndexes] = useState<Record<string, number>>({});
+  const csvIndexesRef = useRef<Record<string, number>>({});
   const autoSendTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // 自动滚动
@@ -303,9 +303,10 @@ export default function NetcatTool() {
       case "csv": {
         const lines = config.csvData.split("\n").filter((l) => l.trim());
         if (lines.length === 0) return null;
-        const currentIndex = csvIndexes[sessionId] || 0;
+        // 使用 ref 来保持索引，避免闭包问题
+        const currentIndex = csvIndexesRef.current[sessionId] || 0;
         const data = lines[currentIndex % lines.length];
-        setCsvIndexes((prev) => ({ ...prev, [sessionId]: currentIndex + 1 }));
+        csvIndexesRef.current[sessionId] = currentIndex + 1;
         return data;
       }
       case "template":
@@ -429,7 +430,7 @@ export default function NetcatTool() {
     // 重置计数
     if (enable) {
       setAutoSendCount((prev) => ({ ...prev, [selectedSession.id]: 0 }));
-      setCsvIndexes((prev) => ({ ...prev, [selectedSession.id]: 0 }));
+      csvIndexesRef.current[selectedSession.id] = 0;
     }
 
     // 保存到后端
