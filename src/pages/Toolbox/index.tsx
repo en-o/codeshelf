@@ -52,10 +52,11 @@ const tools = [
   },
   {
     id: "netcat" as ToolType,
-    name: "协议测试",
+    name: "Netcat",
     description: "TCP/UDP 协议测试工具，支持客户端和服务器模式，用于调试物联网设备",
     icon: Radio,
     color: "bg-cyan-500",
+    beta: true,
   },
 ];
 
@@ -177,6 +178,11 @@ export function ToolboxPage() {
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-gray-900 dark:text-white mb-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                         {tool.name}
+                        {tool.beta && (
+                          <sup className="ml-1 text-[10px] font-medium text-orange-500 dark:text-orange-400">
+                            Beta
+                          </sup>
+                        )}
                       </h3>
                       <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
                         {tool.description}
