@@ -38,7 +38,24 @@ pub async fn start_tcp_server(
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr)
         .await
-        .map_err(|e| format!("绑定端口失败: {}", e))?;
+        .map_err(|e| {
+            let err_msg = if e.kind() == std::io::ErrorKind::AddrInUse {
+                format!("端口 {} 已被占用，请先停止占用该端口的服务或选择其他端口", port)
+            } else {
+                format!("绑定端口失败: {}", e)
+            };
+            // 更新状态为错误
+            let session_state_clone = session_state.clone();
+            let app_clone = app.clone();
+            let session_id_clone = session_id.clone();
+            tokio::spawn(async move {
+                let mut state = session_state_clone.write().await;
+                state.session.status = SessionStatus::Error;
+                state.session.error_message = Some(err_msg.clone());
+                emit_status_changed(&app_clone, &session_id_clone, SessionStatus::Error, Some(err_msg));
+            });
+            format!("绑定端口失败: {}", e)
+        })?;
 
     // 更新状态为监听中
     {

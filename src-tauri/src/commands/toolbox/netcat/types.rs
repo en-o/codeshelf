@@ -263,6 +263,8 @@ pub struct SessionState {
     pub messages: Vec<NetcatMessage>,
     pub clients: HashMap<String, ConnectedClient>,
     pub shutdown_tx: Option<mpsc::Sender<()>>,
+    /// 主任务句柄，用于强制终止
+    pub task_handle: Option<tokio::task::AbortHandle>,
 }
 
 impl SessionState {
@@ -272,6 +274,7 @@ impl SessionState {
             messages: Vec::new(),
             clients: HashMap::new(),
             shutdown_tx: None,
+            task_handle: None,
         }
     }
 }

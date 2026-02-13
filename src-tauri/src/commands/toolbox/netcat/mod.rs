@@ -190,6 +190,17 @@ pub async fn netcat_start_session(
 
     let session_state = session_state.ok_or("会话不存在")?;
 
+    // 先检查是否有旧任务在运行，如果有则终止它
+    {
+        let mut s = session_state.write().await;
+        if let Some(handle) = s.task_handle.take() {
+            log::info!("终止旧的 Netcat 任务: {}", session_id);
+            handle.abort();
+            // 清理旧的 shutdown channel
+            s.shutdown_tx = None;
+        }
+    }
+
     let (protocol, mode, host, port, timeout_ms) = {
         let s = session_state.read().await;
         (
@@ -201,29 +212,38 @@ pub async fn netcat_start_session(
         )
     };
 
-    // 根据协议和模式启动
-    match (protocol, mode) {
+    // 根据协议和模式启动，并保存任务句柄
+    let task_handle = match (protocol, mode) {
         (Protocol::Tcp, SessionMode::Client) => {
             let app_clone = app.clone();
             let state_clone = session_state.clone();
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let _ = tcp_client::start_tcp_client(app_clone, state_clone, host, port, timeout_ms).await;
             });
+            handle.abort_handle()
         }
         (Protocol::Tcp, SessionMode::Server) => {
             let app_clone = app.clone();
             let state_clone = session_state.clone();
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let _ = tcp_server::start_tcp_server(app_clone, state_clone, host, port).await;
             });
+            handle.abort_handle()
         }
         (Protocol::Udp, _) => {
             let app_clone = app.clone();
             let state_clone = session_state.clone();
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let _ = udp::start_udp_session(app_clone, state_clone, host, port, mode).await;
             });
+            handle.abort_handle()
         }
+    };
+
+    // 保存任务句柄
+    {
+        let mut s = session_state.write().await;
+        s.task_handle = Some(task_handle);
     }
 
     Ok(())
@@ -267,6 +287,18 @@ async fn stop_session_internal(
         log::info!("Netcat 停止信号已发送: {}", session_id);
     }
 
+    // 强制终止任务（如果关闭信号没有效果）
+    {
+        let mut s = session_state.write().await;
+        if let Some(handle) = s.task_handle.take() {
+            log::info!("强制终止 Netcat 任务: {}", session_id);
+            handle.abort();
+        }
+    }
+
+    // 等待一小段时间让任务终止
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
     // 根据模式清理资源
     match session_mode {
         SessionMode::Server => {
@@ -291,7 +323,7 @@ async fn stop_session_internal(
         s.session.client_count = 0;
     }
 
-    // 等待一小段时间让资源释放
+    // 等待资源释放
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     log::info!("Netcat 会话已停止: {}", session_id);
