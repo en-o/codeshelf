@@ -1399,9 +1399,18 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
             <p className="text-gray-600 dark:text-gray-400 mb-2">
               确定要启用配置档案 <span className="font-medium text-gray-900 dark:text-white">"{activateConfirmProfile.name}"</span> 吗？
             </p>
-            <p className="text-xs text-gray-500 mb-6">
+            <p className="text-xs text-gray-500 mb-3">
               这将把该档案的配置写入到当前环境的 settings.json 文件中。
             </p>
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg mb-4">
+              <p className="text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
+                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                <span>
+                  <strong>注意：</strong>配置修改后需要重启 Claude Code 才能生效。
+                  请退出当前会话后重新运行 <code className="bg-amber-100 dark:bg-amber-900/40 px-1 rounded">claude</code> 命令。
+                </span>
+              </p>
+            </div>
 
             <div className="flex justify-end gap-2">
               <Button onClick={() => setActivateConfirmProfile(null)} variant="secondary">
