@@ -988,10 +988,16 @@ export function ClaudeCodeManager({ onBack }: ClaudeCodeManagerProps) {
                     {/* 配置档案列表 */}
                     <div className="flex-1 re-card p-3 flex flex-col overflow-hidden min-h-0">
                       <div className="flex items-center justify-between mb-3 flex-shrink-0">
-                        <h3 className="font-semibold text-gray-900 dark:text-white text-sm flex items-center gap-2">
-                          <Copy size={16} />
-                          配置档案
-                        </h3>
+                        <div className="flex items-center gap-3">
+                          <h3 className="font-semibold text-gray-900 dark:text-white text-sm flex items-center gap-2">
+                            <Copy size={16} />
+                            配置档案
+                          </h3>
+                          <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                            <AlertCircle size={12} />
+                            启用后需重启 Claude Code 生效
+                          </span>
+                        </div>
                         <div className="flex items-center gap-1">
                           <button
                             onClick={handleImportProfiles}
