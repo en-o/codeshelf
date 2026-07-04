@@ -30,6 +30,67 @@ function CodeBlock({ code }: { code: string }) {
   );
 }
 
+function FlowDiagram() {
+  return (
+    <svg viewBox="0 0 600 250" className="w-full" role="img" aria-label="内网穿透数据流向图">
+      <defs>
+        <marker id="rt-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#10b981" />
+        </marker>
+        <marker id="rt-arrow-dashed" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8" />
+        </marker>
+      </defs>
+
+      {/* 三个节点 */}
+      <g className="fill-gray-50 stroke-gray-300 dark:fill-gray-800 dark:stroke-gray-600">
+        <rect x="8" y="46" width="150" height="78" rx="10" strokeWidth="1.5" />
+        <rect x="442" y="46" width="150" height="78" rx="10" strokeWidth="1.5" />
+      </g>
+      {/* 中间的 VPS 节点用强调色 */}
+      <rect x="225" y="46" width="150" height="78" rx="10" strokeWidth="1.5" className="fill-emerald-50 stroke-emerald-300 dark:fill-emerald-900/30 dark:stroke-emerald-700" />
+
+      {/* 节点文字 */}
+      <g className="fill-gray-800 dark:fill-gray-100" textAnchor="middle" fontSize="13" fontWeight="600">
+        <text x="83" y="78">外网请求</text>
+        <text x="300" y="78">你的 VPS</text>
+        <text x="517" y="78">你的电脑</text>
+      </g>
+      <g className="fill-gray-400" textAnchor="middle" fontSize="10">
+        <text x="83" y="98">微信 / 浏览器</text>
+        <text x="83" y="112">（公网发起）</text>
+        <text x="300" y="98">公网 IP / 域名</text>
+        <text x="300" y="112">:9000（或 nginx 443）</text>
+        <text x="517" y="98">本地服务</text>
+        <text x="517" y="112">127.0.0.1:8080</text>
+      </g>
+
+      {/* 主数据流箭头 */}
+      <g stroke="#10b981" strokeWidth="2" markerEnd="url(#rt-arrow)" fill="none">
+        <line x1="160" y1="85" x2="222" y2="85" />
+        <line x1="377" y1="85" x2="439" y2="85" />
+      </g>
+      <g className="fill-emerald-600 dark:fill-emerald-400" textAnchor="middle" fontSize="10" fontWeight="600">
+        <text x="191" y="36">① 公网请求</text>
+        <text x="191" y="78" className="fill-gray-400" fontWeight="400">http</text>
+        <text x="408" y="36">② SSH 反向隧道</text>
+        <text x="408" y="78" className="fill-gray-400" fontWeight="400">加密</text>
+      </g>
+
+      {/* 底部：SSH 连接由本机主动外连建立 */}
+      <path d="M470,124 C470,168 300,168 300,128" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" fill="none" markerEnd="url(#rt-arrow-dashed)" />
+      <text x="385" y="182" textAnchor="middle" fontSize="10" className="fill-gray-400">
+        SSH 连接由本机主动外连建立（本机无需公网 IP）
+      </text>
+
+      {/* 底注 */}
+      <text x="300" y="216" textAnchor="middle" fontSize="10" className="fill-gray-400">
+        请求：外网 → VPS 公网端口 → 经 SSH 隧道回流 → 本机服务；响应原路返回
+      </text>
+    </svg>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="space-y-2">
@@ -69,6 +130,17 @@ export function ReverseTunnelHelpDialog({ open, onClose }: { open: boolean; onCl
             <p>
               需要一台<b>能 SSH 登录、带公网 IP（最好有域名）</b>的服务器（阿里云 / 腾讯云 ECS 都可以）。
               真正的 P2P 无法接收第三方回调，所以必须有这么个"公网入口"。
+            </p>
+          </Section>
+
+          <Section title="运行原理（数据流向）">
+            <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-gray-800/40">
+              <FlowDiagram />
+            </div>
+            <p>
+              本工具让<b>你的电脑主动 SSH 外连到 VPS</b> 并建立一条反向隧道；外网请求打到 VPS 的公网端口后，
+              经这条加密隧道回流到你本机的服务，响应再原路返回。因为连接是本机主动发起的，
+              <b>本机不需要公网 IP、不用做端口映射</b>——公网入口完全由你的 VPS 承担。
             </p>
           </Section>
 
