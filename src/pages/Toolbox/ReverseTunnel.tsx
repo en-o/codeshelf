@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   AlertTriangle,
+  BookOpen,
   Copy,
   FolderOpen,
   Globe,
@@ -23,6 +24,7 @@ import {
 import { Button, Input, showToast } from "@/components/ui";
 import { LoadingSpinner } from "@/components/common";
 import { ToolPanelHeader } from "./index";
+import { ReverseTunnelHelpDialog } from "./ReverseTunnelHelp";
 import {
   addReverseTunnel,
   getReverseTunnels,
@@ -68,6 +70,7 @@ export function ReverseTunnel({ onBack }: ReverseTunnelProps) {
   const [loading, setLoading] = useState(true);
   const [sshConfigHosts, setSshConfigHosts] = useState<string[]>([]);
   const [showDialog, setShowDialog] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [editing, setEditing] = useState<ReverseTunnelModel | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
@@ -286,6 +289,10 @@ export function ReverseTunnel({ onBack }: ReverseTunnelProps) {
         beta
         actions={
           <div className="flex items-center gap-2">
+            <Button onClick={() => setShowHelp(true)} variant="secondary" size="sm">
+              <BookOpen size={16} className="mr-2" />
+              使用说明
+            </Button>
             <Button onClick={loadAll} disabled={loading} variant="secondary" size="sm">
               <RefreshCw size={16} className={loading ? "animate-spin mr-2" : "mr-2"} />
               刷新
@@ -309,9 +316,16 @@ export function ReverseTunnel({ onBack }: ReverseTunnelProps) {
                 需要你<b>自己的 VPS</b>（带公网 IP / 域名、可 SSH 登录）。默认只在 VPS 本机可达
                 （<code className="font-mono">127.0.0.1</code>，建议配 nginx 反代 + HTTPS）；
                 勾选「对公网开放」会绑定 <code className="font-mono">0.0.0.0</code>，此时 VPS 需开启{" "}
-                <code className="font-mono">GatewayPorts yes</code>，且暴露的本地服务自身无鉴权、
+                <code className="font-mono">GatewayPorts</code>，且暴露的本地服务自身无鉴权、
                 公网任何人可达——仅用于临时调试。
               </p>
+              <button
+                type="button"
+                onClick={() => setShowHelp(true)}
+                className="inline-flex items-center gap-1 font-medium text-amber-800 underline decoration-dotted underline-offset-2 hover:text-amber-900 dark:text-amber-200"
+              >
+                <BookOpen size={13} /> 查看完整使用说明（服务器 / nginx / 鉴权配置）
+              </button>
             </div>
           </div>
 
@@ -650,6 +664,8 @@ export function ReverseTunnel({ onBack }: ReverseTunnelProps) {
           </div>
         </div>
       )}
+
+      <ReverseTunnelHelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );
 }
