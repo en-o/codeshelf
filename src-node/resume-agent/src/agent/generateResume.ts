@@ -49,14 +49,58 @@ export async function generateResumeFromKnowledge(
     throw new Error("生成简历失败：没有可用的背景知识");
   }
   const prompt = request.promptConfig ?? await loadPromptConfig(request.dataDir);
-  const model = createChatModel(request.provider);
-  const response = await model.invoke([
-    { role: "system", content: prompt.resumePrompt },
-    { role: "user", content: buildUserPrompt(request) },
-  ] as never);
-  const text = extractMessageText(response);
-  const parsed = parseResumeResponse(text);
+  // 简历 JSON 体量随项目数线性增长，动态放大输出上限（封顶避免超模型能力）
+  const maxTokens = Math.min(
+    16384,
+    Math.max(8192, 3000 + request.knowledgeDocs.length * 1500),
+  );
+  const model = createChatModel(request.provider, { maxTokens });
+  const parsed = await requestResumeJson(
+    model,
+    prompt.resumePrompt,
+    buildUserPrompt(request),
+  );
   return normalizeResume(parsed, request);
+}
+
+/**
+ * 调模型拿简历 JSON，解析失败时追加纠正指令重试一次。
+ *
+ * 大模型偶尔会输出被 Markdown 包裹、夹带解释文字、或（项目多时）被截断的 JSON。
+ * 首次解析失败后，把上次输出连同"只返回合法闭合 JSON"的指令回传重试，
+ * 显著降低整次生成因单次格式问题直接报错的概率。
+ */
+async function requestResumeJson(
+  model: ReturnType<typeof createChatModel>,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<ResumeResponse> {
+  const messages: { role: string; content: string }[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await model.invoke(messages as never);
+    const text = extractMessageText(response);
+    try {
+      return parseResumeResponse(text);
+    } catch (error) {
+      lastError = error;
+      messages.push(
+        { role: "assistant", content: text.slice(0, 4000) },
+        {
+          role: "user",
+          content:
+            "上一次输出无法解析为合法 JSON。请只返回一个完整、合法、闭合的 JSON 对象（以 { 开头、以 } 结尾），" +
+            "不要包裹 Markdown 代码块，不要任何解释文字。若内容较多，请精简每条描述以保证 JSON 完整闭合。",
+        },
+      );
+    }
+  }
+  throw new Error(
+    `生成简历失败：模型多次未返回合法 JSON（${lastError instanceof Error ? lastError.message : String(lastError)}）`,
+  );
 }
 
 function buildUserPrompt(request: GenerateResumeRequest): string {
