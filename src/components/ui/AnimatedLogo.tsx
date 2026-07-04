@@ -1,10 +1,18 @@
 // 全息动画 Logo 组件
+//
+// animated=false 时渲染静态帧（去掉所有 SMIL <animate>）。
+// 常驻挂载的场景（如侧边栏小图标）务必传 animated={false}：
+// SVG SMIL + feGaussianBlur 滤镜在 macOS WKWebView 上不走 GPU 合成，
+// 会每帧在 CPU 上重栅格化滤镜区域、永不停，是空闲时 CPU 异常升高的元凶。
+// 静态帧下滤镜只栅格化一次即缓存，视觉几乎无损。
 export function AnimatedLogo({
   size = 30,
-  theme = "light"
+  theme = "light",
+  animated = true,
 }: {
   size?: number;
   theme?: "light" | "dark";
+  animated?: boolean;
 }) {
   // 根据主题选择颜色
   const colors = theme === "dark"
@@ -73,8 +81,12 @@ export function AnimatedLogo({
         strokeWidth="0.5"
         opacity="0.4"
       >
-        <animate attributeName="r" values="96;99;96" dur="3s" repeatCount="indefinite" />
-        <animate attributeName="opacity" values="0.4;0.15;0.4" dur="3s" repeatCount="indefinite" />
+        {animated && (
+          <>
+            <animate attributeName="r" values="96;99;96" dur="3s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.4;0.15;0.4" dur="3s" repeatCount="indefinite" />
+          </>
+        )}
       </circle>
 
       {/* 主圆形基底 */}
@@ -99,9 +111,13 @@ export function AnimatedLogo({
         opacity="0.2"
         clipPath={`url(#circle-clip-${id})`}
       >
-        <animate attributeName="y1" values="20;180;20" dur="4s" repeatCount="indefinite" />
-        <animate attributeName="y2" values="20;180;20" dur="4s" repeatCount="indefinite" />
-        <animate attributeName="opacity" values="0.3;0;0.3" dur="4s" repeatCount="indefinite" />
+        {animated && (
+          <>
+            <animate attributeName="y1" values="20;180;20" dur="4s" repeatCount="indefinite" />
+            <animate attributeName="y2" values="20;180;20" dur="4s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.3;0;0.3" dur="4s" repeatCount="indefinite" />
+          </>
+        )}
       </line>
 
       {/* 背景六边形网格 */}
@@ -150,8 +166,12 @@ export function AnimatedLogo({
       <g filter={`url(#holo-glow-${id})`}>
         {/* 主节点 - 呼吸动画 */}
         <circle cx="65" cy="55" r="5" fill={colors.stroke}>
-          <animate attributeName="r" values="5;6;5" dur="2s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="1;0.7;1" dur="2s" repeatCount="indefinite" />
+          {animated && (
+            <>
+              <animate attributeName="r" values="5;6;5" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="1;0.7;1" dur="2s" repeatCount="indefinite" />
+            </>
+          )}
         </circle>
 
         {/* 连接线 */}
@@ -165,7 +185,9 @@ export function AnimatedLogo({
 
         {/* 节点 2 - 脉冲动画 */}
         <circle cx="85" cy="58" r="4" fill={colors.accent}>
-          <animate attributeName="r" values="4;5;4" dur="3s" repeatCount="indefinite" />
+          {animated && (
+            <animate attributeName="r" values="4;5;4" dur="3s" repeatCount="indefinite" />
+          )}
         </circle>
 
         {/* 流动数据线 */}
@@ -176,12 +198,14 @@ export function AnimatedLogo({
           opacity="0.6"
           strokeDasharray="8,16"
         >
-          <animate
-            attributeName="stroke-dashoffset"
-            values="0;24"
-            dur="1.5s"
-            repeatCount="indefinite"
-          />
+          {animated && (
+            <animate
+              attributeName="stroke-dashoffset"
+              values="0;24"
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+          )}
         </line>
 
         {/* 连接线 2 */}
@@ -217,12 +241,18 @@ export function AnimatedLogo({
         </text>
 
         {/* 状态条动画 */}
-        <rect x="105" y="85" width="3" fill={colors.accent} opacity="0.8">
-          <animate attributeName="height" values="10;6;10" dur="2s" repeatCount="indefinite" />
-          <animate attributeName="y" values="85;87;85" dur="2s" repeatCount="indefinite" />
+        <rect x="105" y="85" width="3" height="10" fill={colors.accent} opacity="0.8">
+          {animated && (
+            <>
+              <animate attributeName="height" values="10;6;10" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="y" values="85;87;85" dur="2s" repeatCount="indefinite" />
+            </>
+          )}
         </rect>
-        <rect x="110" y="83" width="3" fill={colors.stroke} opacity="0.6">
-          <animate attributeName="height" values="14;10;14" dur="2.5s" repeatCount="indefinite" />
+        <rect x="110" y="83" width="3" height="14" fill={colors.stroke} opacity="0.6">
+          {animated && (
+            <animate attributeName="height" values="14;10;14" dur="2.5s" repeatCount="indefinite" />
+          )}
         </rect>
       </g>
 
@@ -247,33 +277,43 @@ export function AnimatedLogo({
 
         {/* 光标闪烁 */}
         <rect x="100" y="128" width="2" height="8" fill={colors.stroke}>
-          <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite" />
+          {animated && (
+            <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite" />
+          )}
         </rect>
       </g>
 
       {/* 悬浮粒子 */}
       <g opacity="0.5">
         <circle cx="140" cy="130" r="1.5" fill={colors.stroke}>
-          <animate attributeName="cy" values="130;120;130" dur="3s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.5;0.2;0.5" dur="3s" repeatCount="indefinite" />
+          {animated && (
+            <>
+              <animate attributeName="cy" values="130;120;130" dur="3s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.5;0.2;0.5" dur="3s" repeatCount="indefinite" />
+            </>
+          )}
         </circle>
         <circle cx="155" cy="115" r="1" fill={colors.accent}>
-          <animate attributeName="cy" values="115;105;115" dur="4s" repeatCount="indefinite" />
+          {animated && (
+            <animate attributeName="cy" values="115;105;115" dur="4s" repeatCount="indefinite" />
+          )}
         </circle>
       </g>
 
       {/* 故障闪现效果 */}
-      <g clipPath={`url(#circle-clip-${id})`}>
-        <rect x="20" y="70" width="160" height="2" fill="#ff00ff" opacity="0">
-          <animate
-            attributeName="opacity"
-            values="0;0;0;0.5;0;0"
-            dur="5s"
-            repeatCount="indefinite"
-          />
-          <animate attributeName="y" values="70;90;120;70" dur="5s" repeatCount="indefinite" />
-        </rect>
-      </g>
+      {animated && (
+        <g clipPath={`url(#circle-clip-${id})`}>
+          <rect x="20" y="70" width="160" height="2" fill="#ff00ff" opacity="0">
+            <animate
+              attributeName="opacity"
+              values="0;0;0;0.5;0;0"
+              dur="5s"
+              repeatCount="indefinite"
+            />
+            <animate attributeName="y" values="70;90;120;70" dur="5s" repeatCount="indefinite" />
+          </rect>
+        </g>
+      )}
     </svg>
   );
 }

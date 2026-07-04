@@ -348,14 +348,20 @@ pub fn start_clipboard_monitor(app_handle: AppHandle) {
             }
         }
 
+        // 设置文件极少变动，缓存起来最多每 2s 从磁盘刷新一次，
+        // 避免每轮（默认 800ms）都做一次 stat + 读文件 + JSON 解析的无谓磁盘 I/O。
+        // 切换开关 / 调整间隔最迟 2s 生效，可接受。
+        let mut settings = read_settings_file().unwrap_or_default();
+        let mut last_settings_read = std::time::Instant::now();
+
         loop {
-            let settings = match read_settings_file() {
-                Ok(s) => s,
-                Err(_) => {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    continue;
+            if last_settings_read.elapsed() >= std::time::Duration::from_secs(2) {
+                // 读失败时保留上次的有效设置，不回退到默认
+                if let Ok(s) = read_settings_file() {
+                    settings = s;
                 }
-            };
+                last_settings_read = std::time::Instant::now();
+            }
 
             if !settings.enabled {
                 tokio::time::sleep(std::time::Duration::from_millis(

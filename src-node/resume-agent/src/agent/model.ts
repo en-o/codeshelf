@@ -9,7 +9,10 @@ export function pickModel(provider: AiProviderConfig) {
   return model;
 }
 
-export function createChatModel(provider: AiProviderConfig) {
+export function createChatModel(
+  provider: AiProviderConfig,
+  options?: { maxTokens?: number },
+) {
   const model = pickModel(provider);
   return new ChatOpenAI({
     model: model.model,
@@ -19,7 +22,9 @@ export function createChatModel(provider: AiProviderConfig) {
     },
     temperature: model.thinking ? undefined : 0.2,
     streaming: false,
-    maxTokens: 8192,
+    // 默认 8192；简历 JSON 会随项目数增长，调用方按项目数动态放大，
+    // 避免输出在 JSON 中途被截断导致整次解析失败。
+    maxTokens: options?.maxTokens ?? 8192,
   });
 }
 

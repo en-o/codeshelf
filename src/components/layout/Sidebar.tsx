@@ -135,7 +135,7 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
         onMouseEnter={() => setShowLogoPopup(true)}
         onMouseLeave={() => setShowLogoPopup(false)}
       >
-        <AnimatedLogo size={30} /> CodeShelf
+        <AnimatedLogo size={30} animated={false} /> CodeShelf
 
         {/* 悬浮展开的大图标 */}
         {showLogoPopup && (
