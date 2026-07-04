@@ -51,6 +51,7 @@ CodeShelf 把这些都收进一个桌面应用：集中管理本地 Git 项目�
 | Netcat `beta` | TCP/UDP 协议测试工具，支持客户端和服务器模式，用于调试物联网设备 |
 | 简历生成 `beta` | 基于 LangChain Deep Agents 分析项目代码，生成项目背景知识和 STAR 简历经历 |
 | SSH 隧道 `beta` | 通过 SSH 将远程内网端口映射到本地，例如远程 Redis/MySQL/管理面板 |
+| 内网穿透 `beta` | 通过 SSH 反向隧道把本地服务映射到自己 VPS 的公网端口，用于微信回调等外网调试（[使用说明](docs/内网穿透使用说明.md)） |
 | 跨设备传输 `beta` | 局域网内一对一收发文字和文件，浏览器扫码即用，所有数据内存中转 |
 
 ![5.png](docs/images/5.png)

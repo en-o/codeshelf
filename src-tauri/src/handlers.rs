@@ -127,6 +127,17 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         toolbox::ssh_tunnel::set_ssh_tunnel_group,
         toolbox::ssh_tunnel::test_ssh_tunnel,
         toolbox::ssh_tunnel::test_local_port,
+        // Toolbox - Reverse Tunnel (内网穿透)
+        toolbox::reverse_tunnel::add_reverse_tunnel,
+        toolbox::reverse_tunnel::update_reverse_tunnel,
+        toolbox::reverse_tunnel::remove_reverse_tunnel,
+        toolbox::reverse_tunnel::start_reverse_tunnel,
+        toolbox::reverse_tunnel::stop_reverse_tunnel,
+        toolbox::reverse_tunnel::get_reverse_tunnels,
+        toolbox::reverse_tunnel::get_reverse_tunnel,
+        toolbox::reverse_tunnel::get_reverse_tunnel_stats,
+        toolbox::reverse_tunnel::list_reverse_ssh_config_hosts,
+        toolbox::reverse_tunnel::set_reverse_tunnel_group,
         // Toolbox - Server
         toolbox::server::create_server,
         toolbox::server::start_server,

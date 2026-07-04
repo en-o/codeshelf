@@ -26,6 +26,9 @@ import type {
   SshTunnel,
   SshTunnelInput,
   SshTunnelStats,
+  ReverseTunnel,
+  ReverseTunnelInput,
+  ReverseTunnelStats,
   TestPortResult,
 } from "@/types/toolbox";
 
@@ -225,6 +228,60 @@ export async function testSshTunnel(tunnelId: string): Promise<TestPortResult> {
 
 export async function testLocalPort(port: number): Promise<TestPortResult> {
   return invoke("test_local_port", { port });
+}
+
+// ============== 内网穿透（反向 SSH 隧道）==============
+
+export async function addReverseTunnel(
+  input: ReverseTunnelInput
+): Promise<ReverseTunnel> {
+  return invoke("add_reverse_tunnel", { input });
+}
+
+export async function updateReverseTunnel(
+  tunnelId: string,
+  input: ReverseTunnelInput
+): Promise<ReverseTunnel> {
+  return invoke("update_reverse_tunnel", { tunnelId, input });
+}
+
+export async function removeReverseTunnel(tunnelId: string): Promise<void> {
+  return invoke("remove_reverse_tunnel", { tunnelId });
+}
+
+export async function startReverseTunnel(tunnelId: string): Promise<void> {
+  return invoke("start_reverse_tunnel", { tunnelId });
+}
+
+export async function stopReverseTunnel(tunnelId: string): Promise<void> {
+  return invoke("stop_reverse_tunnel", { tunnelId });
+}
+
+export async function getReverseTunnels(): Promise<ReverseTunnel[]> {
+  return invoke("get_reverse_tunnels");
+}
+
+export async function getReverseTunnel(
+  tunnelId: string
+): Promise<ReverseTunnel | null> {
+  return invoke("get_reverse_tunnel", { tunnelId });
+}
+
+export async function getReverseTunnelStats(
+  tunnelId: string
+): Promise<ReverseTunnelStats> {
+  return invoke("get_reverse_tunnel_stats", { tunnelId });
+}
+
+export async function listReverseSshConfigHosts(): Promise<string[]> {
+  return invoke("list_reverse_ssh_config_hosts");
+}
+
+export async function setReverseTunnelGroup(
+  tunnelId: string,
+  group: string
+): Promise<ReverseTunnel> {
+  return invoke("set_reverse_tunnel_group", { tunnelId, group });
 }
 
 // ============== 静态服务 ==============

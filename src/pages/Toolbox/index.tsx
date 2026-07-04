@@ -13,6 +13,7 @@ import {
   Network,
   FileText,
   Send,
+  Globe,
 } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useUiStore } from "@/stores/uiStore";
@@ -29,6 +30,7 @@ import { ShortcutsMemo } from "./ShortcutsMemo";
 import { ClipboardManager } from "./ClipboardManager";
 import { DockerImageTool } from "./DockerImageTool";
 import { SshTunnel } from "./SshTunnel";
+import { ReverseTunnel } from "./ReverseTunnel";
 import { ResumeGenerator } from "./ResumeGenerator";
 import { PairDrop } from "./PairDrop";
 
@@ -107,6 +109,14 @@ const tools = [
     beta: true,
   },
   {
+    id: "reverseTunnel" as ToolType,
+    name: "内网穿透",
+    description: "通过 SSH 反向隧道把本地服务映射到你的 VPS 公网端口，用于 webhook 等外网回调调试",
+    icon: Globe,
+    color: "bg-orange-500",
+    beta: true,
+  },
+  {
     id: "pairdrop" as ToolType,
     name: "跨设备传输",
     description: "局域网内一对一收发文字和文件，浏览器扫码即用，所有数据内存中转",
@@ -173,6 +183,8 @@ export function ToolboxPage() {
         return <ResumeGenerator onBack={() => setActiveTool(null)} />;
       case "sshTunnel":
         return <SshTunnel onBack={() => setActiveTool(null)} />;
+      case "reverseTunnel":
+        return <ReverseTunnel onBack={() => setActiveTool(null)} />;
       case "pairdrop":
         return <PairDrop onBack={() => setActiveTool(null)} />;
       default:

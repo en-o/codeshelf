@@ -183,6 +183,58 @@ export interface SshTunnelStats {
   bytesOut: number;
 }
 
+// ============== 内网穿透（反向 SSH 隧道）==============
+
+export interface ReverseTunnel {
+  id: string;
+  name: string;
+  /** 要暴露的本地服务主机，默认 127.0.0.1 */
+  localHost: string;
+  /** 要暴露的本地服务端口 */
+  localPort: number;
+  sshHost: string;
+  sshPort: number;
+  sshUser: string;
+  auth: SshAuthMethod;
+  /** VPS 监听地址：127.0.0.1=仅本机(配 nginx 反代)；0.0.0.0=对公网开放(需 GatewayPorts yes) */
+  remoteBindAddr: string;
+  /** VPS 上对外暴露的端口 */
+  remotePort: number;
+  /** 可选域名，仅用于展示与拼接公网 URL */
+  domain?: string | null;
+  status: "running" | "stopped" | "reconnecting";
+  connections: number;
+  bytesIn: number;
+  bytesOut: number;
+  lastError?: string | null;
+  autoReconnect: boolean;
+  reconnects: number;
+  group: string;
+  createdAt: string;
+}
+
+export interface ReverseTunnelInput {
+  name: string;
+  localHost?: string;
+  localPort: number;
+  sshHost: string;
+  sshPort?: number;
+  sshUser?: string;
+  auth: SshAuthMethod;
+  remoteBindAddr?: string;
+  remotePort: number;
+  domain?: string;
+  autoReconnect?: boolean;
+  group?: string;
+}
+
+export interface ReverseTunnelStats {
+  tunnelId: string;
+  connections: number;
+  bytesIn: number;
+  bytesOut: number;
+}
+
 export interface TestPortResult {
   success: boolean;
   /** 命令输出（stdout/stderr 拼接） */
@@ -350,7 +402,7 @@ export interface ConfigProfile {
 
 // ============== 工具箱页面状态 ==============
 
-export type ToolType = "monitor" | "downloader" | "server" | "docker" | "claude" | "netcat" | "shortcuts" | "clipboard" | "resume" | "sshTunnel" | "pairdrop";
+export type ToolType = "monitor" | "downloader" | "server" | "docker" | "claude" | "netcat" | "shortcuts" | "clipboard" | "resume" | "sshTunnel" | "reverseTunnel" | "pairdrop";
 
 export interface ToolInfo {
   id: ToolType;
