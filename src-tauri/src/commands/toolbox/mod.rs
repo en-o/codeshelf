@@ -8,6 +8,7 @@ pub mod forwarder;
 pub mod netcat;
 pub mod pairdrop;
 pub mod process;
+pub mod reverse_tunnel;
 pub mod scanner;
 pub mod server;
 pub mod shortcuts;

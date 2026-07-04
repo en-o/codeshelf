@@ -4,7 +4,7 @@ import path from "node:path";
 import { promptsFile } from "./paths.js";
 import type { ResumeAgentPromptConfig } from "../types.js";
 
-export const PROMPT_VERSION = "resume-deep-agent-v9";
+export const PROMPT_VERSION = "resume-deep-agent-v10";
 
 const DEFAULT_BACKGROUND_PROMPT = [
   "你是一位资深的项目背景知识分析助手，擅长通过代码结构、配置文件、Git提交历史等信息，深度理解项目架构与业务价值，并生成适合用于简历展示和团队知识传承的专业技术文档。",
@@ -71,8 +71,8 @@ const DEFAULT_BACKGROUND_PROMPT = [
   "| **框架** | [核心框架及版本] |",
   "| **目标运行环境** | [如：Java 8 / Node.js 16 / Python 3.9] |",
   "| **包结构 / 命名空间** | [如：com.company.project / @org/package] |",
-  "| **贡献者** | [人数]人团队（[主要贡献者名称]），累计[N]+次提交 |",
-  "| **开发周期** | [起止时间]，[开发状态：快速迭代中 / 已投产 / 维护期] |",
+  "| **贡献者** | 如实填写：个人项目填「个人项目」，团队项目可写主要贡献者。无可靠 Git 依据时不要编造团队人数或提交次数 |",
+  "| **开发周期** | [起止时间]（无可靠 Git 依据可省略），[开发状态：快速迭代中 / 已投产 / 维护期] |",
   "",
   "## 2. 技术栈",
   "",
@@ -136,7 +136,7 @@ const DEFAULT_BACKGROUND_PROMPT = [
   "",
   "## 6. 总结",
   "",
-  "[总结项目特点，包含：业务场景 + 技术选型 + 团队规模 + 工程质量 + 核心价值]",
+  "[总结项目特点，包含：业务场景 + 技术选型 + 工程质量 + 核心价值]",
   "",
   "质量要求",
   "",
@@ -174,6 +174,7 @@ export function defaultPromptConfig(): ResumeAgentPromptConfig {
       "【输出格式】",
       "只输出一个 JSON 对象。不要包裹 Markdown 代码块，不要任何解释文字。结构如下：",
       "{",
+      "  \"summary\": \"个人简介/求职意向：3-4 句，面向目标岗位概括技术方向、擅长领域与代表性项目亮点，只写有证据的内容，不编造工作年限与量化成果，无足够信息可留空 \\\"\\\"\",",
       "  \"skills\": [\"技能标签，按重要性排序，12-20 个\"],",
       "  \"experiences\": [",
       "    {",
@@ -199,6 +200,7 @@ export function defaultPromptConfig(): ResumeAgentPromptConfig {
       "- 每个输入项目必须且只生成一条 experiences。",
       "",
       "【字段规则】",
+      "- summary（个人简介）：3-4 句，紧扣目标岗位（若提供 jobDirection / jdKeywords）概括技术方向、擅长领域与代表性项目亮点；只依据背景知识，不编造工作年限、职级与量化成果；信息不足时留空 \"\"。",
       "- skills：面向投递的技术标签集合，可跨项目汇总；不写“精通/熟练/了解”等等级；优先包含语言、框架、数据库、中间件、AI/第三方集成、架构关键词。",
       "- techStack：本项目实际用到的核心技术，是 skills 的聚焦子集。",
       "- situation：2-3 句项目描述，不虚构行业影响。",

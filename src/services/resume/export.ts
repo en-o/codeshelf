@@ -32,7 +32,8 @@ export function exportResumeV2ToMarkdown(resume: ResumeV2): string {
     appendPersonalInfo(lines, resume);
   }
 
-  const summary = resume.personalInfo?.summary?.trim();
+  // 与预览一致：个人信息里的 summary 优先，否则回退到生成的 resume.summary
+  const summary = (resume.personalInfo?.summary ?? resume.summary ?? "").trim();
   if (summary) {
     lines.push("## 个人简介");
     lines.push("");

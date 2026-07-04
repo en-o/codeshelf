@@ -103,6 +103,10 @@ impl StorageConfig {
         self.data_dir.join("ssh_tunnels.json")
     }
 
+    pub fn reverse_tunnels_file(&self) -> PathBuf {
+        self.data_dir.join("reverse_tunnels.json")
+    }
+
     pub fn server_configs_file(&self) -> PathBuf {
         self.data_dir.join("server_configs.json")
     }

@@ -12,6 +12,8 @@ import { createChatModel } from "./model.js";
 
 const starSchema = z.object({
   situation: z.string().default(""),
+  // task 为历史遗留字段：提示词按 SAR 设计（任务已融入 action），模型不产出 task，
+  // 这里保留仅为兼容既有数据结构，恒为空字符串。
   task: z.string().default(""),
   action: z.string().default(""),
   result: z.string().default(""),
