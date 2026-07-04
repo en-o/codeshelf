@@ -172,11 +172,32 @@ sudo firewall-cmd --add-port=9000/tcp --permanent && sudo firewall-cmd --reload`
           </Section>
 
           <Section title="⑥ 如何关闭">
-            <ul className="list-disc space-y-1 pl-5">
-              <li><b>临时关（最常用）</b>：工具里点「停止」，VPS 上那个端口立刻不再监听。</li>
-              <li><b>收回服务端能力</b>：把 <code className="font-mono">GatewayPorts</code> 改回 <code className="font-mono">no</code> 后 <code className="font-mono">sudo systemctl restart sshd</code>。</li>
-              <li><b>云端</b>：删掉安全组里为该端口开的入方向规则。</li>
-            </ul>
+            <p><b>1）临时关（最常用）</b>：工具里点「停止」，VPS 上那个端口立刻不再监听。日常调试完这样就够了，跟改不改服务端配置无关。</p>
+            <p><b>2）彻底收回服务端能力</b>（把 GatewayPorts 改回默认关闭）：</p>
+            <CodeBlock
+              code={`# 先看当前到底是什么值（不管配置文件里有没有那行）
+sudo sshd -T | grep gatewayports
+#  no             -> 已经是关闭状态，无需操作
+#  clientspecified / yes -> 是开着的，按下面关
+
+# 找到之前加的那行（可能在主文件，也可能在 drop-in 目录）
+sudo grep -ri gatewayports /etc/ssh/sshd_config /etc/ssh/sshd_config.d/
+
+# 编辑对应文件，把 GatewayPorts 那行删掉，或改成：
+sudo vim /etc/ssh/sshd_config      # 若在 drop-in，则编辑 /etc/ssh/sshd_config.d/xxx.conf
+GatewayPorts no
+
+# 重启 sshd 使其生效（不会断开你当前的 SSH 连接）
+sudo systemctl restart sshd        # Ubuntu/Debian 可能叫 ssh: sudo systemctl restart ssh
+
+# 再次确认已关闭
+sudo sshd -T | grep gatewayports   # 应输出 gatewayports no`}
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              说明：删掉那行和写 <code className="font-mono">no</code> 效果一样（默认就是 <code className="font-mono">no</code>）；
+              配置文件里本来没有 <code className="font-mono">GatewayPorts</code> 也属正常，即处于关闭状态。
+            </p>
+            <p><b>3）云端</b>：删掉安全组里为该端口开的入方向规则（阿里云/腾讯云控制台，入方向规则里删除）。</p>
           </Section>
 
           <Section title="⑦ 连不上？按这个查">
