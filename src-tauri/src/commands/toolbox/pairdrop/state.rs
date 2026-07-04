@@ -5,7 +5,7 @@
 
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex};
@@ -188,7 +188,27 @@ pub fn generate_peer_id() -> String {
     format!("{:x}{:04x}", ns, suffix)
 }
 
-/// 生成一个友好的设备名（从 UA / OS / hostname 推断）
+/// 让显示名在同一频道内唯一：若 `desired` 已被占用则追加 ` (2)`、` (3)` …
+///
+/// `taken` 是当前频道内其它 peer 已使用的显示名集合（去重时应排除自己）。
+pub fn dedup_name(desired: &str, taken: &HashSet<String>) -> String {
+    if !taken.contains(desired) {
+        return desired.to_string();
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{} ({})", desired, n);
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// 生成一个友好的设备名（从 UA / OS 推断）。
+///
+/// 只返回干净的基名（如 `Mac` / `iPhone`），不带区分后缀——同名去重交给
+/// [`dedup_name`] 在注册时按频道现状追加 ` (2)`，避免同型号设备名字一模一样。
 pub fn guess_display_name(user_agent: &str) -> (String, String) {
     let ua = user_agent.to_lowercase();
     // 设备类型
@@ -225,12 +245,7 @@ pub fn guess_display_name(user_agent: &str) -> (String, String) {
         "Device"
     };
 
-    // 加 4 位短 hash 区分多个同类设备
-    let hash = ((user_agent.len() as u32).wrapping_mul(2654435761)) % 0xFFFF;
-    (
-        format!("{} #{:04x}", name, hash),
-        device_type.to_string(),
-    )
+    (name.to_string(), device_type.to_string())
 }
 
 /// 列出本机所有非回环 IPv4 地址

@@ -7,6 +7,7 @@
 // - POST /api/upload     上传文件（multipart），返回 token
 // - GET  /api/file/:tok  下载文件（一次性消耗）
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -369,7 +370,34 @@ async fn handle_socket(
     let peer_id = generate_peer_id();
     let (default_name, default_type) = guess_display_name(&user_agent);
     let device_type = role.unwrap_or(default_type);
-    let display_name = suggested_name.unwrap_or(default_name);
+    let desired_name = suggested_name
+        .map(|s| s.trim().chars().take(32).collect::<String>())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default_name);
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
+
+    // 注册 peer：在锁内按当前频道已有名字去重，保证同频道默认名唯一
+    let display_name = {
+        let mut peers = handle.state.peers.lock().await;
+        let taken: HashSet<String> =
+            peers.values().map(|e| e.info.display_name.clone()).collect();
+        let name = dedup_name(&desired_name, &taken);
+        peers.insert(
+            peer_id.clone(),
+            PeerEntry {
+                info: PeerInfo {
+                    peer_id: peer_id.clone(),
+                    display_name: name.clone(),
+                    device_type: device_type.clone(),
+                    user_agent: user_agent.clone(),
+                    is_self: false,
+                },
+                sender: tx.clone(),
+            },
+        );
+        name
+    };
 
     log::info!(
         "跨设备传输：新连接 peer={} addr={} type={} name={}",
@@ -378,27 +406,6 @@ async fn handle_socket(
         device_type,
         display_name
     );
-
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
-    let peer_info = PeerInfo {
-        peer_id: peer_id.clone(),
-        display_name: display_name.clone(),
-        device_type: device_type.clone(),
-        user_agent: user_agent.clone(),
-        is_self: false,
-    };
-
-    // 注册 peer
-    {
-        let mut peers = handle.state.peers.lock().await;
-        peers.insert(
-            peer_id.clone(),
-            PeerEntry {
-                info: peer_info.clone(),
-                sender: tx.clone(),
-            },
-        );
-    }
 
     // 发送 welcome
     let _ = tx.send(ServerMessage::Welcome {
@@ -463,13 +470,26 @@ async fn handle_socket(
 async fn handle_client_message(state: &AppState, sender_id: &str, msg: ClientMessage) {
     match msg {
         ClientMessage::SetName { name } => {
-            let trimmed = name.trim().to_string();
+            let trimmed: String = name.trim().chars().take(32).collect();
             if trimmed.is_empty() {
                 return;
             }
             let mut peers = state.peers.lock().await;
+            // 去重时排除自己，避免用户改的名与他人撞名
+            let taken: HashSet<String> = peers
+                .iter()
+                .filter(|(id, _)| id.as_str() != sender_id)
+                .map(|(_, e)| e.info.display_name.clone())
+                .collect();
+            let final_name = dedup_name(&trimmed, &taken);
             if let Some(entry) = peers.get_mut(sender_id) {
-                entry.info.display_name = trimmed.clone();
+                entry.info.display_name = final_name.clone();
+                // 回发 welcome 让发送方同步到最终名字（可能被去重为 "xxx (2)"），
+                // 避免自己看到原名、别人看到去重名的不一致
+                let _ = entry.sender.send(ServerMessage::Welcome {
+                    peer_id: sender_id.to_string(),
+                    display_name: final_name,
+                });
             }
             drop(peers);
             broadcast_peers(state).await;
