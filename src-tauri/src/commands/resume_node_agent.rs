@@ -498,26 +498,50 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
         });
     }
 
-    let resource_dir = app
-        .and_then(|handle| handle.path().resource_dir().ok())
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.join("resources")))
-        })
-        .ok_or_else(|| AppError::from("未找到内置 Node resume agent 资源目录".to_string()))?;
+    // 装机后的资源目录：正常情况下 resource_dir() 就在 exe 旁边，拼 sidecars/… 即可。
+    // 但 Windows 自定义安装目录、或 NSIS 把资源套进 productName 子目录（观察到
+    // exe 在 c:/test/、资源却在 c:/test/CodeShelf/sidecars/…，两者不同层）时，单一路径
+    // 拼不出来。这里收集多个候选根 + productName 子目录，逐个 .exists() 命中即用；
+    // 对 macOS/Linux 无影响（第一个候选 resource_dir() 仍会正常命中）。
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = app.and_then(|handle| handle.path().resource_dir().ok()) {
+        roots.push(dir);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.to_path_buf());
+            roots.push(parent.join("resources"));
+            // exe 名去掉后缀作为可能的资源子目录名（通用兜底）
+            if let Some(stem) = exe.file_stem() {
+                roots.push(parent.join(stem));
+            }
+        }
+    }
+    if roots.is_empty() {
+        return Err(AppError::from(
+            "未找到内置 Node resume agent 资源目录".to_string(),
+        ));
+    }
 
     #[cfg(target_os = "windows")]
-    let bundled_node = resource_dir.join("sidecars/node/node.exe");
+    let node_rel = "sidecars/node/node.exe";
     #[cfg(not(target_os = "windows"))]
-    let bundled_node = resource_dir.join("sidecars/node/node");
+    let node_rel = "sidecars/node/node";
+    let entry_rel = "sidecars/resume-agent/main.cjs";
 
-    let entry_script = resource_dir.join("sidecars/resume-agent/main.cjs");
-    if bundled_node.exists() && entry_script.exists() {
-        return Ok(NodeAgentRuntime {
-            node_executable: bundled_node,
-            entry_script,
-        });
+    // productName 目录名：Windows NSIS 可能把资源多套进这一层
+    let product = "CodeShelf";
+    for root in &roots {
+        for base in [root.clone(), root.join(product)] {
+            let node = base.join(node_rel);
+            let entry = base.join(entry_rel);
+            if node.exists() && entry.exists() {
+                return Ok(NodeAgentRuntime {
+                    node_executable: node,
+                    entry_script: entry,
+                });
+            }
+        }
     }
 
     Err(AppError::from(
