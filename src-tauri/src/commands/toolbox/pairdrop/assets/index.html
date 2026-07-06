@@ -300,7 +300,12 @@ function avatarLabelFor(name){
 
 function connect(){
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${proto}//${location.host}/ws`;
+  let deviceId = localStorage.getItem('pairdrop:device-id');
+  if (!deviceId) {
+    deviceId = (crypto.randomUUID ? crypto.randomUUID() : `browser-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`);
+    localStorage.setItem('pairdrop:device-id', deviceId);
+  }
+  const url = `${proto}//${location.host}/ws?clientId=${encodeURIComponent(deviceId)}`;
   setConnStatus('connecting');
   state.ws = new WebSocket(url);
   state.ws.addEventListener('open', ()=>{

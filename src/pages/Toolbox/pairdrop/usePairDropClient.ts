@@ -1,7 +1,7 @@
 // PairDrop 客户端 hook
 //
 // 桌面端的 React UI 也是一个 WebSocket 客户端，复用同样的协议跟浏览器对等。
-// 文件上传走 HTTP multipart POST，下载走 GET。所有数据只放内存。
+// 文件上传走 HTTP multipart POST，下载走 GET。聊天元数据保存在本机 localStorage。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -11,6 +11,10 @@ export interface Peer {
   deviceType: string;
   userAgent: string;
   isSelf: boolean;
+}
+
+export interface HistoricalPeer extends Peer {
+  lastSeenAt: number;
 }
 
 export type ConversationMessage =
@@ -43,21 +47,117 @@ interface UsePairDropClientArgs {
   host?: string;
   port: number | null;
   enabled: boolean;
+  /** 历史记录分组键。本机服务使用固定键，避免服务端口变化时丢失历史。 */
+  historyKey?: string;
 }
 
-export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePairDropClientArgs) {
+interface EndpointHistory {
+  peers: Record<string, HistoricalPeer>;
+  conversations: Record<string, ConversationMessage[]>;
+  selectedPeerId?: string | null;
+}
+
+interface PairDropHistory {
+  version: 1;
+  endpoints: Record<string, EndpointHistory>;
+}
+
+const HISTORY_STORAGE_KEY = "pairdrop:history:v1";
+const DEVICE_ID_STORAGE_KEY = "pairdrop:device-id";
+const MAX_MESSAGES_PER_PEER = 300;
+
+function emptyHistory(): PairDropHistory {
+  return { version: 1, endpoints: {} };
+}
+
+function loadHistory(): PairDropHistory {
+  try {
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return emptyHistory();
+    const parsed = JSON.parse(raw) as PairDropHistory;
+    if (parsed?.version !== 1 || !parsed.endpoints) return emptyHistory();
+    return parsed;
+  } catch (error) {
+    console.warn("读取跨设备传输历史失败", error);
+    return emptyHistory();
+  }
+}
+
+function getDeviceId(): string {
+  const saved = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+  if (saved) return saved;
+  const id =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `desktop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  localStorage.setItem(DEVICE_ID_STORAGE_KEY, id);
+  return id;
+}
+
+function getEndpoint(history: PairDropHistory, key: string): EndpointHistory {
+  return history.endpoints[key] || { peers: {}, conversations: {} };
+}
+
+export function usePairDropClient({
+  host = "127.0.0.1",
+  port,
+  enabled,
+  historyKey,
+}: UsePairDropClientArgs) {
   const [status, setStatus] = useState<ConnStatus>("offline");
   const [selfId, setSelfId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState<string>("");
   const [peers, setPeers] = useState<Peer[]>([]);
-  const [conversations, setConversations] = useState<
-    Map<string, ConversationMessage[]>
-  >(() => new Map());
+  const [history, setHistory] = useState<PairDropHistory>(loadHistory);
   const [unread, setUnread] = useState<Map<string, number>>(() => new Map());
   const [selected, setSelected] = useState<string | null>(null);
   const selectedRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<number | null>(null);
+  const historyRef = useRef(history);
+  const persistTimerRef = useRef<number | null>(null);
+  const endpointKey = historyKey || `${host}:${port || 0}`;
+  const endpointKeyRef = useRef(endpointKey);
+
+  useEffect(() => {
+    endpointKeyRef.current = endpointKey;
+    const endpoint = getEndpoint(history, endpointKey);
+    setSelected(endpoint.selectedPeerId || null);
+    selectedRef.current = endpoint.selectedPeerId || null;
+    setUnread(new Map());
+  }, [endpointKey]);
+
+  useEffect(() => {
+    historyRef.current = history;
+    if (persistTimerRef.current) {
+      window.clearTimeout(persistTimerRef.current);
+    }
+    persistTimerRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
+      } catch (error) {
+        console.warn("保存跨设备传输历史失败", error);
+      }
+      persistTimerRef.current = null;
+    }, 120);
+  }, [history]);
+
+  useEffect(
+    () => () => {
+      if (persistTimerRef.current) {
+        window.clearTimeout(persistTimerRef.current);
+      }
+      try {
+        localStorage.setItem(
+          HISTORY_STORAGE_KEY,
+          JSON.stringify(historyRef.current)
+        );
+      } catch (error) {
+        console.warn("保存跨设备传输历史失败", error);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     selectedRef.current = selected;
@@ -79,13 +179,34 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
     return true;
   }, []);
 
+  const updateEndpoint = useCallback(
+    (updater: (current: EndpointHistory) => EndpointHistory) => {
+      const key = endpointKeyRef.current;
+      setHistory((prev) => ({
+        ...prev,
+        endpoints: {
+          ...prev.endpoints,
+          [key]: updater(getEndpoint(prev, key)),
+        },
+      }));
+    },
+    []
+  );
+
   const appendMessage = useCallback(
     (peerId: string, message: ConversationMessage) => {
-      setConversations((prev) => {
-        const next = new Map(prev);
-        const arr = next.get(peerId) || [];
-        next.set(peerId, [...arr, message]);
-        return next;
+      updateEndpoint((current) => {
+        const messages = [
+          ...(current.conversations[peerId] || []),
+          message,
+        ].slice(-MAX_MESSAGES_PER_PEER);
+        return {
+          ...current,
+          conversations: {
+            ...current.conversations,
+            [peerId]: messages,
+          },
+        };
       });
       if (selectedRef.current !== peerId) {
         setUnread((prev) => {
@@ -95,7 +216,7 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
         });
       }
     },
-    []
+    [updateEndpoint]
   );
 
   // 建立连接 + 自动重连
@@ -108,6 +229,7 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
         ws.close();
         wsRef.current = null;
       }
+      setPeers([]);
       setStatus("offline");
       return;
     }
@@ -117,7 +239,11 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
     const connect = () => {
       if (cancelled) return;
       setStatus("connecting");
-      const url = `${wsBase}/ws?role=desktop`;
+      const query = new URLSearchParams({
+        role: "desktop",
+        clientId: getDeviceId(),
+      });
+      const url = `${wsBase}/ws?${query.toString()}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.addEventListener("open", () => {
@@ -131,6 +257,7 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
       ws.addEventListener("close", () => {
         if (cancelled) return;
         setStatus("offline");
+        setPeers([]);
         wsRef.current = null;
         if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
         reconnectTimer.current = window.setTimeout(connect, 1500);
@@ -153,6 +280,15 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
             break;
           case "peers":
             setPeers(msg.peers || []);
+            updateEndpoint((current) => {
+              const nextPeers = { ...current.peers };
+              const now = Date.now();
+              for (const peer of (msg.peers || []) as Peer[]) {
+                if (peer.isSelf) continue;
+                nextPeers[peer.peerId] = { ...peer, lastSeenAt: now };
+              }
+              return { ...current, peers: nextPeers };
+            });
             break;
           case "text": {
             const m: ConversationMessage = {
@@ -200,11 +336,14 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
         ws.close();
         wsRef.current = null;
       }
+      setPeers([]);
     };
-  }, [wsBase, enabled, appendMessage]);
+  }, [wsBase, enabled, appendMessage, updateEndpoint]);
 
   const selectPeer = useCallback((peerId: string | null) => {
     setSelected(peerId);
+    selectedRef.current = peerId;
+    updateEndpoint((current) => ({ ...current, selectedPeerId: peerId }));
     if (peerId) {
       setUnread((prev) => {
         if (!prev.has(peerId)) return prev;
@@ -213,7 +352,7 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
         return next;
       });
     }
-  }, []);
+  }, [updateEndpoint]);
 
   const sendText = useCallback(
     (to: string, text: string) => {
@@ -258,17 +397,20 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
         xhr.upload.onprogress = (e) => {
           if (!e.lengthComputable) return;
           const pct = Math.round((e.loaded / e.total) * 100);
-          setConversations((prev) => {
-            const arr = prev.get(to);
-            if (!arr) return prev;
-            const updated = arr.map((m) =>
-              m.kind === "file" && m.id === localId
-                ? { ...m, uploadProgress: pct }
-                : m
-            );
-            const next = new Map(prev);
-            next.set(to, updated);
-            return next;
+          updateEndpoint((current) => {
+            const arr = current.conversations[to];
+            if (!arr) return current;
+            return {
+              ...current,
+              conversations: {
+                ...current.conversations,
+                [to]: arr.map((m) =>
+                  m.kind === "file" && m.id === localId
+                    ? { ...m, uploadProgress: pct }
+                    : m
+                ),
+              },
+            };
           });
         };
         const result = await new Promise<{ token: string }>((resolve, reject) => {
@@ -299,34 +441,40 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
           mime: file.type || null,
         });
 
-        setConversations((prev) => {
-          const arr = prev.get(to);
-          if (!arr) return prev;
-          const updated = arr.map((m) =>
-            m.kind === "file" && m.id === localId
-              ? { ...m, token: result.token, uploadProgress: 100 }
-              : m
-          );
-          const next = new Map(prev);
-          next.set(to, updated);
-          return next;
+        updateEndpoint((current) => {
+          const arr = current.conversations[to];
+          if (!arr) return current;
+          return {
+            ...current,
+            conversations: {
+              ...current.conversations,
+              [to]: arr.map((m) =>
+                m.kind === "file" && m.id === localId
+                  ? { ...m, token: result.token, uploadProgress: 100 }
+                  : m
+              ),
+            },
+          };
         });
       } catch (err) {
         console.error("send file failed", err);
-        setConversations((prev) => {
-          const arr = prev.get(to);
-          if (!arr) return prev;
-          const updated = arr.filter(
-            (m) => !(m.kind === "file" && m.id === localId)
-          );
-          const next = new Map(prev);
-          next.set(to, updated);
-          return next;
+        updateEndpoint((current) => {
+          const arr = current.conversations[to];
+          if (!arr) return current;
+          return {
+            ...current,
+            conversations: {
+              ...current.conversations,
+              [to]: arr.filter(
+                (m) => !(m.kind === "file" && m.id === localId)
+              ),
+            },
+          };
         });
         throw err;
       }
     },
-    [apiBase, appendMessage, selfId, send]
+    [apiBase, appendMessage, selfId, send, updateEndpoint]
   );
 
   const updateSelfName = useCallback(
@@ -341,10 +489,10 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
   );
 
   const markFileSaved = useCallback((messageId: string, savedPath: string) => {
-    setConversations((prev) => {
-      const next = new Map(prev);
+    updateEndpoint((current) => {
+      const next = { ...current.conversations };
       let touched = false;
-      for (const [peerId, arr] of prev.entries()) {
+      for (const [peerId, arr] of Object.entries(current.conversations)) {
         let changed = false;
         const updated = arr.map((m) => {
           if (m.kind === "file" && m.id === messageId) {
@@ -354,19 +502,31 @@ export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePair
           return m;
         });
         if (changed) {
-          next.set(peerId, updated);
+          next[peerId] = updated;
           touched = true;
         }
       }
-      return touched ? next : prev;
+      return touched ? { ...current, conversations: next } : current;
     });
-  }, []);
+  }, [updateEndpoint]);
+
+  const endpoint = getEndpoint(history, endpointKey);
+  const conversations = useMemo(
+    () => new Map(Object.entries(endpoint.conversations)),
+    [endpoint.conversations]
+  );
+  const knownPeers = useMemo(
+    () =>
+      Object.values(endpoint.peers).sort((a, b) => b.lastSeenAt - a.lastSeenAt),
+    [endpoint.peers]
+  );
 
   return {
     status,
     selfId,
     selfName,
     peers,
+    knownPeers,
     selected,
     selectPeer,
     conversations,

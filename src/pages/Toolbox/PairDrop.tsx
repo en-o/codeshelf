@@ -12,6 +12,8 @@ import {
   Save,
   Copy,
   FolderOpen,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { ToolPanelHeader } from "./index";
@@ -27,7 +29,11 @@ import {
 } from "@/services/toolbox";
 import { openInExplorer } from "@/services/db";
 import type { PairDropServiceStatus } from "@/types/toolbox";
-import { usePairDropClient, type Peer } from "./pairdrop/usePairDropClient";
+import {
+  usePairDropClient,
+  type HistoricalPeer,
+  type Peer,
+} from "./pairdrop/usePairDropClient";
 import { UrlsModal } from "./pairdrop/UrlsModal";
 
 interface PairDropProps {
@@ -36,6 +42,7 @@ interface PairDropProps {
 
 /** 跨设备传输默认端口（与后端 DEFAULT_PORT 保持一致）；加入对方桌面端时未填端口用它兜底 */
 const DEFAULT_PAIRDROP_PORT = 8421;
+const REMOTE_TARGET_STORAGE_KEY = "pairdrop:remote-target";
 
 /** 解析"加入其他桌面端"输入：支持 "192.168.1.5" 或 "192.168.1.5:8421" */
 function parseJoinTarget(v: string): { host: string; port: number } | null {
@@ -46,6 +53,25 @@ function parseJoinTarget(v: string): { host: string; port: number } | null {
   const port = idx > 0 ? parseInt(s.slice(idx + 1)) : DEFAULT_PAIRDROP_PORT;
   if (!host || Number.isNaN(port) || port <= 0 || port > 65535) return null;
   return { host, port };
+}
+
+function loadRemoteTarget(): { host: string; port: number } | null {
+  try {
+    const raw = localStorage.getItem(REMOTE_TARGET_STORAGE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as { host?: string; port?: number };
+    if (
+      !value.host ||
+      !Number.isInteger(value.port) ||
+      value.port! <= 0 ||
+      value.port! > 65535
+    ) {
+      return null;
+    }
+    return { host: value.host, port: value.port! };
+  } catch {
+    return null;
+  }
 }
 
 export function PairDrop({ onBack }: PairDropProps) {
@@ -182,7 +208,7 @@ function ServiceOffline({
       <h3 className="text-base font-semibold mb-1">跨设备传输未启动</h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md leading-relaxed mb-6">
         启动后会在本机开启一个局域网服务，其他设备扫码或访问地址即可加入，
-        实现一对一文字 / 文件互发。所有数据只在本机内存中转，不落盘、不上云。
+        实现一对一文字 / 文件互发。聊天历史仅保存在本机，文件内容只在内存中转，不上云。
       </p>
       <Button onClick={onToggle} variant="primary" disabled={loading}>
         <Power size={14} className="mr-1.5" />
@@ -200,11 +226,22 @@ function ChatWorkspace({
   onShowUrls: () => void;
 }) {
   // 加入其他桌面端：null=连本机自身服务；否则连对方局域网地址（浏览器功能不受影响）
-  const [remoteTarget, setRemoteTarget] = useState<{ host: string; port: number } | null>(null);
+  const [remoteTarget, setRemoteTarget] = useState<{
+    host: string;
+    port: number;
+  } | null>(loadRemoteTarget);
+  const [connectionEnabled, setConnectionEnabled] = useState(true);
   const [joinInput, setJoinInput] = useState("");
   const activeHost = remoteTarget?.host ?? "127.0.0.1";
   const activePort = remoteTarget?.port ?? port;
-  const client = usePairDropClient({ host: activeHost, port: activePort, enabled: true });
+  const client = usePairDropClient({
+    host: activeHost,
+    port: activePort,
+    enabled: connectionEnabled,
+    historyKey: remoteTarget
+      ? `remote:${remoteTarget.host}:${remoteTarget.port}`
+      : "local",
+  });
   const [draft, setDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -216,11 +253,15 @@ function ChatWorkspace({
     }
     client.selectPeer(null);
     setRemoteTarget(target);
+    localStorage.setItem(REMOTE_TARGET_STORAGE_KEY, JSON.stringify(target));
+    setConnectionEnabled(true);
     setJoinInput("");
   };
   const handleLeaveRemote = () => {
     client.selectPeer(null);
     setRemoteTarget(null);
+    localStorage.removeItem(REMOTE_TARGET_STORAGE_KEY);
+    setConnectionEnabled(true);
   };
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [editingName, setEditingName] = useState(false);
@@ -229,8 +270,21 @@ function ChatWorkspace({
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
 
-  const peers = client.peers.filter((p) => !p.isSelf);
-  const selectedPeer = client.peers.find((p) => p.peerId === client.selected) || null;
+  const onlinePeers = client.peers.filter((p) => !p.isSelf);
+  const onlinePeerIds = new Set(onlinePeers.map((p) => p.peerId));
+  const peers: HistoricalPeer[] = [
+    ...onlinePeers.map((peer) => ({
+      ...peer,
+      lastSeenAt:
+        client.knownPeers.find((known) => known.peerId === peer.peerId)
+          ?.lastSeenAt ||
+        Date.now(),
+    })),
+    ...client.knownPeers.filter((peer) => !onlinePeerIds.has(peer.peerId)),
+  ];
+  const selectedPeer = peers.find((p) => p.peerId === client.selected) || null;
+  const selectedPeerOnline =
+    connectionEnabled && !!selectedPeer && onlinePeerIds.has(selectedPeer.peerId);
   const messages = client.selected ? client.conversations.get(client.selected) || [] : [];
 
   useEffect(() => {
@@ -242,7 +296,7 @@ function ChatWorkspace({
   }, [selectedPeer?.peerId]);
 
   const handleSendText = () => {
-    if (!client.selected || !draft.trim()) return;
+    if (!client.selected || !selectedPeerOnline || !draft.trim()) return;
     client.sendText(client.selected, draft);
     setDraft("");
   };
@@ -250,7 +304,7 @@ function ChatWorkspace({
   const handleSelectFile = () => fileInputRef.current?.click();
 
   const handleFilesChosen = async (files: FileList | null) => {
-    if (!files || !client.selected) return;
+    if (!files || !client.selected || !selectedPeerOnline) return;
     for (const file of Array.from(files)) {
       try {
         await client.sendFile(client.selected, file);
@@ -413,6 +467,13 @@ function ChatWorkspace({
                 </span>
               </div>
             </div>
+            <button
+              onClick={() => setConnectionEnabled((value) => !value)}
+              className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title={connectionEnabled ? "断开当前连接" : "重新连接"}
+            >
+              {connectionEnabled ? <WifiOff size={15} /> : <Wifi size={15} />}
+            </button>
           </div>
         </div>
 
@@ -432,6 +493,7 @@ function ChatWorkspace({
                 key={peer.peerId}
                 peer={peer}
                 active={peer.peerId === client.selected}
+                online={onlinePeerIds.has(peer.peerId)}
                 unread={client.unread.get(peer.peerId) || 0}
                 onClick={() => {
                   client.selectPeer(peer.peerId);
@@ -447,8 +509,17 @@ function ChatWorkspace({
             <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-[11px]">
               <span className="truncate text-blue-700 dark:text-blue-300 flex items-center gap-1 min-w-0">
                 <Monitor size={12} className="shrink-0" />
-                <span className="truncate">已加入 {remoteTarget.host}:{remoteTarget.port}</span>
+                <span className="truncate">
+                  {connectionEnabled ? "已加入" : "已断开"} {remoteTarget.host}:
+                  {remoteTarget.port}
+                </span>
               </span>
+              <button
+                onClick={() => setConnectionEnabled((value) => !value)}
+                className="shrink-0 text-blue-600 dark:text-blue-300 hover:underline"
+              >
+                {connectionEnabled ? "断开" : "重连"}
+              </button>
               <button
                 onClick={handleLeaveRemote}
                 className="shrink-0 text-blue-600 dark:text-blue-300 hover:underline"
@@ -511,7 +582,8 @@ function ChatWorkspace({
                 </div>
                 <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
                   <DeviceIcon type={selectedPeer.deviceType} />
-                  {deviceLabel(selectedPeer.deviceType)} · 局域网
+                  {deviceLabel(selectedPeer.deviceType)} ·{" "}
+                  {selectedPeerOnline ? "在线" : "离线历史"}
                 </div>
               </div>
             </header>
@@ -537,9 +609,16 @@ function ChatWorkspace({
             </div>
 
             <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-3 flex-shrink-0">
+              {!selectedPeerOnline && (
+                <div className="mb-2 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <WifiOff size={13} />
+                  设备当前离线，历史记录仍可查看，重新连接后可继续发送。
+                </div>
+              )}
               <div className="flex items-end gap-2">
                 <button
                   onClick={handleSelectFile}
+                  disabled={!selectedPeerOnline}
                   className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center text-gray-500 hover:text-blue-500 transition-colors flex-shrink-0"
                   title="发送文件"
                 >
@@ -555,7 +634,12 @@ function ChatWorkspace({
                 <textarea
                   className="flex-1 min-h-9 max-h-32 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:border-blue-500 dark:text-gray-100 resize-none"
                   rows={1}
-                  placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                  disabled={!selectedPeerOnline}
+                  placeholder={
+                    selectedPeerOnline
+                      ? "输入消息，Enter 发送，Shift+Enter 换行"
+                      : "设备离线，暂时无法发送"
+                  }
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
@@ -569,7 +653,7 @@ function ChatWorkspace({
                   onClick={handleSendText}
                   variant="primary"
                   size="sm"
-                  disabled={!draft.trim()}
+                  disabled={!selectedPeerOnline || !draft.trim()}
                 >
                   <Send size={14} className="mr-1" />
                   发送
@@ -600,11 +684,13 @@ function ChatWorkspace({
 function PeerItem({
   peer,
   active,
+  online,
   unread,
   onClick,
 }: {
-  peer: Peer;
+  peer: Peer & { lastSeenAt?: number };
   active: boolean;
+  online: boolean;
   unread: number;
   onClick: () => void;
 }) {
@@ -629,9 +715,15 @@ function PeerItem({
         </div>
         <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
           <DeviceIcon type={peer.deviceType} />
-          {deviceLabel(peer.deviceType)}
+          {deviceLabel(peer.deviceType)} · {online ? "在线" : "历史"}
         </div>
       </div>
+      <span
+        className={`w-2 h-2 rounded-full shrink-0 ${
+          online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
+        }`}
+        title={online ? "在线" : "离线"}
+      />
       {unread > 0 && (
         <span className="bg-red-500 text-white text-[10px] font-semibold rounded-full px-1.5 min-w-[18px] h-[18px] flex items-center justify-center">
           {unread}
@@ -656,9 +748,19 @@ function MessageBubble({
 }) {
   const time = useMemo(() => {
     const d = new Date(message.ts);
-    return `${String(d.getHours()).padStart(2, "0")}:${String(
+    const clock = `${String(d.getHours()).padStart(2, "0")}:${String(
       d.getMinutes()
     ).padStart(2, "0")}`;
+    const now = new Date();
+    const isToday =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    return isToday
+      ? clock
+      : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+          d.getDate()
+        ).padStart(2, "0")} ${clock}`;
   }, [message.ts]);
 
   if (message.kind === "text") {

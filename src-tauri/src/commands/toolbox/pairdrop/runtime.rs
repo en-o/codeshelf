@@ -48,6 +48,9 @@ struct ConnectQuery {
     /// 客户端可建议的初始名称
     #[serde(default)]
     name: Option<String>,
+    /// 客户端持久化的设备 ID，用于重连后恢复同一会话历史
+    #[serde(default, rename = "clientId")]
+    client_id: Option<String>,
 }
 
 /// 启动服务（绑定到 0.0.0.0:port，0 表示由系统分配）
@@ -356,7 +359,10 @@ async fn ws_handler(
         .to_string();
     let role = qs.role;
     let suggested_name = qs.name;
-    ws.on_upgrade(move |socket| handle_socket(socket, addr, ua, role, suggested_name, handle))
+    let client_id = qs.client_id;
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, addr, ua, role, suggested_name, client_id, handle)
+    })
 }
 
 async fn handle_socket(
@@ -365,9 +371,24 @@ async fn handle_socket(
     user_agent: String,
     role: Option<String>,
     suggested_name: Option<String>,
+    client_id: Option<String>,
     handle: ServerHandle,
 ) {
-    let peer_id = generate_peer_id();
+    let requested_id = client_id
+        .map(|id| {
+            id.chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                .take(80)
+                .collect::<String>()
+        })
+        .filter(|id| !id.is_empty());
+    let peer_id = {
+        let peers = handle.state.peers.lock().await;
+        match requested_id {
+            Some(id) if !peers.contains_key(&id) => id,
+            _ => generate_peer_id(),
+        }
+    };
     let (default_base, default_type) = guess_display_name(&user_agent);
     let device_type = role.unwrap_or(default_type);
     // 默认名 = 设备类型 + 基于 IP 的 4 位短码（如 "Mac #3f2a"）：同设备稳定、不同设备基本不撞，
