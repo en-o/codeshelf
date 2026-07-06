@@ -288,17 +288,15 @@ pub(super) async fn run_reconnect_supervisor(
     log::info!("内网穿透 {} 监督任务退出", tunnel_id);
 }
 
-/// 探测 SSH 会话是否存活（与 ssh_tunnel 同策略）
+/// 探测 SSH 会话是否存活。
+///
+/// 仅依赖 keepalive（见 auth.rs：keepalive_interval=10s / keepalive_max=3）支撑的
+/// `is_closed()` 来判断真实断线。**不再主动 `channel_open_session` 探测**——旧实现每 5s
+/// 新开一个探测通道并设 3s 超时，在瞬时高延迟或服务器 `MaxSessions` 限制下会误判**存活**
+/// 会话为断开，进而拆掉正常隧道触发重连，并在重连瞬时 TCP 超时时冒出 `os error 10060`，
+/// 表现为「一直重连中 + 报错但其实穿透正常」。
 async fn is_session_alive(h: &client::Handle<ReverseClient>) -> bool {
-    if h.is_closed() {
-        return false;
-    }
-    match timeout(Duration::from_secs(3), h.channel_open_session()).await {
-        Ok(Ok(_ch)) => true,
-        Ok(Err(russh::Error::ChannelOpenFailure(_))) => true,
-        Ok(Err(_)) => false,
-        Err(_) => false,
-    }
+    !h.is_closed()
 }
 
 async fn set_status(tunnel_id: &str, status: &str) {
