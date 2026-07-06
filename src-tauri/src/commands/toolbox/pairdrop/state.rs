@@ -188,6 +188,20 @@ pub fn generate_peer_id() -> String {
     format!("{:x}{:04x}", ns, suffix)
 }
 
+/// 基于 IP 生成 4 位十六进制短码，用作默认设备名后缀（如 `Mac #3f2a`）。
+/// 同一台设备（同 LAN IP）每次连接得到相同后缀、身份稳定；不同设备基本不撞。
+/// 比 ` (2)` 这种序号更能区分"谁是谁"。
+pub fn short_ip_hash(ip: &std::net::IpAddr) -> String {
+    // FNV-1a，取低 16 位
+    let s = ip.to_string();
+    let mut h: u32 = 2166136261;
+    for b in s.bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(16777619);
+    }
+    format!("{:04x}", (h ^ (h >> 16)) & 0xffff)
+}
+
 /// 让显示名在同一频道内唯一：若 `desired` 已被占用则追加 ` (2)`、` (3)` …
 ///
 /// `taken` 是当前频道内其它 peer 已使用的显示名集合（去重时应排除自己）。

@@ -368,12 +368,14 @@ async fn handle_socket(
     handle: ServerHandle,
 ) {
     let peer_id = generate_peer_id();
-    let (default_name, default_type) = guess_display_name(&user_agent);
+    let (default_base, default_type) = guess_display_name(&user_agent);
     let device_type = role.unwrap_or(default_type);
+    // 默认名 = 设备类型 + 基于 IP 的 4 位短码（如 "Mac #3f2a"）：同设备稳定、不同设备基本不撞，
+    // 比 " (2)" 序号更能区分谁是谁。用户仍可随时改名（set-name），去重作为最后兜底。
     let desired_name = suggested_name
         .map(|s| s.trim().chars().take(32).collect::<String>())
         .filter(|s| !s.is_empty())
-        .unwrap_or(default_name);
+        .unwrap_or_else(|| format!("{} #{}", default_base, short_ip_hash(&addr.ip())));
 
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
 

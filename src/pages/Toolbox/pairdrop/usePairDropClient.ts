@@ -39,11 +39,13 @@ export type ConversationMessage =
 export type ConnStatus = "offline" | "connecting" | "online";
 
 interface UsePairDropClientArgs {
+  /** 目标服务主机。默认连本机自身的服务；填局域网 IP 可"加入"另一台桌面端。 */
+  host?: string;
   port: number | null;
   enabled: boolean;
 }
 
-export function usePairDropClient({ port, enabled }: UsePairDropClientArgs) {
+export function usePairDropClient({ host = "127.0.0.1", port, enabled }: UsePairDropClientArgs) {
   const [status, setStatus] = useState<ConnStatus>("offline");
   const [selfId, setSelfId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState<string>("");
@@ -63,13 +65,13 @@ export function usePairDropClient({ port, enabled }: UsePairDropClientArgs) {
 
   const wsBase = useMemo(() => {
     if (!port) return null;
-    return `ws://127.0.0.1:${port}`;
-  }, [port]);
+    return `ws://${host}:${port}`;
+  }, [host, port]);
 
   const apiBase = useMemo(() => {
     if (!port) return null;
-    return `http://127.0.0.1:${port}`;
-  }, [port]);
+    return `http://${host}:${port}`;
+  }, [host, port]);
   const send = useCallback((msg: any) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -373,5 +375,6 @@ export function usePairDropClient({ port, enabled }: UsePairDropClientArgs) {
     sendFile,
     updateSelfName,
     markFileSaved,
+    apiBase,
   };
 }

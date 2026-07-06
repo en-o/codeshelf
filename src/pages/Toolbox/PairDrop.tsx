@@ -14,6 +14,7 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import { ToolPanelHeader } from "./index";
 import { Button, showToast } from "@/components/ui";
 import { LoadingSpinner } from "@/components/common";
@@ -31,6 +32,20 @@ import { UrlsModal } from "./pairdrop/UrlsModal";
 
 interface PairDropProps {
   onBack: () => void;
+}
+
+/** 跨设备传输默认端口（与后端 DEFAULT_PORT 保持一致）；加入对方桌面端时未填端口用它兜底 */
+const DEFAULT_PAIRDROP_PORT = 8421;
+
+/** 解析"加入其他桌面端"输入：支持 "192.168.1.5" 或 "192.168.1.5:8421" */
+function parseJoinTarget(v: string): { host: string; port: number } | null {
+  const s = v.trim().replace(/^\w+:\/\//, "").replace(/\/+$/, "");
+  if (!s) return null;
+  const idx = s.lastIndexOf(":");
+  const host = idx > 0 ? s.slice(0, idx) : s;
+  const port = idx > 0 ? parseInt(s.slice(idx + 1)) : DEFAULT_PAIRDROP_PORT;
+  if (!host || Number.isNaN(port) || port <= 0 || port > 65535) return null;
+  return { host, port };
 }
 
 export function PairDrop({ onBack }: PairDropProps) {
@@ -184,9 +199,29 @@ function ChatWorkspace({
   port: number;
   onShowUrls: () => void;
 }) {
-  const client = usePairDropClient({ port, enabled: true });
+  // 加入其他桌面端：null=连本机自身服务；否则连对方局域网地址（浏览器功能不受影响）
+  const [remoteTarget, setRemoteTarget] = useState<{ host: string; port: number } | null>(null);
+  const [joinInput, setJoinInput] = useState("");
+  const activeHost = remoteTarget?.host ?? "127.0.0.1";
+  const activePort = remoteTarget?.port ?? port;
+  const client = usePairDropClient({ host: activeHost, port: activePort, enabled: true });
   const [draft, setDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleJoin = () => {
+    const target = parseJoinTarget(joinInput);
+    if (!target) {
+      showToast("error", "地址格式不对，示例：192.168.1.5:8421");
+      return;
+    }
+    client.selectPeer(null);
+    setRemoteTarget(target);
+    setJoinInput("");
+  };
+  const handleLeaveRemote = () => {
+    client.selectPeer(null);
+    setRemoteTarget(null);
+  };
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -260,7 +295,18 @@ function ChatWorkspace({
         defaultPath: suggestedName,
       });
       if (!path) return;
-      const bytes = await pairdropSaveFile(token, path);
+      let bytes: number;
+      if (remoteTarget && client.apiBase) {
+        // 加入了对方桌面端：文件缓存在对方服务上，通过 HTTP 从对方拉取再写盘
+        const res = await fetch(`${client.apiBase}/api/file/${encodeURIComponent(token)}`);
+        if (!res.ok) throw new Error("下载失败: HTTP " + res.status);
+        const data = new Uint8Array(await res.arrayBuffer());
+        await writeFile(path, data);
+        bytes = data.byteLength;
+      } else {
+        // 连本机自身服务：直接从本机缓存写盘
+        bytes = await pairdropSaveFile(token, path);
+      }
       showToast("success", `已保存 ${formatBytes(bytes)} → ${path}`);
       client.markFileSaved(messageId, path);
     } catch (e) {
@@ -399,7 +445,39 @@ function ChatWorkspace({
           )}
         </div>
 
-        <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
+          {remoteTarget ? (
+            <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-[11px]">
+              <span className="truncate text-blue-700 dark:text-blue-300 flex items-center gap-1 min-w-0">
+                <Monitor size={12} className="shrink-0" />
+                <span className="truncate">已加入 {remoteTarget.host}:{remoteTarget.port}</span>
+              </span>
+              <button
+                onClick={handleLeaveRemote}
+                className="shrink-0 text-blue-600 dark:text-blue-300 hover:underline"
+              >
+                返回本机
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-1.5" title="当两台电脑都装了本软件时，在一台填入另一台的局域网地址即可直接互连，无需浏览器">
+              <input
+                value={joinInput}
+                onChange={(e) => setJoinInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleJoin();
+                }}
+                placeholder="加入桌面端：192.168.1.5:8421"
+                className="flex-1 min-w-0 px-2 py-1.5 text-[11px] bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md outline-none focus:border-blue-500 dark:text-gray-100"
+              />
+              <button
+                onClick={handleJoin}
+                className="shrink-0 px-2.5 py-1.5 text-[11px] bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors"
+              >
+                加入
+              </button>
+            </div>
+          )}
           <button
             onClick={onShowUrls}
             className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-center gap-1.5 text-gray-700 dark:text-gray-300"
@@ -593,7 +671,7 @@ function MessageBubble({
           isSelf ? "ml-auto" : ""
         }`}
       >
-        <div>
+        <div className="min-w-0 max-w-full">
           <div
             className={`px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
               isSelf
@@ -627,7 +705,7 @@ function MessageBubble({
         isSelf ? "ml-auto" : ""
       }`}
     >
-      <div>
+      <div className="min-w-0 max-w-full">
         <div
           className={`px-3 py-2 rounded-2xl text-sm ${
             isSelf
