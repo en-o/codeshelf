@@ -227,6 +227,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         toolbox::pairdrop::pairdrop_status,
         toolbox::pairdrop::pairdrop_peers,
         toolbox::pairdrop::pairdrop_save_file,
+        toolbox::pairdrop::pairdrop_download_save,
         // Chat
         chat::get_chat_history_dir,
         chat::migrate_chat_history_dir,

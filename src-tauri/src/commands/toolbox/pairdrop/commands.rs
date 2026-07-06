@@ -157,6 +157,43 @@ pub async fn pairdrop_save_file(token: String, save_path: String) -> AppResult<u
     Ok(bytes_written)
 }
 
+/// 从"加入的对方桌面端"按 URL 下载文件并写到本地。
+/// 本机自身收到的文件走 [`pairdrop_save_file`]（读本机内存缓存）；加入对方桌面端时，
+/// 文件缓存在对方服务上，只能通过 HTTP 拉取——走这个命令，避免前端 fs 插件的路径 scope 限制。
+#[tauri::command]
+#[specta::specta]
+pub async fn pairdrop_download_save(url: String, save_path: String) -> AppResult<u64> {
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("下载失败: {}", e)))?;
+    if !resp.status().is_success() {
+        return Err(crate::error::AppError::from(format!(
+            "下载失败: HTTP {}",
+            resp.status().as_u16()
+        )));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("读取响应失败: {}", e)))?;
+
+    let path = std::path::Path::new(&save_path);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| crate::error::AppError::from(format!("创建目录失败: {}", e)))?;
+        }
+    }
+    let n = bytes.len() as u64;
+    tokio::fs::write(&save_path, &bytes)
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("写入文件失败: {}", e)))?;
+    Ok(n)
+}
+
 fn build_status_urls(port: u16) -> Vec<NetworkUrl> {
     list_local_ipv4()
         .into_iter()

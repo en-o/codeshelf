@@ -864,6 +864,11 @@ export async function pairdropSaveFile(token: string, savePath: string): Promise
   return invoke("pairdrop_save_file", { token, savePath });
 }
 
+/** 从"加入的对方桌面端"按 URL 下载文件写盘（无 fs scope 限制，与本机保存一致） */
+export async function pairdropDownloadSave(url: string, savePath: string): Promise<number> {
+  return invoke("pairdrop_download_save", { url, savePath });
+}
+
 // ============== 工具函数 ==============
 
 export function formatBytes(bytes: number): string {

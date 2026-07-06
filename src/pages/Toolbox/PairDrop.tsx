@@ -14,7 +14,6 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
 import { ToolPanelHeader } from "./index";
 import { Button, showToast } from "@/components/ui";
 import { LoadingSpinner } from "@/components/common";
@@ -23,6 +22,7 @@ import {
   pairdropStop,
   pairdropStatus,
   pairdropSaveFile,
+  pairdropDownloadSave,
   formatBytes,
 } from "@/services/toolbox";
 import { openInExplorer } from "@/services/db";
@@ -295,18 +295,15 @@ function ChatWorkspace({
         defaultPath: suggestedName,
       });
       if (!path) return;
-      let bytes: number;
-      if (remoteTarget && client.apiBase) {
-        // 加入了对方桌面端：文件缓存在对方服务上，通过 HTTP 从对方拉取再写盘
-        const res = await fetch(`${client.apiBase}/api/file/${encodeURIComponent(token)}`);
-        if (!res.ok) throw new Error("下载失败: HTTP " + res.status);
-        const data = new Uint8Array(await res.arrayBuffer());
-        await writeFile(path, data);
-        bytes = data.byteLength;
-      } else {
-        // 连本机自身服务：直接从本机缓存写盘
-        bytes = await pairdropSaveFile(token, path);
-      }
+      // 加入了对方桌面端时，文件缓存在对方服务上，走后端 HTTP 拉取写盘（无 fs scope 限制）；
+      // 连本机自身服务时直接从本机内存缓存写盘。
+      const bytes =
+        remoteTarget && client.apiBase
+          ? await pairdropDownloadSave(
+              `${client.apiBase}/api/file/${encodeURIComponent(token)}`,
+              path
+            )
+          : await pairdropSaveFile(token, path);
       showToast("success", `已保存 ${formatBytes(bytes)} → ${path}`);
       client.markFileSaved(messageId, path);
     } catch (e) {
