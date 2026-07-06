@@ -451,6 +451,32 @@ struct NodeAgentRuntime {
     entry_script: PathBuf,
 }
 
+/// Windows 上 canonicalize 过的路径带 `\\?\` verbatim 前缀（Tauri 的 resource_dir()
+/// 基于 canonicalize 后的 exe 路径派生，打包安装后必然带该前缀）。Node 的入口模块
+/// 解析器（resolveMainPath -> realpathSync）不支持 verbatim 路径，会报
+/// `EISDIR: illegal operation on a directory, lstat '盘符:'` 并以 exit code 1 退出。
+/// 传给子进程前必须剥掉该前缀。
+fn simplify_verbatim_path(path: PathBuf) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let text = path.as_os_str().to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{}", rest));
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest.to_string());
+        }
+    }
+    path
+}
+
+fn make_node_runtime(node_executable: PathBuf, entry_script: PathBuf) -> NodeAgentRuntime {
+    NodeAgentRuntime {
+        node_executable: simplify_verbatim_path(node_executable),
+        entry_script: simplify_verbatim_path(entry_script),
+    }
+}
+
 fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
     let cwd = std::env::current_dir()
         .map_err(|e| AppError::from(format!("获取当前目录失败: {}", e)))?;
@@ -481,10 +507,7 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
         .into_iter()
         .find(|(node, entry)| node.exists() && entry.exists())
     {
-        return Ok(NodeAgentRuntime {
-            node_executable,
-            entry_script,
-        });
+        return Ok(make_node_runtime(node_executable, entry_script));
     }
 
     let dev_entry_candidates = [
@@ -492,10 +515,7 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
         cwd.join("../src-node/resume-agent/dist/main.js"),
     ];
     if let Some(entry_script) = dev_entry_candidates.into_iter().find(|path| path.exists()) {
-        return Ok(NodeAgentRuntime {
-            node_executable: PathBuf::from("node"),
-            entry_script,
-        });
+        return Ok(make_node_runtime(PathBuf::from("node"), entry_script));
     }
 
     // 装机后的资源目录：正常情况下 resource_dir() 就在 exe 旁边，拼 sidecars/… 即可。
@@ -536,10 +556,7 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
             let node = base.join(node_rel);
             let entry = base.join(entry_rel);
             if node.exists() && entry.exists() {
-                return Ok(NodeAgentRuntime {
-                    node_executable: node,
-                    entry_script: entry,
-                });
+                return Ok(make_node_runtime(node, entry));
             }
         }
     }
@@ -571,5 +588,28 @@ async fn kill_process_tree(pid: u32) {
             .args(["-TERM", &pid.to_string()])
             .output()
             .await;
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simplify_verbatim_path_strips_prefix() {
+        assert_eq!(
+            simplify_verbatim_path(PathBuf::from(
+                r"\\?\F:\apps\CodeShelf\sidecars\resume-agent\main.cjs"
+            )),
+            PathBuf::from(r"F:\apps\CodeShelf\sidecars\resume-agent\main.cjs")
+        );
+        assert_eq!(
+            simplify_verbatim_path(PathBuf::from(r"\\?\UNC\server\share\main.cjs")),
+            PathBuf::from(r"\\server\share\main.cjs")
+        );
+        assert_eq!(
+            simplify_verbatim_path(PathBuf::from(r"F:\apps\main.cjs")),
+            PathBuf::from(r"F:\apps\main.cjs")
+        );
     }
 }
