@@ -17,6 +17,12 @@ use crate::storage::get_storage_config;
 
 const RUN_EVENT: &str = "resume-agent-run-event-v3";
 
+/// Windows: 隐藏子进程控制台窗口。release/打包版无控制台父级，任何 spawn 都会
+/// 新建一个一闪而过的黑窗；本模块每次 RPC 都会拉起 node.exe，必须加此 flag。
+/// tokio 的 Command 在 Windows 上有内建 creation_flags，无需引入 std 的 CommandExt。
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 static RUN_PIDS: Lazy<Arc<RwLock<HashMap<String, u32>>>> =
     Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
 
@@ -352,11 +358,16 @@ async fn call_node_rpc_with_events(
     request_id_for_pid: Option<String>,
 ) -> AppResult<Value> {
     let runtime = node_agent_runtime(app.as_ref())?;
-    let mut child = Command::new(&runtime.node_executable)
+    let mut command = Command::new(&runtime.node_executable);
+    command
         .arg(&runtime.entry_script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Windows: 隐藏 node.exe 子进程控制台窗口，避免打包版闪黑窗。
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let mut child = command
         .spawn()
         .map_err(|e| AppError::from(format!("启动 Node resume agent 失败: {}", e)))?;
 
@@ -481,6 +492,9 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
     let cwd = std::env::current_dir()
         .map_err(|e| AppError::from(format!("获取当前目录失败: {}", e)))?;
 
+    // 记录所有检查过但未命中的候选路径；最终失败时回给用户，便于定位真实安装布局。
+    let mut attempted: Vec<String> = Vec::new();
+
     #[cfg(target_os = "windows")]
     let local_sidecar_candidates = [
         (
@@ -503,19 +517,26 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
             cwd.join("../src-tauri/resources/sidecars/resume-agent/main.cjs"),
         ),
     ];
-    if let Some((node_executable, entry_script)) = local_sidecar_candidates
-        .into_iter()
-        .find(|(node, entry)| node.exists() && entry.exists())
-    {
-        return Ok(make_node_runtime(node_executable, entry_script));
+    for (node_executable, entry_script) in local_sidecar_candidates {
+        if node_executable.exists() && entry_script.exists() {
+            return Ok(make_node_runtime(node_executable, entry_script));
+        }
+        attempted.push(format!(
+            "本地: node={} | entry={}",
+            node_executable.display(),
+            entry_script.display()
+        ));
     }
 
     let dev_entry_candidates = [
         cwd.join("src-node/resume-agent/dist/main.js"),
         cwd.join("../src-node/resume-agent/dist/main.js"),
     ];
-    if let Some(entry_script) = dev_entry_candidates.into_iter().find(|path| path.exists()) {
-        return Ok(make_node_runtime(PathBuf::from("node"), entry_script));
+    for entry_script in dev_entry_candidates {
+        if entry_script.exists() {
+            return Ok(make_node_runtime(PathBuf::from("node"), entry_script));
+        }
+        attempted.push(format!("开发: entry={}", entry_script.display()));
     }
 
     // 装机后的资源目录：正常情况下 resource_dir() 就在 exe 旁边，拼 sidecars/… 即可。
@@ -538,9 +559,10 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
         }
     }
     if roots.is_empty() {
-        return Err(AppError::from(
-            "未找到内置 Node resume agent 资源目录".to_string(),
-        ));
+        return Err(AppError::from(format!(
+            "未找到内置 Node resume agent 资源目录；已尝试: {}",
+            attempted.join("; ")
+        )));
     }
 
     #[cfg(target_os = "windows")]
@@ -558,12 +580,18 @@ fn node_agent_runtime(app: Option<&AppHandle>) -> AppResult<NodeAgentRuntime> {
             if node.exists() && entry.exists() {
                 return Ok(make_node_runtime(node, entry));
             }
+            attempted.push(format!(
+                "资源: node={} | entry={}",
+                node.display(),
+                entry.display()
+            ));
         }
     }
 
-    Err(AppError::from(
-        "未找到内置 Node resume agent，请重新执行应用打包构建。".to_string(),
-    ))
+    Err(AppError::from(format!(
+        "未找到内置 Node resume agent，请重新执行应用打包构建。已尝试以下路径: {}",
+        attempted.join("; ")
+    )))
 }
 
 async fn load_project(project_id: &str) -> AppResult<Project> {
@@ -579,6 +607,7 @@ async fn kill_process_tree(pid: u32) {
     {
         let _ = Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .await;
     }

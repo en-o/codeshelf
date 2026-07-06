@@ -23,6 +23,12 @@ async function copyRuntime() {
   if (process.platform !== "win32") {
     await fs.chmod(nodeOutFile, 0o755);
   }
+  // 打印被拷贝的 node 运行时信息，便于确认架构与目标平台一致（CI 打包排错关键）。
+  const { size } = await fs.stat(nodeOutFile);
+  const mib = (size / 1024 / 1024).toFixed(1);
+  process.stdout.write(
+    `Copied Node runtime: ${process.execPath} (${process.version} ${process.platform}/${process.arch}) -> ${nodeOutFile} [${mib} MiB]\n`,
+  );
 }
 
 async function bundleAgent() {

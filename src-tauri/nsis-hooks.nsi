@@ -3,20 +3,20 @@
 
 ; Helper function to check if path ends with product name
 !macro CheckAndAppendProductName
-  ; Get the last directory component of INSTDIR
   Push $0
   Push $1
 
-  StrCpy $0 $INSTDIR
-  ; Get string length
-  StrLen $1 $0
-
-  ; Check if INSTDIR already ends with product name
-  StrCpy $1 $0 "" -10  ; Get last 10 chars (length of "CodeShelf")
-  StrCmp $1 "CodeShelf" +3 0
-  StrCmp $1 "codeshelf" +2 0
-  ; Path doesn't end with product name, append it
+  ; 动态取产品名长度，取 $INSTDIR 末尾同样长度的子串做比较。
+  ; 旧实现硬编码 -10 截取，而 "CodeShelf" 只有 9 个字符，永远不相等，
+  ; 导致对已经以产品名结尾的目录反复追加一层，exe 与 resources 从此分处不同层级。
+  ; StrCmp 本身大小写不敏感，无需再单独判断小写变体。
+  StrLen $0 "${PRODUCTNAME}"
+  IntOp $0 0 - $0
+  StrCpy $1 $INSTDIR "" $0
+  StrCmp $1 "${PRODUCTNAME}" done 0
+  ; 末段不是产品名（用户选了裸目录），追加一层，保证资源自包含
   StrCpy $INSTDIR "$INSTDIR\${PRODUCTNAME}"
+  done:
 
   Pop $1
   Pop $0

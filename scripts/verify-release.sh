@@ -36,6 +36,25 @@ else
 fi
 npm run build
 
+echo "==> 校验 sidecar 已生成（装机必需；缺失会导致简历功能报“未找到内置 Node…”）"
+SIDECAR_DIR="src-tauri/resources/sidecars"
+AGENT_ENTRY="$SIDECAR_DIR/resume-agent/main.cjs"
+# node 二进制名随平台不同：Windows 为 node.exe，其余为 node
+if [ -f "$SIDECAR_DIR/node/node.exe" ]; then
+  NODE_BIN="$SIDECAR_DIR/node/node.exe"
+else
+  NODE_BIN="$SIDECAR_DIR/node/node"
+fi
+for f in "$AGENT_ENTRY" "$NODE_BIN"; do
+  if [ ! -s "$f" ]; then
+    echo "❌ 缺少或为空的 sidecar 文件: $f" >&2
+    echo "   请确认 'npm run resume-agent:prepare-sidecar' 已成功执行。" >&2
+    exit 1
+  fi
+done
+echo "   ✓ $AGENT_ENTRY"
+echo "   ✓ $NODE_BIN"
+
 echo "==> [2/3] Rust: cargo check --release (lib only, 对齐 tauri build)"
 (cd src-tauri && cargo check --release --lib --bins)
 
