@@ -65,12 +65,15 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
     loadAllKnowledgeFromDisk,
     savedResumes,
     setSavedResumes,
+    clearResumeRun,
   } = useResumeStore();
 
   const [view, setView] = useState<View>(() =>
     savedResumes.length > 0 ? "history" : "workflow"
   );
   const [activeTab, setActiveTab] = useState<Tab>("select");
+  // 编辑已有简历模式：从「我的简历」打开时为 true，隐藏创建向导的步骤条，直接进编辑器。
+  const [editingSaved, setEditingSaved] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [jobDirection, setJobDirection] = useState<JobDirection>("backend");
   const [resume, setResume] = useState<ResumeV2 | null>(null);
@@ -130,6 +133,8 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
     setJobDirection("backend");
     setView("workflow");
     setActiveTab("select");
+    setEditingSaved(false);
+    clearResumeRun();
   };
 
   const selectedProjects = useMemo(
@@ -154,7 +159,18 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
     onBack();
   };
 
+  // 强绑定：项目选择一旦变化，之前基于旧选择生成的简历即失效，清空以强制重走「生成简历」。
+  // 已保存的简历仍在「我的简历」中，不受影响。
+  const invalidateGeneratedResume = () => {
+    if (resume) {
+      setResume(null);
+      clearResumeRun();
+      showToast("warning", "项目选择已变更，已清空当前生成结果，请重新生成简历");
+    }
+  };
+
   const toggleProject = (id: string) => {
+    invalidateGeneratedResume();
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -164,6 +180,7 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
   };
 
   const toggleAll = () => {
+    invalidateGeneratedResume();
     if (selectedIds.size === projects.length) {
       setSelectedIds(new Set());
     } else {
@@ -227,6 +244,7 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
     setSelectedIds(new Set(r.experiences.map((e) => e.projectId)));
     setActiveTab("resume");
     setView("workflow");
+    setEditingSaved(true);
   };
 
   const handleDeleteSaved = async (e: MouseEvent, id: string) => {
@@ -686,25 +704,28 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
   }> = [
     {
       id: "select",
-      label: "选项目",
+      label: "① 选项目",
       icon: <ListChecks size={14} />,
       badge: selectedIds.size > 0 ? String(selectedIds.size) : undefined,
     },
     {
       id: "knowledge",
-      label: "背景知识",
+      label: "② 生成背景",
       icon: <Database size={14} />,
       badge:
-        selectedKnowledgeDocs.length > 0
+        selectedIds.size > 0
           ? `${selectedKnowledgeDocs.length}/${selectedIds.size}`
           : undefined,
       disabled: selectedIds.size === 0,
     },
     {
       id: "resume",
-      label: "简历",
+      label: "③ 生成简历",
       icon: <Wand2 size={14} />,
-      disabled: selectedKnowledgeDocs.length === 0,
+      // 强约束：必须为「全部」已选项目生成背景知识后，才能进入生成简历
+      disabled:
+        selectedProjects.length === 0 ||
+        selectedKnowledgeDocs.length < selectedProjects.length,
     },
   ];
 
@@ -796,6 +817,12 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
       <div className="flex-1 flex flex-col min-h-0">
         {showHistory ? (
           renderHistoryView()
+        ) : editingSaved ? (
+          <div className="flex-1 overflow-auto p-6">
+            <div className="max-w-7xl mx-auto space-y-5">
+              {renderResumeTab()}
+            </div>
+          </div>
         ) : activeTab === "knowledge" ? (
           <>
             <div className="px-6 pt-5 pb-4">

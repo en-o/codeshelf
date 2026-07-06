@@ -67,6 +67,9 @@ export function KnowledgePanel({ selectedProjects, provider, promptConfigVersion
   const selectedRun = liveRun ?? storedRun;
   const stats = useMemo(() => summarizeRun(selectedRun), [selectedRun]);
   const showProjectRail = selectedProjects.length > 1;
+  // 强约束：所有已选项目都生成了背景知识，才允许进入「生成简历」。
+  const completedCount = selectedProjects.filter((p) => !!knowledgeDocs[p.id]).length;
+  const allBackgroundsReady = selectedProjects.length > 0 && completedCount === selectedProjects.length;
 
   useEffect(() => {
     if (!selectedProjects.find((item) => item.id === activeProjectId)) {
@@ -242,6 +245,9 @@ export function KnowledgePanel({ selectedProjects, provider, promptConfigVersion
               onViewChange={setActiveView}
               onGenerate={() => activeProject && handleGenerate(activeProject)}
               onNext={onNext}
+              nextDisabled={!allBackgroundsReady}
+              completedCount={completedCount}
+              totalCount={selectedProjects.length}
               onDelete={() => activeProject && handleDelete(activeProject.id)}
               onRefresh={() => activeProject && refreshRuns(activeProject.id)}
             />

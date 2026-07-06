@@ -73,6 +73,9 @@ export function PanelHeader({
   onViewChange,
   onGenerate,
   onNext,
+  nextDisabled = false,
+  completedCount,
+  totalCount,
   onDelete,
   onRefresh,
 }: {
@@ -85,6 +88,9 @@ export function PanelHeader({
   onViewChange: (view: KnowledgeView) => void;
   onGenerate: () => void;
   onNext?: () => void;
+  nextDisabled?: boolean;
+  completedCount?: number;
+  totalCount?: number;
   onDelete: () => void;
   onRefresh: () => void;
 }) {
@@ -106,7 +112,27 @@ export function PanelHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={onNext} className="gap-1.5">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onNext}
+            disabled={nextDisabled}
+            title={
+              nextDisabled
+                ? "请先为「全部」已选项目生成背景知识，才能进入下一步"
+                : "进入下一步：生成简历"
+            }
+            className="gap-1.5"
+          >
+            {typeof completedCount === "number" && totalCount ? (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                  nextDisabled ? "bg-gray-100 text-gray-500" : "bg-emerald-100 text-emerald-700"
+                }`}
+              >
+                {completedCount}/{totalCount}
+              </span>
+            ) : null}
             下一步
             <ChevronRight size={14} />
           </Button>
