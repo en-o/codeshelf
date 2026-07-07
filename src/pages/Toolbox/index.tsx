@@ -194,7 +194,14 @@ export function ToolboxPage() {
 
   // 如果有选中的工具，显示工具面板
   if (activeTool) {
-    return renderToolPanel();
+    // 统一铺不透明底：主窗口是 transparent（做圆角用），工具页某些状态（加载间隙、
+    // 空列表、重连抖动、渲染兜底）内容区为空时会透出桌面（"变透明"）。这里兜一层
+    // opaque 背景覆盖所有工具，避免逐个工具漏铺底色。
+    return (
+      <div className="h-full min-h-0 bg-white dark:bg-gray-900">
+        {renderToolPanel()}
+      </div>
+    );
   }
 
   return (

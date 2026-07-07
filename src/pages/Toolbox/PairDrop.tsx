@@ -141,7 +141,7 @@ export function PairDrop({ onBack }: PairDropProps) {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-white dark:bg-gray-900">
       <ToolPanelHeader
         title="跨设备传输"
         icon={Radio}

@@ -120,6 +120,8 @@ fn init_logging(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     app.plugin(
         tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Info)
+            // 日志时间戳用本机时区（默认是 UTC，会与系统时间差几个小时）
+            .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
             .target(tauri_plugin_log::Target::new(
                 tauri_plugin_log::TargetKind::Folder {
                     path: log_dir,
