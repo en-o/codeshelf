@@ -137,6 +137,7 @@ fn init_logging(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 /// 构建托盘菜单 + 图标，并绑定事件处理。
 fn init_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+    let open_logs = MenuItem::with_id(app, "open_logs", "打开日志目录", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
 
     let tool_monitor = MenuItem::with_id(app, "tool_monitor", "系统监控", true, None::<&str>)?;
@@ -168,7 +169,10 @@ fn init_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&show, &sep1, &toolbox_submenu, &sep2, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&show, &sep1, &toolbox_submenu, &sep2, &open_logs, &quit],
+    )?;
 
     let icon =
         Image::from_bytes(include_bytes!("../icons/icon.png")).expect("Failed to load tray icon");
@@ -189,6 +193,7 @@ fn handle_tray_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     let id = event.id().as_ref();
     match id {
         "show" => focus_main_window(app),
+        "open_logs" => open_logs_dir(app),
         "quit" => app.exit(0),
         _ if id.starts_with("tool_") => {
             focus_main_window(app);
@@ -228,6 +233,41 @@ fn focus_main_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+/// 托盘「打开日志目录」：在系统文件管理器中打开日志所在文件夹。
+/// 日志目录与 init_logging 一致（storage 配置的 logs_dir）。
+fn open_logs_dir(app: &AppHandle) {
+    let _ = app;
+    let log_dir = storage::get_storage_config()
+        .map(|c| c.logs_dir.clone())
+        .unwrap_or_else(|_| std::path::PathBuf::from("logs"));
+    let _ = std::fs::create_dir_all(&log_dir);
+    if let Err(e) = open_path_in_file_manager(&log_dir) {
+        log::error!("打开日志目录失败 ({}): {}", log_dir.display(), e);
+    }
+}
+
+/// 跨平台在文件管理器中打开一个目录。
+fn open_path_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(path).spawn()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("explorer")
+            .arg(path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
+    }
+    Ok(())
 }
 
 /// 启动后台 worker：netcat 状态、workflow 调度器、chat bridge poller、MCP gateway。

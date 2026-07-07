@@ -3,6 +3,7 @@ export { Dialog } from "./Dialog";
 export { ConfirmDialog, type ConfirmVariant } from "./ConfirmDialog";
 export { useConfirm, ConfirmHost, type ConfirmOptions } from "./useConfirm";
 export { LoadingSpinner } from "./LoadingSpinner";
+export { ErrorBoundary } from "./ErrorBoundary";
 export { EmptyState } from "./EmptyState";
 export { CopyButton } from "./CopyButton";
 export { SearchInput } from "./SearchInput";

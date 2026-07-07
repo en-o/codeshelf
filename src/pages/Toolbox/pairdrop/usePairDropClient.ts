@@ -244,7 +244,18 @@ export function usePairDropClient({
         clientId: getDeviceId(),
       });
       const url = `${wsBase}/ws?${query.toString()}`;
-      const ws = new WebSocket(url);
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(url);
+      } catch (e) {
+        // 非法地址等会让 new WebSocket 同步抛错——捕获后转离线 + 重连，
+        // 避免异常冒泡出 effect 导致整页崩溃（transparent 窗口下表现为"变透明"）。
+        console.error("PairDrop: 无法建立连接", url, e);
+        setStatus("offline");
+        if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = window.setTimeout(connect, 1500);
+        return;
+      }
       wsRef.current = ws;
       ws.addEventListener("open", () => {
         if (cancelled) return;

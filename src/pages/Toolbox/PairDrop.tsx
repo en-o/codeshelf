@@ -18,7 +18,7 @@ import {
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { ToolPanelHeader } from "./index";
 import { Button, showToast } from "@/components/ui";
-import { LoadingSpinner } from "@/components/common";
+import { LoadingSpinner, ErrorBoundary } from "@/components/common";
 import {
   pairdropStart,
   pairdropStop,
@@ -44,14 +44,17 @@ interface PairDropProps {
 const DEFAULT_PAIRDROP_PORT = 8421;
 const REMOTE_TARGET_STORAGE_KEY = "pairdrop:remote-target";
 
-/** 解析"加入其他桌面端"输入：支持 "192.168.1.5" 或 "192.168.1.5:8421" */
+/** 解析"加入其他桌面端"输入：支持 "192.168.1.5"、"192.168.1.5:8421"、"http://192.168.1.5:8421" */
 function parseJoinTarget(v: string): { host: string; port: number } | null {
-  const s = v.trim().replace(/^\w+:\/\//, "").replace(/\/+$/, "");
+  // 去掉协议头和路径/末尾斜杠
+  const s = v.trim().replace(/^[a-zA-Z][\w+.-]*:\/\//, "").replace(/\/.*$/, "");
   if (!s) return null;
   const idx = s.lastIndexOf(":");
   const host = idx > 0 ? s.slice(0, idx) : s;
-  const port = idx > 0 ? parseInt(s.slice(idx + 1)) : DEFAULT_PAIRDROP_PORT;
-  if (!host || Number.isNaN(port) || port <= 0 || port > 65535) return null;
+  const port = idx > 0 ? parseInt(s.slice(idx + 1), 10) : DEFAULT_PAIRDROP_PORT;
+  // host 只允许 IPv4 / 主机名字符（含空格/非法字符一律拒，避免拼出非法 ws:// 导致崩溃）
+  if (!host || !/^[a-zA-Z0-9.\-]+$/.test(host)) return null;
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
   return { host, port };
 }
 
@@ -177,10 +180,12 @@ export function PairDrop({ onBack }: PairDropProps) {
         ) : !serviceStatus?.running ? (
           <ServiceOffline onToggle={handleToggle} loading={loading} />
         ) : (
-          <ChatWorkspace
-            port={serviceStatus.port}
-            onShowUrls={() => setShowUrls(true)}
-          />
+          <ErrorBoundary label="跨设备传输页面出错（可点重试恢复）">
+            <ChatWorkspace
+              port={serviceStatus.port}
+              onShowUrls={() => setShowUrls(true)}
+            />
+          </ErrorBoundary>
         )}
       </div>
 
