@@ -117,6 +117,24 @@ pub async fn pairdrop_peers() -> AppResult<Vec<PeerInfo>> {
     }
 }
 
+/// 获取局域网中主动发现到的其它桌面端
+#[tauri::command]
+#[specta::specta]
+pub async fn pairdrop_discovered() -> AppResult<Vec<DiscoveredDevice>> {
+    let guard = SERVICE.lock().await;
+    match guard.as_ref() {
+        Some(svc) => {
+            let now = now_millis();
+            let mut devices = svc.state.discovered.lock().await;
+            devices.retain(|_, d| now - d.last_seen_at <= 20_000);
+            let mut list: Vec<DiscoveredDevice> = devices.values().cloned().collect();
+            list.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+            Ok(list)
+        }
+        None => Ok(vec![]),
+    }
+}
+
 /// 把缓存中的接收文件直接写到本地。一次性消费 — 调用后 token 立即失效，
 /// 避免再被 HTTP /api/file/:token 又下载一次。
 #[tauri::command]
@@ -135,8 +153,7 @@ pub async fn pairdrop_save_file(token: String, save_path: String) -> AppResult<u
         files.remove(&token)
     };
 
-    let file = cached
-        .ok_or_else(|| crate::error::AppError::from("文件不存在或已被领取/过期"))?;
+    let file = cached.ok_or_else(|| crate::error::AppError::from("文件不存在或已被领取/过期"))?;
     if file.is_expired() {
         return Err(crate::error::AppError::from("文件已过期"));
     }

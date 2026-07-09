@@ -584,3 +584,11 @@ export interface PairDropPeerInfo {
   isSelf: boolean;
 }
 
+export interface PairDropDiscoveredDevice {
+  deviceId: string;
+  displayName: string;
+  host: string;
+  port: number;
+  url: string;
+  lastSeenAt: number;
+}

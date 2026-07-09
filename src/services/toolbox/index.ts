@@ -841,6 +841,7 @@ export async function updateClipboardNote(id: string, note: string): Promise<Cli
 import type {
   PairDropServiceStatus,
   PairDropPeerInfo,
+  PairDropDiscoveredDevice,
 } from "@/types/toolbox";
 
 export async function pairdropStart(port?: number): Promise<PairDropServiceStatus> {
@@ -857,6 +858,10 @@ export async function pairdropStatus(): Promise<PairDropServiceStatus> {
 
 export async function pairdropPeers(): Promise<PairDropPeerInfo[]> {
   return invoke("pairdrop_peers");
+}
+
+export async function pairdropDiscovered(): Promise<PairDropDiscoveredDevice[]> {
+  return invoke("pairdrop_discovered");
 }
 
 /** 把缓存中的接收文件直接写到本地，token 一次性消费。返回写入字节数。 */

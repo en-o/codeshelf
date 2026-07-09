@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Wifi,
   WifiOff,
+  X,
 } from "lucide-react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { ToolPanelHeader } from "./index";
@@ -23,12 +24,16 @@ import {
   pairdropStart,
   pairdropStop,
   pairdropStatus,
+  pairdropDiscovered,
   pairdropSaveFile,
   pairdropDownloadSave,
   formatBytes,
 } from "@/services/toolbox";
 import { openInExplorer } from "@/services/db";
-import type { PairDropServiceStatus } from "@/types/toolbox";
+import type {
+  PairDropDiscoveredDevice,
+  PairDropServiceStatus,
+} from "@/types/toolbox";
 import {
   usePairDropClient,
   type HistoricalPeer,
@@ -42,10 +47,19 @@ interface PairDropProps {
 
 /** 跨设备传输默认端口（与后端 DEFAULT_PORT 保持一致）；加入对方桌面端时未填端口用它兜底 */
 const DEFAULT_PAIRDROP_PORT = 8421;
-const REMOTE_TARGET_STORAGE_KEY = "pairdrop:remote-target";
+const REMOTE_TARGETS_STORAGE_KEY = "pairdrop:remote-targets";
+const ACTIVE_ROOM_STORAGE_KEY = "pairdrop:active-room";
+const LOCAL_ROOM_ID = "local";
+
+interface RemoteTarget {
+  host: string;
+  port: number;
+  deviceId?: string;
+  displayName?: string;
+}
 
 /** 解析"加入其他桌面端"输入：支持 "192.168.1.5"、"192.168.1.5:8421"、"http://192.168.1.5:8421" */
-function parseJoinTarget(v: string): { host: string; port: number } | null {
+function parseJoinTarget(v: string): RemoteTarget | null {
   // 去掉协议头和路径/末尾斜杠
   const s = v.trim().replace(/^[a-zA-Z][\w+.-]*:\/\//, "").replace(/\/.*$/, "");
   if (!s) return null;
@@ -58,23 +72,55 @@ function parseJoinTarget(v: string): { host: string; port: number } | null {
   return { host, port };
 }
 
-function loadRemoteTarget(): { host: string; port: number } | null {
+function remoteRoomId(target: RemoteTarget): string {
+  if (target.deviceId) return `device:${target.deviceId}`;
+  return `remote:${target.host}:${target.port}`;
+}
+
+function remoteLabel(target: RemoteTarget): string {
+  if (target.displayName) return target.displayName;
+  return `${target.host}:${target.port}`;
+}
+
+function loadRemoteTargets(): RemoteTarget[] {
   try {
-    const raw = localStorage.getItem(REMOTE_TARGET_STORAGE_KEY);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as { host?: string; port?: number };
-    if (
-      !value.host ||
-      !Number.isInteger(value.port) ||
-      value.port! <= 0 ||
-      value.port! > 65535
-    ) {
-      return null;
-    }
-    return { host: value.host, port: value.port! };
+    const raw = localStorage.getItem(REMOTE_TARGETS_STORAGE_KEY);
+    if (!raw) return [];
+    const values = JSON.parse(raw) as Array<{
+      host?: string;
+      port?: number;
+      deviceId?: string;
+      displayName?: string;
+    }>;
+    if (!Array.isArray(values)) return [];
+    return values.filter(
+      (value): value is RemoteTarget =>
+        !!value.host &&
+        Number.isInteger(value.port) &&
+        value.port! > 0 &&
+        value.port! <= 65535
+    );
   } catch {
-    return null;
+    return [];
   }
+}
+
+function saveRemoteTargets(targets: RemoteTarget[]) {
+  localStorage.setItem(REMOTE_TARGETS_STORAGE_KEY, JSON.stringify(targets));
+}
+
+function targetFromDiscovery(device: PairDropDiscoveredDevice): RemoteTarget {
+  return {
+    host: device.host,
+    port: device.port,
+    deviceId: device.deviceId,
+    displayName: device.displayName,
+  };
+}
+
+function isSameRemoteTarget(a: RemoteTarget, b: RemoteTarget): boolean {
+  if (a.deviceId && b.deviceId) return a.deviceId === b.deviceId;
+  return a.host === b.host && a.port === b.port;
 }
 
 export function PairDrop({ onBack }: PairDropProps) {
@@ -230,25 +276,95 @@ function ChatWorkspace({
   port: number;
   onShowUrls: () => void;
 }) {
-  // 加入其他桌面端：null=连本机自身服务；否则连对方局域网地址（浏览器功能不受影响）
-  const [remoteTarget, setRemoteTarget] = useState<{
-    host: string;
-    port: number;
-  } | null>(loadRemoteTarget);
-  const [connectionEnabled, setConnectionEnabled] = useState(true);
+  const [remoteTargets, setRemoteTargets] = useState<RemoteTarget[]>(
+    loadRemoteTargets
+  );
+  const [activeRoomId, setActiveRoomId] = useState(
+    () => localStorage.getItem(ACTIVE_ROOM_STORAGE_KEY) || LOCAL_ROOM_ID
+  );
+  const [disabledRooms, setDisabledRooms] = useState<Record<string, boolean>>({});
+  const [discoveredDevices, setDiscoveredDevices] = useState<
+    PairDropDiscoveredDevice[]
+  >([]);
   const [joinInput, setJoinInput] = useState("");
-  const activeHost = remoteTarget?.host ?? "127.0.0.1";
-  const activePort = remoteTarget?.port ?? port;
-  const client = usePairDropClient({
-    host: activeHost,
-    port: activePort,
-    enabled: connectionEnabled,
-    historyKey: remoteTarget
-      ? `remote:${remoteTarget.host}:${remoteTarget.port}`
-      : "local",
+  const activeRemoteTarget = remoteTargets.find(
+    (target) => remoteRoomId(target) === activeRoomId
+  ) || null;
+  const localClient = usePairDropClient({
+    host: "127.0.0.1",
+    port,
+    enabled: !disabledRooms[LOCAL_ROOM_ID],
+    historyKey: LOCAL_ROOM_ID,
   });
+  const remoteClient = usePairDropClient({
+    host: activeRemoteTarget?.host ?? "127.0.0.1",
+    port: activeRemoteTarget?.port ?? null,
+    enabled: !!activeRemoteTarget && !disabledRooms[activeRoomId],
+    historyKey: activeRemoteTarget ? remoteRoomId(activeRemoteTarget) : "remote:none",
+  });
+  const client = activeRemoteTarget ? remoteClient : localClient;
+  const currentRoomId = activeRemoteTarget
+    ? remoteRoomId(activeRemoteTarget)
+    : LOCAL_ROOM_ID;
+  const currentRoomDisabled = !!disabledRooms[currentRoomId];
+  const currentRoomIsRemote = !!activeRemoteTarget;
   const [draft, setDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (activeRoomId === LOCAL_ROOM_ID || activeRemoteTarget) {
+      localStorage.setItem(ACTIVE_ROOM_STORAGE_KEY, activeRoomId);
+      return;
+    }
+    setActiveRoomId(LOCAL_ROOM_ID);
+  }, [activeRoomId, activeRemoteTarget]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshDiscovered = async () => {
+      try {
+        const devices = await pairdropDiscovered();
+        if (cancelled) return;
+        setDiscoveredDevices(devices);
+        if (devices.length === 0) return;
+        setRemoteTargets((prev) => {
+          let changed = false;
+          const next = [...prev];
+          for (const device of devices) {
+            const target = targetFromDiscovery(device);
+            const index = next.findIndex((item) => isSameRemoteTarget(item, target));
+            const previous = index >= 0 ? next[index] : null;
+            if (
+              !previous ||
+              previous.deviceId !== target.deviceId ||
+              previous.displayName !== target.displayName ||
+              previous.host !== target.host ||
+              previous.port !== target.port
+            ) {
+              changed = true;
+            }
+            if (index >= 0) {
+              next[index] = { ...previous, ...target };
+            } else {
+              next.unshift(target);
+            }
+          }
+          if (!changed) return prev;
+          const saved = next.slice(0, 16);
+          saveRemoteTargets(saved);
+          return saved;
+        });
+      } catch (error) {
+        console.warn("读取跨设备发现列表失败", error);
+      }
+    };
+    refreshDiscovered();
+    const timer = window.setInterval(refreshDiscovered, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const handleJoin = () => {
     const target = parseJoinTarget(joinInput);
@@ -256,17 +372,53 @@ function ChatWorkspace({
       showToast("error", "地址格式不对，示例：192.168.1.5:8421");
       return;
     }
-    client.selectPeer(null);
-    setRemoteTarget(target);
-    localStorage.setItem(REMOTE_TARGET_STORAGE_KEY, JSON.stringify(target));
-    setConnectionEnabled(true);
+    const roomId = remoteRoomId(target);
+    setRemoteTargets((prev) => {
+      const next = [
+        target,
+        ...prev.filter((item) => !isSameRemoteTarget(item, target)),
+      ].slice(0, 8);
+      saveRemoteTargets(next);
+      return next;
+    });
+    setDisabledRooms((prev) => ({ ...prev, [roomId]: false }));
+    setActiveRoomId(roomId);
     setJoinInput("");
   };
-  const handleLeaveRemote = () => {
-    client.selectPeer(null);
-    setRemoteTarget(null);
-    localStorage.removeItem(REMOTE_TARGET_STORAGE_KEY);
-    setConnectionEnabled(true);
+
+  const handleSelectRoom = (roomId: string) => {
+    setDraft("");
+    setActiveRoomId(roomId);
+  };
+
+  const handleBackToLocal = () => {
+    setDraft("");
+    setActiveRoomId(LOCAL_ROOM_ID);
+    setShowSidebarOnMobile(true);
+  };
+
+  const handleToggleCurrentRoom = () => {
+    setDisabledRooms((prev) => ({
+      ...prev,
+      [currentRoomId]: !prev[currentRoomId],
+    }));
+  };
+
+  const handleForgetRemote = (target: RemoteTarget) => {
+    const roomId = remoteRoomId(target);
+    setRemoteTargets((prev) => {
+      const next = prev.filter((item) => remoteRoomId(item) !== roomId);
+      saveRemoteTargets(next);
+      return next;
+    });
+    setDisabledRooms((prev) => {
+      const next = { ...prev };
+      delete next[roomId];
+      return next;
+    });
+    if (activeRoomId === roomId) {
+      setActiveRoomId(LOCAL_ROOM_ID);
+    }
   };
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [editingName, setEditingName] = useState(false);
@@ -289,8 +441,26 @@ function ChatWorkspace({
   ];
   const selectedPeer = peers.find((p) => p.peerId === client.selected) || null;
   const selectedPeerOnline =
-    connectionEnabled && !!selectedPeer && onlinePeerIds.has(selectedPeer.peerId);
+    !currentRoomDisabled && !!selectedPeer && onlinePeerIds.has(selectedPeer.peerId);
   const messages = client.selected ? client.conversations.get(client.selected) || [] : [];
+  const discoveredRoomIds = new Set(
+    discoveredDevices.map((device) => remoteRoomId(targetFromDiscovery(device)))
+  );
+  const visibleRemoteTargets = [...remoteTargets].sort(
+    (a, b) =>
+      Number(discoveredRoomIds.has(remoteRoomId(b))) -
+      Number(discoveredRoomIds.has(remoteRoomId(a)))
+  );
+  const hasListItems = peers.length > 0 || visibleRemoteTargets.length > 0;
+
+  useEffect(() => {
+    if (currentRoomDisabled || client.selected) return;
+    const firstOnline = onlinePeers.find((peer) => !peer.isSelf);
+    if (firstOnline) {
+      client.selectPeer(firstOnline.peerId);
+      setShowSidebarOnMobile(false);
+    }
+  }, [currentRoomId, currentRoomDisabled, client.selected, onlinePeers, client]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -357,7 +527,7 @@ function ChatWorkspace({
       // 加入了对方桌面端时，文件缓存在对方服务上，走后端 HTTP 拉取写盘（无 fs scope 限制）；
       // 连本机自身服务时直接从本机内存缓存写盘。
       const bytes =
-        remoteTarget && client.apiBase
+        currentRoomIsRemote && client.apiBase
           ? await pairdropDownloadSave(
               `${client.apiBase}/api/file/${encodeURIComponent(token)}`,
               path
@@ -473,84 +643,88 @@ function ChatWorkspace({
               </div>
             </div>
             <button
-              onClick={() => setConnectionEnabled((value) => !value)}
+              onClick={handleToggleCurrentRoom}
               className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title={connectionEnabled ? "断开当前连接" : "重新连接"}
+              title={currentRoomDisabled ? "重新连接当前房间" : "断开当前房间"}
             >
-              {connectionEnabled ? <WifiOff size={15} /> : <Wifi size={15} />}
+              {currentRoomDisabled ? <Wifi size={15} /> : <WifiOff size={15} />}
             </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-hidden py-2">
-          {peers.length === 0 ? (
+        <div className="flex-1 overflow-y-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <LocalScopeItem
+            active={currentRoomId === LOCAL_ROOM_ID}
+            online={!disabledRooms[LOCAL_ROOM_ID] && localClient.status === "online"}
+            onClick={handleBackToLocal}
+          />
+          {!hasListItems ? (
             <div className="p-8 text-center text-gray-400">
               <div className="text-3xl mb-2">👥</div>
               <p className="text-sm leading-relaxed">
-                等待其他设备连接…
+                {currentRoomIsRemote ? "远端房间暂无在线设备" : "等待其他设备连接…"}
                 <br />
-                <span className="text-xs">点击右上「扫码加入」分享地址</span>
+                <span className="text-xs">
+                  {currentRoomIsRemote
+                    ? "可切回本机房间，或确认远端地址和防火墙"
+                    : "点击右上「扫码加入」分享地址"}
+                </span>
               </p>
             </div>
           ) : (
-            peers.map((peer) => (
-              <PeerItem
-                key={peer.peerId}
-                peer={peer}
-                active={peer.peerId === client.selected}
-                online={onlinePeerIds.has(peer.peerId)}
-                unread={client.unread.get(peer.peerId) || 0}
-                onClick={() => {
-                  client.selectPeer(peer.peerId);
-                  setShowSidebarOnMobile(false);
-                }}
-              />
-            ))
+            <>
+              {peers.map((peer) => (
+                <PeerItem
+                  key={peer.peerId}
+                  peer={peer}
+                  active={peer.peerId === client.selected}
+                  online={onlinePeerIds.has(peer.peerId)}
+                  unread={client.unread.get(peer.peerId) || 0}
+                  onClick={() => {
+                    client.selectPeer(peer.peerId);
+                    setShowSidebarOnMobile(false);
+                  }}
+                />
+              ))}
+              {visibleRemoteTargets.map((target) => {
+                const roomId = remoteRoomId(target);
+                return (
+                  <RemoteTargetItem
+                    key={roomId}
+                    target={target}
+                    active={roomId === currentRoomId}
+                    online={discoveredRoomIds.has(roomId)}
+                    disabled={!!disabledRooms[roomId]}
+                    onClick={() => {
+                      handleSelectRoom(roomId);
+                      setShowSidebarOnMobile(false);
+                    }}
+                    onForget={() => handleForgetRemote(target)}
+                  />
+                );
+              })}
+            </>
           )}
         </div>
 
         <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
-          {remoteTarget ? (
-            <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-[11px]">
-              <span className="truncate text-blue-700 dark:text-blue-300 flex items-center gap-1 min-w-0">
-                <Monitor size={12} className="shrink-0" />
-                <span className="truncate">
-                  {connectionEnabled ? "已加入" : "已断开"} {remoteTarget.host}:
-                  {remoteTarget.port}
-                </span>
-              </span>
-              <button
-                onClick={() => setConnectionEnabled((value) => !value)}
-                className="shrink-0 text-blue-600 dark:text-blue-300 hover:underline"
-              >
-                {connectionEnabled ? "断开" : "重连"}
-              </button>
-              <button
-                onClick={handleLeaveRemote}
-                className="shrink-0 text-blue-600 dark:text-blue-300 hover:underline"
-              >
-                返回本机
-              </button>
-            </div>
-          ) : (
-            <div className="flex gap-1.5" title="当两台电脑都装了本软件时，在一台填入另一台的局域网地址即可直接互连，无需浏览器">
-              <input
-                value={joinInput}
-                onChange={(e) => setJoinInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleJoin();
-                }}
-                placeholder="加入桌面端：192.168.1.5:8421"
-                className="flex-1 min-w-0 px-2 py-1.5 text-[11px] bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md outline-none focus:border-blue-500 dark:text-gray-100"
-              />
-              <button
-                onClick={handleJoin}
-                className="shrink-0 px-2.5 py-1.5 text-[11px] bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors"
-              >
-                加入
-              </button>
-            </div>
-          )}
+          <div className="flex gap-1.5" title="当两台电脑都装了本软件时，在一台填入另一台的局域网地址即可直接互连，无需浏览器">
+            <input
+              value={joinInput}
+              onChange={(e) => setJoinInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleJoin();
+              }}
+              placeholder="加入桌面端：192.168.1.5:8421"
+              className="flex-1 min-w-0 px-2 py-1.5 text-[11px] bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md outline-none focus:border-blue-500 dark:text-gray-100"
+            />
+            <button
+              onClick={handleJoin}
+              className="shrink-0 px-2.5 py-1.5 text-[11px] bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors"
+            >
+              加入
+            </button>
+          </div>
           <button
             onClick={onShowUrls}
             className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-center gap-1.5 text-gray-700 dark:text-gray-300"
@@ -591,9 +765,33 @@ function ChatWorkspace({
                   {selectedPeerOnline ? "在线" : "离线历史"}
                 </div>
               </div>
+              {activeRemoteTarget ? (
+                <div className="hidden sm:flex items-center gap-2">
+                  <span className="max-w-[180px] truncate text-[11px] text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-md">
+                    {remoteLabel(activeRemoteTarget)}
+                  </span>
+                  <button
+                    onClick={handleBackToLocal}
+                    className="px-2 py-1 text-xs rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    返回本机
+                  </button>
+                  <button
+                    onClick={handleToggleCurrentRoom}
+                    className="w-7 h-7 rounded-md flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    title={currentRoomDisabled ? "重新连接当前地址" : "断开当前地址"}
+                  >
+                    {currentRoomDisabled ? (
+                      <Wifi size={14} />
+                    ) : (
+                      <WifiOff size={14} />
+                    )}
+                  </button>
+                </div>
+              ) : null}
             </header>
 
-            <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {messages.length === 0 ? (
                 <div className="text-center text-xs text-gray-400 py-12">
                   还没有聊天记录，发送一条消息开始吧
@@ -670,18 +868,147 @@ function ChatWorkspace({
           <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-gray-400 p-8 text-center">
             <div className="text-5xl mb-4 opacity-60">💬</div>
             <h4 className="text-base font-medium text-gray-600 dark:text-gray-300 mb-2">
-              {peers.length === 0
+              {activeRemoteTarget
+                ? currentRoomDisabled
+                  ? "已断开"
+                  : "正在进入局域网圈"
+                : peers.length === 0
                 ? "等待设备加入"
                 : "选择一个设备开始聊天"}
             </h4>
             <p className="text-xs text-gray-500 dark:text-gray-400 max-w-sm leading-relaxed">
-              {peers.length === 0
+              {activeRemoteTarget
+                ? "发现到的桌面端会自动连接，连上后会直接显示可聊天的设备。"
+                : peers.length === 0
                 ? "点击「扫码加入」按钮分享地址，让其他设备通过浏览器加入到这个传输房间。"
                 : "在左侧设备列表中选择一个对象，即可发送文字或拖拽 / 选择文件发送。"}
             </p>
+            {activeRemoteTarget ? (
+              <div className="mt-4 flex items-center gap-2">
+                <Button
+                  onClick={handleToggleCurrentRoom}
+                  variant="secondary"
+                  size="sm"
+                >
+                  {currentRoomDisabled ? (
+                    <Wifi size={14} className="mr-1.5" />
+                  ) : (
+                    <WifiOff size={14} className="mr-1.5" />
+                  )}
+                  {currentRoomDisabled ? "重新连接" : "断开"}
+                </Button>
+                <Button
+                  onClick={handleBackToLocal}
+                  variant="secondary"
+                  size="sm"
+                >
+                  <ChevronLeft size={14} className="mr-1.5" />
+                  本机
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function LocalScopeItem({
+  active,
+  online,
+  onClick,
+}: {
+  active: boolean;
+  online: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left relative ${
+        active ? "bg-blue-50 dark:bg-blue-900/30" : ""
+      }`}
+    >
+      {active && (
+        <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />
+      )}
+      <Avatar label="本" color="#2563eb" size={32} />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+          本机
+        </div>
+        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+          <Monitor size={10} />
+          局域网入口 · {online ? "在线" : "已断开"}
+        </div>
+      </div>
+      <span
+        className={`w-2 h-2 rounded-full shrink-0 ${
+          online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
+        }`}
+      />
+    </button>
+  );
+}
+
+function RemoteTargetItem({
+  target,
+  active,
+  online,
+  disabled,
+  onClick,
+  onForget,
+}: {
+  target: RemoteTarget;
+  active: boolean;
+  online: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  onForget: () => void;
+}) {
+  return (
+    <div className="group relative">
+      <button
+        onClick={onClick}
+        className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left ${
+          active ? "bg-blue-50 dark:bg-blue-900/30" : ""
+        }`}
+      >
+        {active && (
+          <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />
+        )}
+        <Avatar
+          label={avatarLabel(remoteLabel(target))}
+          color={avatarColor(target.deviceId || `${target.host}:${target.port}`)}
+          size={32}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+            {remoteLabel(target)}
+          </div>
+          <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+            <Monitor size={10} />
+            桌面端 · {disabled ? "已断开" : online ? "已发现" : "历史"}
+          </div>
+        </div>
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${
+            disabled
+              ? "bg-gray-300 dark:bg-gray-600"
+              : online
+              ? "bg-green-500"
+              : "bg-gray-300 dark:bg-gray-600"
+          }`}
+        />
+      </button>
+      <button
+        onClick={onForget}
+        className="absolute right-7 top-1/2 -translate-y-1/2 hidden group-hover:flex w-6 h-6 items-center justify-center rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+        title="移除"
+      >
+        <X size={13} />
+      </button>
     </div>
   );
 }

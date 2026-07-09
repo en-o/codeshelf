@@ -3,7 +3,7 @@
 // 通过 tauri-specta 注册：调试构建时会把命令签名导出为 src/bindings.ts，供前端类型安全调用。
 
 use crate::commands::{
-    api_chat, chat, chat_bridge, extras, git, project, resume, resume_node_agent, resume_docx,
+    api_chat, chat, chat_bridge, extras, git, project, resume, resume_docx, resume_node_agent,
     settings, stats, storage_admin, system, toolbox, tools, workflows,
 };
 use crate::{keyboard_hook, mcp_gateway};
@@ -226,6 +226,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         toolbox::pairdrop::pairdrop_stop,
         toolbox::pairdrop::pairdrop_status,
         toolbox::pairdrop::pairdrop_peers,
+        toolbox::pairdrop::pairdrop_discovered,
         toolbox::pairdrop::pairdrop_save_file,
         toolbox::pairdrop::pairdrop_download_save,
         // Chat
@@ -377,8 +378,7 @@ mod tests {
         // 整个 bindings.ts 跳过类型检查 (它本来就是机器生成的)。
         let content = std::fs::read_to_string(target).expect("read bindings");
         if !content.trim_start().starts_with("// @ts-nocheck") {
-            std::fs::write(target, format!("// @ts-nocheck\n{}", content))
-                .expect("write bindings");
+            std::fs::write(target, format!("// @ts-nocheck\n{}", content)).expect("write bindings");
         }
     }
 }

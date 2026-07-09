@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Mutex};
 
 /// 端口默认值。固定端口让 QR / URL 在重启后保持不变，方便手机收藏。
@@ -51,6 +51,18 @@ pub struct NetworkUrl {
     pub interface: String,
     pub ip: String,
     pub url: String,
+}
+
+/// 局域网中主动发现到的其它桌面端服务
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredDevice {
+    pub device_id: String,
+    pub display_name: String,
+    pub host: String,
+    pub port: u16,
+    pub url: String,
+    pub last_seen_at: i64,
 }
 
 /// 客户端 → 服务器消息
@@ -120,6 +132,8 @@ pub type PeerSender = mpsc::UnboundedSender<ServerMessage>;
 pub struct AppState {
     /// 所有在线 peer
     pub peers: Mutex<HashMap<String, PeerEntry>>,
+    /// 局域网中发现到的其它桌面端
+    pub discovered: Mutex<HashMap<String, DiscoveredDevice>>,
     /// 文件中继缓存
     pub files: Mutex<HashMap<String, CachedFile>>,
     /// 服务停止信号
@@ -130,6 +144,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             peers: Mutex::new(HashMap::new()),
+            discovered: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
             stop_signal: Arc::new(tokio::sync::Notify::new()),
         }
@@ -176,9 +191,38 @@ pub struct RunningService {
     pub task: tokio::task::JoinHandle<()>,
 }
 
+/// 当前桌面端服务的稳定 ID（进程内稳定，前端仍用 localStorage 维护客户端 ID）
+pub static DESKTOP_DEVICE_ID: Lazy<String> = Lazy::new(|| {
+    let seed = format!(
+        "{}-{}-{}",
+        std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "user".to_string()),
+        std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "host".to_string()),
+        std::env::current_dir()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "codeshelf".to_string())
+    );
+    let mut h: u64 = 1469598103934665603;
+    for b in seed.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    format!("cs-{:016x}", h)
+});
+
+pub fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
 /// 生成随机 peer ID
 pub fn generate_peer_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
     let ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock before UNIX epoch")

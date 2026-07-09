@@ -7,6 +7,7 @@
 // - POST /api/upload     上传文件（multipart），返回 token
 // - GET  /api/file/:tok  下载文件（一次性消耗）
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,6 +25,7 @@ use axum::{
     Json, Router,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Deserialize;
 use serde_json::json;
 use socket2::{Domain, Socket, Type};
@@ -33,6 +35,9 @@ use tower_http::cors::{Any, CorsLayer};
 use super::assets::INDEX_HTML;
 use super::state::*;
 use crate::error::AppResult;
+
+const DISCOVERY_SERVICE_TYPE: &str = "_codeshelf-pairdrop._tcp.local.";
+const DISCOVERY_TTL_MS: i64 = 20_000;
 
 #[derive(Clone)]
 struct ServerHandle {
@@ -56,7 +61,14 @@ struct ConnectQuery {
 /// 启动服务（绑定到 0.0.0.0:port，0 表示由系统分配）
 ///
 /// 返回实际监听的端口。
-pub async fn start_server(port: u16) -> AppResult<(u16, Arc<AppState>, Arc<tokio::sync::Notify>, tokio::task::JoinHandle<()>)> {
+pub async fn start_server(
+    port: u16,
+) -> AppResult<(
+    u16,
+    Arc<AppState>,
+    Arc<tokio::sync::Notify>,
+    tokio::task::JoinHandle<()>,
+)> {
     let state = Arc::new(AppState::new());
     let stop_signal = state.stop_signal.clone();
 
@@ -76,6 +88,7 @@ pub async fn start_server(port: u16) -> AppResult<(u16, Arc<AppState>, Arc<tokio
     let app = Router::new()
         .route("/", get(serve_index))
         .route("/api/info", get(api_info))
+        .route("/api/discovered", get(api_discovered))
         .route(
             "/api/upload",
             // axum 默认 2MB body 限制对图片/视频很容易就超了 → 连接被中止 → 浏览器收到 xhr.onerror（「网络错误」)
@@ -141,6 +154,11 @@ pub async fn start_server(port: u16) -> AppResult<(u16, Arc<AppState>, Arc<tokio
         // 周期清理过期文件
         let cleanup_state = state_clone.clone();
         let cleanup_signal = signal_clone.clone();
+        let discovery_state = state_clone.clone();
+        let discovery_signal = signal_clone.clone();
+        let discovery_task = tokio::spawn(async move {
+            run_discovery(discovery_state, actual_port, discovery_signal).await;
+        });
         let cleanup_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -169,6 +187,7 @@ pub async fn start_server(port: u16) -> AppResult<(u16, Arc<AppState>, Arc<tokio
             log::error!("跨设备传输服务错误: {}", e);
         }
         cleanup_task.abort();
+        discovery_task.abort();
         log::info!("跨设备传输服务已停止");
     });
 
@@ -181,12 +200,18 @@ async fn serve_index() -> Html<&'static str> {
 
 async fn api_info(State(handle): State<ServerHandle>) -> Json<serde_json::Value> {
     let urls = build_urls(handle.port);
+    let discovered = discovered_devices(&handle.state).await;
     let peers = handle.state.peers.lock().await;
     Json(json!({
         "port": handle.port,
         "urls": urls,
+        "discovered": discovered,
         "peerCount": peers.len(),
     }))
+}
+
+async fn api_discovered(State(handle): State<ServerHandle>) -> Json<Vec<DiscoveredDevice>> {
+    Json(discovered_devices(&handle.state).await)
 }
 
 fn build_urls(port: u16) -> Vec<NetworkUrl> {
@@ -198,6 +223,129 @@ fn build_urls(port: u16) -> Vec<NetworkUrl> {
             ip,
         })
         .collect()
+}
+
+async fn discovered_devices(state: &AppState) -> Vec<DiscoveredDevice> {
+    let now = now_millis();
+    let mut devices = state.discovered.lock().await;
+    devices.retain(|_, d| now - d.last_seen_at <= DISCOVERY_TTL_MS);
+    let mut list: Vec<DiscoveredDevice> = devices.values().cloned().collect();
+    list.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+    list
+}
+
+async fn run_discovery(
+    state: Arc<AppState>,
+    service_port: u16,
+    stop_signal: Arc<tokio::sync::Notify>,
+) {
+    let mdns = match ServiceDaemon::new() {
+        Ok(daemon) => daemon,
+        Err(e) => {
+            log::warn!("跨设备传输 mDNS：启动失败，自动发现已降级: {}", e);
+            return;
+        }
+    };
+    let display_name = default_desktop_name();
+    let instance = discovery_instance_name();
+    let host_name = format!("{}.local.", instance);
+    let ips = list_local_ipv4()
+        .into_iter()
+        .map(|(_, ip)| ip)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut properties = HashMap::new();
+    properties.insert("deviceId".to_string(), DESKTOP_DEVICE_ID.clone());
+    properties.insert("displayName".to_string(), display_name.clone());
+    properties.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
+    let info = match ServiceInfo::new(
+        DISCOVERY_SERVICE_TYPE,
+        &instance,
+        &host_name,
+        ips,
+        service_port,
+        properties,
+    ) {
+        Ok(info) => info,
+        Err(e) => {
+            log::warn!("跨设备传输 mDNS：创建服务信息失败: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = mdns.register(info) {
+        log::warn!("跨设备传输 mDNS：注册服务失败: {}", e);
+    }
+    let receiver = match mdns.browse(DISCOVERY_SERVICE_TYPE) {
+        Ok(receiver) => receiver,
+        Err(e) => {
+            log::warn!("跨设备传输 mDNS：浏览服务失败: {}", e);
+            let _ = mdns.shutdown();
+            return;
+        }
+    };
+    let discovery_state = state.clone();
+    let discovery_thread = std::thread::spawn(move || {
+        while let Ok(event) = receiver.recv() {
+            match event {
+                ServiceEvent::ServiceResolved(info) => {
+                    let device_id = info
+                        .get_property_val_str("deviceId")
+                        .unwrap_or("")
+                        .to_string();
+                    if device_id.is_empty() || device_id == *DESKTOP_DEVICE_ID {
+                        continue;
+                    }
+                    let display_name = info
+                        .get_property_val_str("displayName")
+                        .unwrap_or_else(|| info.get_fullname())
+                        .to_string();
+                    let host = info
+                        .get_addresses_v4()
+                        .into_iter()
+                        .next()
+                        .map(|ip| ip.to_string())
+                        .unwrap_or_else(|| info.get_hostname().trim_end_matches('.').to_string());
+                    let port = info.get_port();
+                    let mut devices = discovery_state.discovered.blocking_lock();
+                    devices.insert(
+                        device_id.clone(),
+                        DiscoveredDevice {
+                            device_id,
+                            display_name,
+                            host: host.clone(),
+                            port,
+                            url: format!("http://{}:{}/", host, port),
+                            last_seen_at: now_millis(),
+                        },
+                    );
+                }
+                ServiceEvent::ServiceRemoved(_, _) => {
+                    let now = now_millis();
+                    let mut devices = discovery_state.discovered.blocking_lock();
+                    devices.retain(|_, d| now - d.last_seen_at <= DISCOVERY_TTL_MS);
+                }
+                _ => {}
+            }
+        }
+    });
+
+    stop_signal.notified().await;
+    let _ = mdns.stop_browse(DISCOVERY_SERVICE_TYPE);
+    let _ = mdns.shutdown();
+    let _ = discovery_thread.join();
+}
+
+fn default_desktop_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "CodeShelf".to_string())
+}
+
+fn discovery_instance_name() -> String {
+    let id = DESKTOP_DEVICE_ID.trim_start_matches("cs-");
+    format!("cs-{}", &id[..id.len().min(8)])
 }
 
 // ============== File relay ==============
@@ -285,10 +433,7 @@ async fn api_upload(
     .into_response()
 }
 
-async fn api_file(
-    State(handle): State<ServerHandle>,
-    Path(token): Path<String>,
-) -> Response {
+async fn api_file(State(handle): State<ServerHandle>, Path(token): Path<String>) -> Response {
     let cached = {
         let mut files = handle.state.files.lock().await;
         // 一次性消费：取出后从缓存中删除
@@ -403,8 +548,10 @@ async fn handle_socket(
     // 注册 peer：在锁内按当前频道已有名字去重，保证同频道默认名唯一
     let display_name = {
         let mut peers = handle.state.peers.lock().await;
-        let taken: HashSet<String> =
-            peers.values().map(|e| e.info.display_name.clone()).collect();
+        let taken: HashSet<String> = peers
+            .values()
+            .map(|e| e.info.display_name.clone())
+            .collect();
         let name = dedup_name(&desired_name, &taken);
         peers.insert(
             peer_id.clone(),
@@ -469,12 +616,10 @@ async fn handle_socket(
             }
         };
         match msg {
-            Message::Text(text) => {
-                match serde_json::from_str::<ClientMessage>(&text) {
-                    Ok(cmsg) => handle_client_message(&handle.state, &peer_id, cmsg).await,
-                    Err(e) => log::warn!("无法解析消息 ({}): {} text={}", peer_id, e, text),
-                }
-            }
+            Message::Text(text) => match serde_json::from_str::<ClientMessage>(&text) {
+                Ok(cmsg) => handle_client_message(&handle.state, &peer_id, cmsg).await,
+                Err(e) => log::warn!("无法解析消息 ({}): {} text={}", peer_id, e, text),
+            },
             Message::Close(_) => break,
             _ => {}
         }
