@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   Send,
   Paperclip,
@@ -48,7 +48,7 @@ interface PairDropProps {
 /** 跨设备传输默认端口（与后端 DEFAULT_PORT 保持一致）；加入对方桌面端时未填端口用它兜底 */
 const DEFAULT_PAIRDROP_PORT = 8421;
 const REMOTE_TARGETS_STORAGE_KEY = "pairdrop:remote-targets";
-const ACTIVE_ROOM_STORAGE_KEY = "pairdrop:active-room";
+const PEER_ALIASES_STORAGE_KEY = "pairdrop:peer-aliases";
 const LOCAL_ROOM_ID = "local";
 
 interface RemoteTarget {
@@ -57,6 +57,11 @@ interface RemoteTarget {
   deviceId?: string;
   displayName?: string;
 }
+
+type ContextMenuState =
+  | { kind: "local"; x: number; y: number }
+  | { kind: "remote"; x: number; y: number; target: RemoteTarget }
+  | { kind: "peer"; x: number; y: number; peer: HistoricalPeer };
 
 /** 解析"加入其他桌面端"输入：支持 "192.168.1.5"、"192.168.1.5:8421"、"http://192.168.1.5:8421" */
 function parseJoinTarget(v: string): RemoteTarget | null {
@@ -107,6 +112,21 @@ function loadRemoteTargets(): RemoteTarget[] {
 
 function saveRemoteTargets(targets: RemoteTarget[]) {
   localStorage.setItem(REMOTE_TARGETS_STORAGE_KEY, JSON.stringify(targets));
+}
+
+function loadPeerAliases(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(PEER_ALIASES_STORAGE_KEY);
+    if (!raw) return {};
+    const aliases = JSON.parse(raw) as Record<string, string>;
+    return aliases && typeof aliases === "object" ? aliases : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePeerAliases(aliases: Record<string, string>) {
+  localStorage.setItem(PEER_ALIASES_STORAGE_KEY, JSON.stringify(aliases));
 }
 
 function targetFromDiscovery(device: PairDropDiscoveredDevice): RemoteTarget {
@@ -279,14 +299,16 @@ function ChatWorkspace({
   const [remoteTargets, setRemoteTargets] = useState<RemoteTarget[]>(
     loadRemoteTargets
   );
-  const [activeRoomId, setActiveRoomId] = useState(
-    () => localStorage.getItem(ACTIVE_ROOM_STORAGE_KEY) || LOCAL_ROOM_ID
-  );
+  const [activeRoomId, setActiveRoomId] = useState(LOCAL_ROOM_ID);
   const [disabledRooms, setDisabledRooms] = useState<Record<string, boolean>>({});
   const [discoveredDevices, setDiscoveredDevices] = useState<
     PairDropDiscoveredDevice[]
   >([]);
   const [joinInput, setJoinInput] = useState("");
+  const [peerAliases, setPeerAliases] = useState<Record<string, string>>(
+    loadPeerAliases
+  );
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const activeRemoteTarget = remoteTargets.find(
     (target) => remoteRoomId(target) === activeRoomId
   ) || null;
@@ -308,16 +330,9 @@ function ChatWorkspace({
     : LOCAL_ROOM_ID;
   const currentRoomDisabled = !!disabledRooms[currentRoomId];
   const currentRoomIsRemote = !!activeRemoteTarget;
+  const localRoomDisabled = !!disabledRooms[LOCAL_ROOM_ID];
   const [draft, setDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (activeRoomId === LOCAL_ROOM_ID || activeRemoteTarget) {
-      localStorage.setItem(ACTIVE_ROOM_STORAGE_KEY, activeRoomId);
-      return;
-    }
-    setActiveRoomId(LOCAL_ROOM_ID);
-  }, [activeRoomId, activeRemoteTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -334,17 +349,22 @@ function ChatWorkspace({
             const target = targetFromDiscovery(device);
             const index = next.findIndex((item) => isSameRemoteTarget(item, target));
             const previous = index >= 0 ? next[index] : null;
+            const merged = {
+              ...previous,
+              ...target,
+              displayName: previous?.displayName || target.displayName,
+            };
             if (
               !previous ||
               previous.deviceId !== target.deviceId ||
-              previous.displayName !== target.displayName ||
+              previous.displayName !== merged.displayName ||
               previous.host !== target.host ||
               previous.port !== target.port
             ) {
               changed = true;
             }
             if (index >= 0) {
-              next[index] = { ...previous, ...target };
+              next[index] = merged;
             } else {
               next.unshift(target);
             }
@@ -386,6 +406,84 @@ function ChatWorkspace({
     setJoinInput("");
   };
 
+  const updateRemoteTarget = (
+    target: RemoteTarget,
+    updater: (current: RemoteTarget) => RemoteTarget
+  ) => {
+    setRemoteTargets((prev) => {
+      const next = prev.map((item) => {
+        if (!isSameRemoteTarget(item, target)) return item;
+        return updater(item);
+      });
+      saveRemoteTargets(next);
+      return next;
+    });
+  };
+
+  const handleRenameRemote = (target: RemoteTarget) => {
+    const name = window.prompt("重命名这个连接", remoteLabel(target));
+    if (name === null) return;
+    const displayName = name.trim();
+    if (!displayName) return;
+    updateRemoteTarget(target, (current) => ({ ...current, displayName }));
+  };
+
+  const handleEditRemoteAddress = (target: RemoteTarget) => {
+    const value = window.prompt(
+      "修改连接地址",
+      `${target.host}:${target.port}`
+    );
+    if (value === null) return;
+    const parsed = parseJoinTarget(value);
+    if (!parsed) {
+      showToast("error", "地址格式不对，示例：192.168.1.5:8421");
+      return;
+    }
+    const oldRoomId = remoteRoomId(target);
+    const nextTarget: RemoteTarget = {
+      ...target,
+      host: parsed.host,
+      port: parsed.port,
+      deviceId: target.deviceId,
+    };
+    updateRemoteTarget(target, () => nextTarget);
+    if (activeRoomId === oldRoomId) {
+      setActiveRoomId(remoteRoomId(nextTarget));
+    }
+    setDisabledRooms((prev) => {
+      const next = { ...prev };
+      if (oldRoomId !== remoteRoomId(nextTarget)) {
+        delete next[oldRoomId];
+      }
+      next[remoteRoomId(nextTarget)] = false;
+      return next;
+    });
+  };
+
+  const handleRenamePeer = (peer: HistoricalPeer) => {
+    const name = window.prompt("重命名这个设备", peerAliases[peer.peerId] || peer.displayName);
+    if (name === null) return;
+    const displayName = name.trim();
+    setPeerAliases((prev) => {
+      const next = { ...prev };
+      if (displayName) next[peer.peerId] = displayName;
+      else delete next[peer.peerId];
+      savePeerAliases(next);
+      return next;
+    });
+  };
+
+  const handleRenameLocal = () => {
+    const name = window.prompt("重命名本机", localClient.selfName || "");
+    if (name === null) return;
+    const displayName = name.trim();
+    if (displayName) localClient.updateSelfName(displayName);
+  };
+
+  const handleOpenContextMenu = (menu: ContextMenuState) => {
+    setContextMenu(menu);
+  };
+
   const handleSelectRoom = (roomId: string) => {
     setDraft("");
     setActiveRoomId(roomId);
@@ -404,6 +502,20 @@ function ChatWorkspace({
     }));
   };
 
+  const handleToggleLocalRoom = () => {
+    setDisabledRooms((prev) => ({
+      ...prev,
+      [LOCAL_ROOM_ID]: !prev[LOCAL_ROOM_ID],
+    }));
+  };
+
+  const handleReconnectCurrentRoom = () => {
+    setDisabledRooms((prev) => ({ ...prev, [currentRoomId]: true }));
+    window.setTimeout(() => {
+      setDisabledRooms((prev) => ({ ...prev, [currentRoomId]: false }));
+    }, 50);
+  };
+
   const handleForgetRemote = (target: RemoteTarget) => {
     const roomId = remoteRoomId(target);
     setRemoteTargets((prev) => {
@@ -420,6 +532,17 @@ function ChatWorkspace({
       setActiveRoomId(LOCAL_ROOM_ID);
     }
   };
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+    };
+  }, [contextMenu]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -429,7 +552,7 @@ function ChatWorkspace({
 
   const onlinePeers = client.peers.filter((p) => !p.isSelf);
   const onlinePeerIds = new Set(onlinePeers.map((p) => p.peerId));
-  const peers: HistoricalPeer[] = [
+  const rawPeers: HistoricalPeer[] = [
     ...onlinePeers.map((peer) => ({
       ...peer,
       lastSeenAt:
@@ -439,6 +562,10 @@ function ChatWorkspace({
     })),
     ...client.knownPeers.filter((peer) => !onlinePeerIds.has(peer.peerId)),
   ];
+  const peers: HistoricalPeer[] = rawPeers.map((peer) => ({
+    ...peer,
+    displayName: peerAliases[peer.peerId] || peer.displayName,
+  }));
   const selectedPeer = peers.find((p) => p.peerId === client.selected) || null;
   const selectedPeerOnline =
     !currentRoomDisabled && !!selectedPeer && onlinePeerIds.has(selectedPeer.peerId);
@@ -586,8 +713,8 @@ function ChatWorkspace({
         <div className="p-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg bg-gray-50 dark:bg-gray-900">
             <Avatar
-              label={avatarLabel(client.selfName || "?")}
-              color={avatarColor(client.selfId || "self")}
+              label={avatarLabel(localClient.selfName || "?")}
+              color={avatarColor(localClient.selfId || "self")}
               size={32}
             />
             <div className="flex-1 min-w-0">
@@ -599,12 +726,12 @@ function ChatWorkspace({
                   maxLength={32}
                   onChange={(e) => setNameDraft(e.target.value)}
                   onBlur={() => {
-                    if (nameDraft.trim()) client.updateSelfName(nameDraft);
+                    if (nameDraft.trim()) localClient.updateSelfName(nameDraft);
                     setEditingName(false);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      if (nameDraft.trim()) client.updateSelfName(nameDraft);
+                      if (nameDraft.trim()) localClient.updateSelfName(nameDraft);
                       setEditingName(false);
                     } else if (e.key === "Escape") {
                       setEditingName(false);
@@ -615,39 +742,39 @@ function ChatWorkspace({
                 <button
                   className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate block max-w-full text-left hover:text-blue-500 transition-colors"
                   onClick={() => {
-                    setNameDraft(client.selfName);
+                    setNameDraft(localClient.selfName);
                     setEditingName(true);
                   }}
                   title="点击修改名称"
                 >
-                  {client.selfName || "（未命名）"}
+                  {localClient.selfName || "（未命名）"}
                 </button>
               )}
               <div className="flex items-center gap-1 text-[11px] mt-0.5">
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
-                    client.status === "online"
+                    localClient.status === "online"
                       ? "bg-green-500"
-                      : client.status === "connecting"
+                      : localClient.status === "connecting"
                       ? "bg-orange-500"
                       : "bg-red-500"
                   }`}
                 />
                 <span className="text-gray-500 dark:text-gray-400">
-                  {client.status === "online"
+                  {localClient.status === "online"
                     ? "在线"
-                    : client.status === "connecting"
+                    : localClient.status === "connecting"
                     ? "连接中…"
                     : "已断开"}
                 </span>
               </div>
             </div>
             <button
-              onClick={handleToggleCurrentRoom}
+              onClick={handleToggleLocalRoom}
               className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title={currentRoomDisabled ? "重新连接当前房间" : "断开当前房间"}
+              title={localRoomDisabled ? "重新连接本机入口" : "断开本机入口"}
             >
-              {currentRoomDisabled ? <Wifi size={15} /> : <WifiOff size={15} />}
+              {localRoomDisabled ? <Wifi size={15} /> : <WifiOff size={15} />}
             </button>
           </div>
         </div>
@@ -657,6 +784,15 @@ function ChatWorkspace({
             active={currentRoomId === LOCAL_ROOM_ID}
             online={!disabledRooms[LOCAL_ROOM_ID] && localClient.status === "online"}
             onClick={handleBackToLocal}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleOpenContextMenu({
+                kind: "local",
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }}
           />
           {!hasListItems ? (
             <div className="p-8 text-center text-gray-400">
@@ -684,6 +820,16 @@ function ChatWorkspace({
                     client.selectPeer(peer.peerId);
                     setShowSidebarOnMobile(false);
                   }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleOpenContextMenu({
+                      kind: "peer",
+                      x: event.clientX,
+                      y: event.clientY,
+                      peer,
+                    });
+                  }}
                 />
               ))}
               {visibleRemoteTargets.map((target) => {
@@ -698,6 +844,16 @@ function ChatWorkspace({
                     onClick={() => {
                       handleSelectRoom(roomId);
                       setShowSidebarOnMobile(false);
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      handleOpenContextMenu({
+                        kind: "remote",
+                        x: event.clientX,
+                        y: event.clientY,
+                        target,
+                      });
                     }}
                     onForget={() => handleForgetRemote(target)}
                   />
@@ -777,11 +933,19 @@ function ChatWorkspace({
                     返回本机
                   </button>
                   <button
-                    onClick={handleToggleCurrentRoom}
+                    onClick={
+                      currentRoomDisabled || remoteClient.status === "offline"
+                        ? handleReconnectCurrentRoom
+                        : handleToggleCurrentRoom
+                    }
                     className="w-7 h-7 rounded-md flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                    title={currentRoomDisabled ? "重新连接当前地址" : "断开当前地址"}
+                    title={
+                      currentRoomDisabled || remoteClient.status === "offline"
+                        ? "重试当前地址"
+                        : "断开当前地址"
+                    }
                   >
-                    {currentRoomDisabled ? (
+                    {currentRoomDisabled || remoteClient.status === "offline" ? (
                       <Wifi size={14} />
                     ) : (
                       <WifiOff size={14} />
@@ -871,6 +1035,10 @@ function ChatWorkspace({
               {activeRemoteTarget
                 ? currentRoomDisabled
                   ? "已断开"
+                  : remoteClient.status === "connecting"
+                  ? "正在连接"
+                  : remoteClient.status === "offline"
+                  ? "连接不上这个地址"
                   : "正在进入局域网圈"
                 : peers.length === 0
                 ? "等待设备加入"
@@ -878,7 +1046,9 @@ function ChatWorkspace({
             </h4>
             <p className="text-xs text-gray-500 dark:text-gray-400 max-w-sm leading-relaxed">
               {activeRemoteTarget
-                ? "发现到的桌面端会自动连接，连上后会直接显示可聊天的设备。"
+                ? remoteClient.status === "offline" && !currentRoomDisabled
+                  ? `${remoteLabel(activeRemoteTarget)} 暂时不可达，请确认对方服务还在运行，或点本机返回。`
+                  : "发现到的桌面端会自动连接，连上后会直接显示可聊天的设备。"
                 : peers.length === 0
                 ? "点击「扫码加入」按钮分享地址，让其他设备通过浏览器加入到这个传输房间。"
                 : "在左侧设备列表中选择一个对象，即可发送文字或拖拽 / 选择文件发送。"}
@@ -886,16 +1056,22 @@ function ChatWorkspace({
             {activeRemoteTarget ? (
               <div className="mt-4 flex items-center gap-2">
                 <Button
-                  onClick={handleToggleCurrentRoom}
+                  onClick={
+                    currentRoomDisabled || remoteClient.status === "offline"
+                      ? handleReconnectCurrentRoom
+                      : handleToggleCurrentRoom
+                  }
                   variant="secondary"
                   size="sm"
                 >
-                  {currentRoomDisabled ? (
+                  {currentRoomDisabled || remoteClient.status === "offline" ? (
                     <Wifi size={14} className="mr-1.5" />
                   ) : (
                     <WifiOff size={14} className="mr-1.5" />
                   )}
-                  {currentRoomDisabled ? "重新连接" : "断开"}
+                  {currentRoomDisabled || remoteClient.status === "offline"
+                    ? "重试"
+                    : "断开"}
                 </Button>
                 <Button
                   onClick={handleBackToLocal}
@@ -905,11 +1081,178 @@ function ChatWorkspace({
                   <ChevronLeft size={14} className="mr-1.5" />
                   本机
                 </Button>
+                {remoteClient.status === "offline" ? (
+                  <Button
+                    onClick={() => handleForgetRemote(activeRemoteTarget)}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    <X size={14} className="mr-1.5" />
+                    移除
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>
         )}
       </main>
+
+      {contextMenu ? (
+        <PairDropContextMenu
+          menu={contextMenu}
+          activeRoomId={activeRoomId}
+          disabledRooms={disabledRooms}
+          onClose={() => setContextMenu(null)}
+          onRenameLocal={handleRenameLocal}
+          onBackToLocal={handleBackToLocal}
+          onToggleLocal={handleToggleLocalRoom}
+          onSelectRemote={(target) => {
+            const roomId = remoteRoomId(target);
+            setDisabledRooms((prev) => ({ ...prev, [roomId]: false }));
+            handleSelectRoom(roomId);
+            setShowSidebarOnMobile(false);
+          }}
+          onReconnectRemote={(target) => {
+            const roomId = remoteRoomId(target);
+            setActiveRoomId(roomId);
+            setDisabledRooms((prev) => ({ ...prev, [roomId]: true }));
+            window.setTimeout(() => {
+              setDisabledRooms((prev) => ({ ...prev, [roomId]: false }));
+            }, 50);
+          }}
+          onDisconnectRemote={(target) => {
+            const roomId = remoteRoomId(target);
+            setDisabledRooms((prev) => ({ ...prev, [roomId]: true }));
+          }}
+          onRenameRemote={handleRenameRemote}
+          onEditRemoteAddress={handleEditRemoteAddress}
+          onForgetRemote={handleForgetRemote}
+          onRenamePeer={handleRenamePeer}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function PairDropContextMenu({
+  menu,
+  activeRoomId,
+  disabledRooms,
+  onClose,
+  onRenameLocal,
+  onBackToLocal,
+  onToggleLocal,
+  onSelectRemote,
+  onReconnectRemote,
+  onDisconnectRemote,
+  onRenameRemote,
+  onEditRemoteAddress,
+  onForgetRemote,
+  onRenamePeer,
+}: {
+  menu: ContextMenuState;
+  activeRoomId: string;
+  disabledRooms: Record<string, boolean>;
+  onClose: () => void;
+  onRenameLocal: () => void;
+  onBackToLocal: () => void;
+  onToggleLocal: () => void;
+  onSelectRemote: (target: RemoteTarget) => void;
+  onReconnectRemote: (target: RemoteTarget) => void;
+  onDisconnectRemote: (target: RemoteTarget) => void;
+  onRenameRemote: (target: RemoteTarget) => void;
+  onEditRemoteAddress: (target: RemoteTarget) => void;
+  onForgetRemote: (target: RemoteTarget) => void;
+  onRenamePeer: (peer: HistoricalPeer) => void;
+}) {
+  const x = Math.min(menu.x, window.innerWidth - 180);
+  const y = Math.min(menu.y, window.innerHeight - 260);
+  const run = (action: () => void) => {
+    action();
+    onClose();
+  };
+  const itemClass =
+    "w-full px-3 py-2 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700";
+
+  return (
+    <div
+      className="fixed z-50 min-w-[168px] overflow-hidden rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1"
+      style={{ left: x, top: y }}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      {menu.kind === "local" ? (
+        <>
+          <button className={itemClass} onClick={() => run(onBackToLocal)}>
+            切回本机
+          </button>
+          <button className={itemClass} onClick={() => run(onRenameLocal)}>
+            重命名本机
+          </button>
+          <button className={itemClass} onClick={() => run(onToggleLocal)}>
+            {disabledRooms[LOCAL_ROOM_ID] ? "重新连接本机" : "断开本机"}
+          </button>
+        </>
+      ) : null}
+      {menu.kind === "remote" ? (
+        <>
+          <button
+            className={itemClass}
+            onClick={() => run(() => onSelectRemote(menu.target))}
+          >
+            进入连接
+          </button>
+          <button
+            className={itemClass}
+            onClick={() => run(() => onReconnectRemote(menu.target))}
+          >
+            重试连接
+          </button>
+          <button
+            className={itemClass}
+            onClick={() => run(() => onDisconnectRemote(menu.target))}
+          >
+            断开连接
+          </button>
+          <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+          <button
+            className={itemClass}
+            onClick={() => run(() => onRenameRemote(menu.target))}
+          >
+            重命名
+          </button>
+          <button
+            className={itemClass}
+            onClick={() => run(() => onEditRemoteAddress(menu.target))}
+          >
+            修改地址
+          </button>
+          <button
+            className={`${itemClass} text-red-600 dark:text-red-400`}
+            onClick={() => run(() => onForgetRemote(menu.target))}
+          >
+            移除
+          </button>
+          {activeRoomId === remoteRoomId(menu.target) ? (
+            <div className="px-3 py-1.5 text-[10px] text-gray-400">
+              当前连接
+            </div>
+          ) : null}
+        </>
+      ) : null}
+      {menu.kind === "peer" ? (
+        <>
+          <button
+            className={itemClass}
+            onClick={() => run(() => onRenamePeer(menu.peer))}
+          >
+            重命名
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -918,14 +1261,17 @@ function LocalScopeItem({
   active,
   online,
   onClick,
+  onContextMenu,
 }: {
   active: boolean;
   online: boolean;
   onClick: () => void;
+  onContextMenu: (event: MouseEvent) => void;
 }) {
   return (
     <button
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left relative ${
         active ? "bg-blue-50 dark:bg-blue-900/30" : ""
       }`}
@@ -958,6 +1304,7 @@ function RemoteTargetItem({
   online,
   disabled,
   onClick,
+  onContextMenu,
   onForget,
 }: {
   target: RemoteTarget;
@@ -965,12 +1312,14 @@ function RemoteTargetItem({
   online: boolean;
   disabled: boolean;
   onClick: () => void;
+  onContextMenu: (event: MouseEvent) => void;
   onForget: () => void;
 }) {
   return (
     <div className="group relative">
       <button
         onClick={onClick}
+        onContextMenu={onContextMenu}
         className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left ${
           active ? "bg-blue-50 dark:bg-blue-900/30" : ""
         }`}
@@ -1019,16 +1368,19 @@ function PeerItem({
   online,
   unread,
   onClick,
+  onContextMenu,
 }: {
   peer: Peer & { lastSeenAt?: number };
   active: boolean;
   online: boolean;
   unread: number;
   onClick: () => void;
+  onContextMenu: (event: MouseEvent) => void;
 }) {
   return (
     <button
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left relative ${
         active ? "bg-blue-50 dark:bg-blue-900/30" : ""
       }`}
