@@ -19,6 +19,11 @@ if (!import.meta.env.DEV) {
   });
 }
 
+// 阻止把文件拖进窗口时 WebView 直接导航打开该文件(整个 app 被文件覆盖、只能退出解决)。
+// 只 preventDefault、不 stopPropagation,页面内的拖拽上传(如跨设备传输)仍能读到 dataTransfer.files。
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
 console.log("Frontend starting...");
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

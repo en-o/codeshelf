@@ -116,8 +116,11 @@ button { font-family: inherit; cursor: pointer; }
 .msg.self { align-self: flex-end; flex-direction: row-reverse; }
 .msg-body { padding: 8px 12px; border-radius: 12px; background: var(--bg-primary); border: 1px solid var(--border); font-size: 14px; line-height: 1.5; word-break: break-word; white-space: pre-wrap; }
 .msg.self .msg-body { background: var(--accent); border-color: var(--accent); color: white; }
-.msg-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; text-align: right; }
-.msg.self .msg-time { text-align: left; }
+.msg-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; text-align: right; display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.msg.self .msg-time { justify-content: flex-start; }
+.msg-copy-btn { background: none; border: none; color: var(--text-muted); font-size: 11px; cursor: pointer; padding: 0; opacity: 0; transition: opacity 0.15s; }
+.msg:hover .msg-copy-btn { opacity: 1; }
+.msg-copy-btn:hover { color: var(--accent); }
 .msg-file { display: flex; align-items: center; gap: 10px; min-width: 200px; }
 .msg-file-icon { width: 36px; height: 36px; background: rgba(255,255,255,0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 700; }
 .msg.self .msg-file-icon { background: rgba(255,255,255,0.25); }
@@ -503,7 +506,7 @@ function renderMessages(){
     const div = document.createElement('div');
     div.className = 'msg' + (isSelf ? ' self' : '');
     if (m.kind === 'text'){
-      div.innerHTML = `<div><div class="msg-body">${escapeHTML(m.text)}</div><div class="msg-time">${formatTime(m.ts)}</div></div>`;
+      div.innerHTML = `<div><div class="msg-body">${escapeHTML(m.text)}</div><div class="msg-time"><button class="msg-copy-btn" onclick="copyMsgText(this)">复制</button>${formatTime(m.ts)}</div></div>`;
     } else if (m.kind === 'file'){
       const ext = (m.name.split('.').pop() || '').toUpperCase().slice(0,4);
       const isUploading = isSelf && typeof m.uploadProgress === 'number' && m.uploadProgress < 100;
@@ -543,14 +546,30 @@ function renderMessages(){
   box.scrollTop = box.scrollHeight;
 }
 
+function copyMsgText(btn){
+  const body = btn.closest('.msg').querySelector('.msg-body');
+  const text = body ? body.textContent : '';
+  navigator.clipboard.writeText(text).then(
+    () => toast('已复制', 'success'),
+    () => toast('复制失败', 'error')
+  );
+}
 function sendText(){
   const input = $('text-input');
   const text = input.value.trim();
   if (!text){ return; }
   if (!state.selected){ toast('请先选择一个设备', 'error'); return; }
-  const ok = sendWs({ type: 'send-text', to: state.selected, text });
-  if (!ok) return;
-  addMessage(state.selected, { kind: 'text', from: state.selfId, text, ts: Date.now() });
+  // 超长文本按码点切分成多条依次发送(服务端单条上限 256KB);Array.from 避免截断 emoji 代理对。
+  const CHUNK = 60000;
+  const chars = text.length > CHUNK ? Array.from(text) : null;
+  const parts = chars
+    ? Array.from({ length: Math.ceil(chars.length / CHUNK) }, (_, i) => chars.slice(i * CHUNK, (i + 1) * CHUNK).join(''))
+    : [text];
+  for (const part of parts){
+    const ok = sendWs({ type: 'send-text', to: state.selected, text: part });
+    if (!ok) return;
+    addMessage(state.selected, { kind: 'text', from: state.selfId, text: part, ts: Date.now() });
+  }
   input.value = '';
   input.style.height = 'auto';
 }

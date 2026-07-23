@@ -664,7 +664,18 @@ async fn handle_client_message(state: &AppState, sender_id: &str, msg: ClientMes
         }
         ClientMessage::SendText { to, text } => {
             let trimmed = text.trim().to_string();
-            if trimmed.is_empty() || trimmed.len() > 8192 {
+            if trimmed.is_empty() {
+                return;
+            }
+            // 单条文本上限 256KB(UTF-8 字节)——长文/粘贴代码够用,又能防滥用撑爆内存。
+            // 超限时回发错误给发送方,避免旧行为里"本地显示已发、对方永远收不到"的静默丢失。
+            if trimmed.len() > 256 * 1024 {
+                let peers = state.peers.lock().await;
+                if let Some(sender) = peers.get(sender_id) {
+                    let _ = sender.sender.send(ServerMessage::Error {
+                        message: "文本过长(超过 256KB),未发送".to_string(),
+                    });
+                }
                 return;
             }
             relay_text(state, sender_id, &to, &trimmed).await;

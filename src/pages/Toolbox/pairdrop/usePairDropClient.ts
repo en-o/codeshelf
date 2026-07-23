@@ -369,16 +369,26 @@ export function usePairDropClient({
     (to: string, text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      const ok = send({ type: "send-text", to, text: trimmed });
-      if (!ok) return;
-      const id = `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      appendMessage(to, {
-        kind: "text",
-        id,
-        from: selfId || "self",
-        text: trimmed,
-        ts: Date.now(),
-      });
+      // 超长文本按码点切分成多条依次发送(服务端单条上限 256KB,60000 码点 * 4 字节 < 上限);
+      // 用 Array.from 按码点切,避免把 emoji 等代理对从中间截断。
+      const CHUNK = 60000;
+      const chars = trimmed.length > CHUNK ? Array.from(trimmed) : null;
+      const parts = chars
+        ? Array.from({ length: Math.ceil(chars.length / CHUNK) }, (_, i) =>
+            chars.slice(i * CHUNK, (i + 1) * CHUNK).join("")
+          )
+        : [trimmed];
+      for (const part of parts) {
+        const ok = send({ type: "send-text", to, text: part });
+        if (!ok) return;
+        appendMessage(to, {
+          kind: "text",
+          id: `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          from: selfId || "self",
+          text: part,
+          ts: Date.now(),
+        });
+      }
     },
     [send, appendMessage, selfId]
   );

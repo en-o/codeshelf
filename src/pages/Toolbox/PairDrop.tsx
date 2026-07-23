@@ -676,6 +676,15 @@ function ChatWorkspace({
     }
   };
 
+  const handleCopyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("success", "已复制");
+    } catch (e) {
+      showToast("error", "复制失败: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
   const handleOpenSavedPath = async (path: string) => {
     try {
       await openInExplorer(path);
@@ -969,6 +978,7 @@ function ChatWorkspace({
                     onSave={handleSaveFile}
                     onCopyPath={handleCopySavedPath}
                     onOpenPath={handleOpenSavedPath}
+                    onCopyText={handleCopyText}
                   />
                 ))
               )}
@@ -1423,12 +1433,14 @@ function MessageBubble({
   onSave,
   onCopyPath,
   onOpenPath,
+  onCopyText,
 }: {
   message: any;
   isSelf: boolean;
   onSave?: (token: string, suggestedName: string, messageId: string) => void;
   onCopyPath?: (path: string) => void;
   onOpenPath?: (path: string) => void;
+  onCopyText?: (text: string) => void;
 }) {
   const time = useMemo(() => {
     const d = new Date(message.ts);
@@ -1454,7 +1466,7 @@ function MessageBubble({
           isSelf ? "ml-auto" : ""
         }`}
       >
-        <div className="min-w-0 max-w-full">
+        <div className="min-w-0 max-w-full group">
           <div
             className={`px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
               isSelf
@@ -1465,11 +1477,19 @@ function MessageBubble({
             {message.text}
           </div>
           <div
-            className={`text-[10px] text-gray-400 mt-1 ${
-              isSelf ? "text-left" : "text-right"
+            className={`flex items-center gap-2 mt-1 ${
+              isSelf ? "justify-start" : "justify-end"
             }`}
           >
-            {time}
+            <button
+              onClick={() => onCopyText?.(message.text)}
+              className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] text-gray-400 hover:text-blue-500"
+              title="复制文本"
+            >
+              <Copy size={11} />
+              复制
+            </button>
+            <span className="text-[10px] text-gray-400">{time}</span>
           </div>
         </div>
       </div>
