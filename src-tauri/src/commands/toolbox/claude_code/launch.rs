@@ -237,14 +237,15 @@ pub async fn launch_claude_in_terminal(
                 }
                 "custom" => {
                     if let Some(custom) = custom_path {
+                        let lower = custom.to_ascii_lowercase();
                         if is_windows_terminal(&custom) {
                             // Windows Terminal：走 wt.exe -d <dir> cmd /k <cli>，
                             // 直接启动 WindowsTerminal.exe 会 0x80070005，裸 wt.exe 又常「找不到程序」。
                             launch_wt_or_cmd(&dir, cli)?;
-                        } else {
-                            // 任意自定义终端：尽力在目标目录打开(无法通用地注入 CLI 命令)
+                        } else if lower.ends_with("powershell.exe") || lower.ends_with("pwsh.exe") {
                             Command::new(&custom)
                                 .current_dir(&dir)
+                                .args(["-NoExit", "-Command", cli])
                                 .creation_flags(CREATE_NEW_CONSOLE)
                                 .spawn()
                                 .map_err(|e| {
@@ -253,6 +254,22 @@ pub async fn launch_claude_in_terminal(
                                         e
                                     ))
                                 })?;
+                        } else if lower.ends_with("cmd.exe") {
+                            Command::new(&custom)
+                                .current_dir(&dir)
+                                .args(["/k", cli])
+                                .creation_flags(CREATE_NEW_CONSOLE)
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动自定义终端失败: {}",
+                                        e
+                                    ))
+                                })?;
+                        } else {
+                            // 未知自定义终端无法通用地注入命令，退回 wt/cmd 确保 CLI 真正跑起来
+                            // (而不是只开一个空终端窗口)。
+                            launch_wt_or_cmd(&dir, cli)?;
                         }
                     } else {
                         return Err(crate::error::AppError::from(
@@ -299,12 +316,18 @@ pub async fn launch_claude_in_terminal(
                 let full_path = get_augmented_path();
                 if let Some(custom) = custom_path {
                     if custom.ends_with(".app") {
-                        // 用 open -a 启动图形终端(在目标目录打开)。
+                        // 用 open -na 启动图形终端，并通过 -e 让它在目标目录运行 CLI(claude/codex)。
                         // 不能去跑 .app/Contents/MacOS 里的可执行文件——Ghostty 这类
                         // 「GUI+CLI 二合一」的程序被直接调用只会打印帮助、不开窗口。
-                        // 注:自定义图形终端无法通用地自动执行 CLI,打开后在目录里手动运行即可。
+                        // Ghostty / Alacritty 等支持 `-e <命令>`；不支持 -e 的应用会忽略它、仅打开窗口(优雅降级)。
+                        let sh_cmd = format!(
+                            "cd '{}' && {}exec {}",
+                            dir.replace('\'', "'\\''"),
+                            path_prefix,
+                            cli
+                        );
                         Command::new("open")
-                            .args(["-a", &custom, &dir])
+                            .args(["-na", &custom, "--args", "-e", "/bin/sh", "-lc", &sh_cmd])
                             .spawn()
                             .map_err(|e| {
                                 crate::error::AppError::from(format!(
