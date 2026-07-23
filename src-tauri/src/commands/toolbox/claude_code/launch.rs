@@ -316,18 +316,42 @@ pub async fn launch_claude_in_terminal(
                 let full_path = get_augmented_path();
                 if let Some(custom) = custom_path {
                     if custom.ends_with(".app") {
-                        // 用 open -na 启动图形终端，并通过 -e 让它在目标目录运行 CLI(claude/codex)。
-                        // 不能去跑 .app/Contents/MacOS 里的可执行文件——Ghostty 这类
-                        // 「GUI+CLI 二合一」的程序被直接调用只会打印帮助、不开窗口。
-                        // Ghostty / Alacritty 等支持 `-e <命令>`；不支持 -e 的应用会忽略它、仅打开窗口(优雅降级)。
-                        let sh_cmd = format!(
-                            "cd '{}' && {}exec {}",
-                            dir.replace('\'', "'\\''"),
-                            path_prefix,
-                            cli
+                        // 图形终端(Ghostty 等)必须经 open 启动(直接跑 .app/Contents/MacOS 里的
+                        // 可执行文件只会打印帮助)。但 Ghostty 的 `-e` 会把参数塞进它自己的
+                        // `login ... bash --noprofile --norc -c "exec -l ..."` 包装里:
+                        //   1) 多层 shell + 引号会被打散(实测 `-e /bin/sh -lc "cd ... && exec x"` 直接失败)；
+                        //   2) --norc 下不加载 .zshrc → nvm 的 PATH 缺失 → 连 CLI 的 `env node` 都找不到。
+                        // 解法:写一个临时可执行脚本(对 -e 而言是「单个干净参数」，不触发上面两个坑)，
+                        // 脚本里注入完整 PATH(含 nvm/homebrew) + cd + 运行 CLI。
+                        use std::os::unix::fs::PermissionsExt;
+                        let script = format!(
+                            "#!/bin/sh\nexport PATH=\"{}\"\ncd \"{}\" && exec {}\n",
+                            full_path, escaped_dir, cli
                         );
+                        let uniq = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos())
+                            .unwrap_or(0);
+                        let script_path = std::env::temp_dir()
+                            .join(format!("codeshelf-launch-{}.sh", uniq));
+                        std::fs::write(&script_path, script)
+                            .and_then(|_| {
+                                std::fs::set_permissions(
+                                    &script_path,
+                                    std::fs::Permissions::from_mode(0o755),
+                                )
+                            })
+                            .map_err(|e| {
+                                crate::error::AppError::from(format!("准备启动脚本失败: {}", e))
+                            })?;
                         Command::new("open")
-                            .args(["-na", &custom, "--args", "-e", "/bin/sh", "-lc", &sh_cmd])
+                            .args([
+                                "-na",
+                                custom.as_str(),
+                                "--args",
+                                "-e",
+                                script_path.to_string_lossy().as_ref(),
+                            ])
                             .spawn()
                             .map_err(|e| {
                                 crate::error::AppError::from(format!(
