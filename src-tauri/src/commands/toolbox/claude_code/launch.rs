@@ -2,8 +2,6 @@
 
 #[allow(unused_imports)]
 use crate::error::AppResult;
-#[cfg(target_os = "macos")]
-use std::path::PathBuf;
 #[allow(unused_imports)]
 use std::process::Command;
 
@@ -68,6 +66,42 @@ fn is_windows_terminal(path: &str) -> bool {
     name == "wt.exe" || name == "windowsterminal.exe"
 }
 
+/// Windows：解析 wt.exe 的可用路径。
+/// GUI 进程的 PATH 常常不含 %LOCALAPPDATA%\Microsoft\WindowsApps，裸 `wt.exe` 会「找不到程序」；
+/// 优先用该目录下的应用执行别名全路径(它可执行，而 Program Files\WindowsApps 里的真身会被拒绝访问)。
+#[cfg(target_os = "windows")]
+fn resolve_wt() -> String {
+    if let Some(local) = dirs::data_local_dir() {
+        let p = local.join("Microsoft").join("WindowsApps").join("wt.exe");
+        if p.exists() {
+            return p.to_string_lossy().to_string();
+        }
+    }
+    "wt.exe".to_string()
+}
+
+/// Windows：优先用 Windows Terminal(wt.exe -d <dir> cmd /k <cli>)在目标目录打开并运行 CLI。
+/// wt 不可用(未安装 / 别名不在 PATH)时退回 cmd，保证永不硬失败。
+/// cmd 用 .current_dir 设定目录而非 `cd /d "..."`，避开 Rust 转义把内层引号变成 cmd 不认的 \"。
+#[cfg(target_os = "windows")]
+fn launch_wt_or_cmd(dir: &str, cli: &str) -> AppResult<()> {
+    const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+    let wt = resolve_wt();
+    let wt_ok = Command::new(&wt)
+        .args(["-d", dir, "cmd", "/k", cli])
+        .spawn()
+        .is_ok();
+    if !wt_ok {
+        Command::new("cmd")
+            .current_dir(dir)
+            .args(["/k", cli])
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| crate::error::AppError::from(format!("启动终端失败: {}", e)))?;
+    }
+    Ok(())
+}
+
 /// 在终端中启动 Claude Code / Codex
 #[tauri::command]
 #[specta::specta]
@@ -122,18 +156,23 @@ pub async fn launch_claude_in_terminal(
                 "custom" => {
                     if let Some(custom) = custom_path {
                         if is_windows_terminal(&custom) {
-                            // Windows Terminal 必须走 wt.exe，且能带上完整 wsl 子命令运行 CLI
+                            // Windows Terminal 必须走 wt.exe(全路径)，带上完整 wsl 子命令运行 CLI；
+                            // wt 不可用时退回直接起 wsl.exe。
                             let mut wt_args = vec!["wsl.exe".to_string()];
                             wt_args.extend(wsl_args.clone());
-                            Command::new("wt.exe")
-                                .args(&wt_args)
-                                .spawn()
-                                .map_err(|e| {
-                                    crate::error::AppError::from(format!(
-                                        "启动 Windows Terminal 失败: {}",
-                                        e
-                                    ))
-                                })?;
+                            let wt_ok = Command::new(resolve_wt()).args(&wt_args).spawn().is_ok();
+                            if !wt_ok {
+                                Command::new("wsl.exe")
+                                    .args(&wsl_args)
+                                    .creation_flags(CREATE_NEW_CONSOLE)
+                                    .spawn()
+                                    .map_err(|e| {
+                                        crate::error::AppError::from(format!(
+                                            "启动终端失败: {}",
+                                            e
+                                        ))
+                                    })?;
+                            }
                         } else {
                             Command::new(&custom)
                                 .args(&wsl_args[..wsl_args.len() - 4])
@@ -153,10 +192,10 @@ pub async fn launch_claude_in_terminal(
                     }
                 }
                 _ => {
-                    let wt_path = terminal_path.as_deref().unwrap_or("wt");
+                    let wt_path = terminal_path.clone().unwrap_or_else(resolve_wt);
                     let mut wt_args = vec!["wsl.exe".to_string()];
                     wt_args.extend(wsl_args.clone());
-                    let wt_result = Command::new(wt_path).args(&wt_args).spawn();
+                    let wt_result = Command::new(&wt_path).args(&wt_args).spawn();
 
                     if wt_result.is_err() {
                         Command::new("wsl.exe")
@@ -170,16 +209,15 @@ pub async fn launch_claude_in_terminal(
                 }
             }
         } else {
+            // 统一用 .current_dir(&dir) 设定工作目录，而非 `cd /d "..."` / `Set-Location '...'`：
+            // Rust 传参会把内层引号转义成 cmd 不认识的 \"（表现为「语法不正确」），current_dir 从根上绕开。
+            // cli 只含 claude/codex，无空格无需转义。
             match term_type.as_str() {
                 "powershell" => {
                     let ps_path = terminal_path.as_deref().unwrap_or("powershell");
-                    let escaped_path = dir.replace("'", "''");
                     Command::new(ps_path)
-                        .args([
-                            "-NoExit",
-                            "-Command",
-                            &format!("Set-Location -LiteralPath '{}'; {}", escaped_path, cli),
-                        ])
+                        .current_dir(&dir)
+                        .args(["-NoExit", "-Command", cli])
                         .creation_flags(CREATE_NEW_CONSOLE)
                         .spawn()
                         .map_err(|e| {
@@ -189,7 +227,8 @@ pub async fn launch_claude_in_terminal(
                 "cmd" => {
                     let cmd_path = terminal_path.as_deref().unwrap_or("cmd");
                     Command::new(cmd_path)
-                        .args(["/k", &format!("cd /d \"{}\" && {}", dir, cli)])
+                        .current_dir(&dir)
+                        .args(["/k", cli])
                         .creation_flags(CREATE_NEW_CONSOLE)
                         .spawn()
                         .map_err(|e| {
@@ -199,20 +238,13 @@ pub async fn launch_claude_in_terminal(
                 "custom" => {
                     if let Some(custom) = custom_path {
                         if is_windows_terminal(&custom) {
-                            // Windows Terminal 走 wt.exe(-d 定位目录 + cmd /k 运行 CLI),
-                            // 直接启动 WindowsTerminal.exe 会 0x80070005 拒绝访问。
-                            Command::new("wt.exe")
-                                .args(["-d", &dir, "cmd", "/k", cli])
-                                .spawn()
-                                .map_err(|e| {
-                                    crate::error::AppError::from(format!(
-                                        "启动 Windows Terminal 失败: {}",
-                                        e
-                                    ))
-                                })?;
+                            // Windows Terminal：走 wt.exe -d <dir> cmd /k <cli>，
+                            // 直接启动 WindowsTerminal.exe 会 0x80070005，裸 wt.exe 又常「找不到程序」。
+                            launch_wt_or_cmd(&dir, cli)?;
                         } else {
+                            // 任意自定义终端：尽力在目标目录打开(无法通用地注入 CLI 命令)
                             Command::new(&custom)
-                                .arg(&dir)
+                                .current_dir(&dir)
                                 .creation_flags(CREATE_NEW_CONSOLE)
                                 .spawn()
                                 .map_err(|e| {
@@ -229,25 +261,7 @@ pub async fn launch_claude_in_terminal(
                     }
                 }
                 _ => {
-                    let wt_path = terminal_path.as_deref().unwrap_or("wt");
-                    let wt_result = Command::new(wt_path)
-                        .args(["-d", &dir, "cmd", "/k", cli])
-                        .spawn();
-
-                    if wt_result.is_err() {
-                        let escaped_path = dir.replace("'", "''");
-                        Command::new("powershell")
-                            .args([
-                                "-NoExit",
-                                "-Command",
-                                &format!("Set-Location -LiteralPath '{}'; {}", escaped_path, cli),
-                            ])
-                            .creation_flags(CREATE_NEW_CONSOLE)
-                            .spawn()
-                            .map_err(|e| {
-                                crate::error::AppError::from(format!("启动终端失败: {}", e))
-                            })?;
-                    }
+                    launch_wt_or_cmd(&dir, cli)?;
                 }
             }
         }
@@ -285,36 +299,19 @@ pub async fn launch_claude_in_terminal(
                 let full_path = get_augmented_path();
                 if let Some(custom) = custom_path {
                     if custom.ends_with(".app") {
-                        let macos_dir = PathBuf::from(&custom).join("Contents/MacOS");
-                        let executable = std::fs::read_dir(&macos_dir).ok().and_then(|entries| {
-                            entries
-                                .flatten()
-                                .find(|e| e.path().is_file())
-                                .map(|e| e.path().to_string_lossy().to_string())
-                        });
-
-                        if let Some(exec_path) = executable {
-                            Command::new(&exec_path)
-                                .current_dir(&dir)
-                                .env("PATH", &full_path)
-                                .spawn()
-                                .map_err(|e| {
-                                    crate::error::AppError::from(format!(
-                                        "启动自定义终端失败: {}",
-                                        e
-                                    ))
-                                })?;
-                        } else {
-                            Command::new("open")
-                                .args(["-a", &custom, &dir])
-                                .spawn()
-                                .map_err(|e| {
-                                    crate::error::AppError::from(format!(
-                                        "启动自定义终端失败: {}",
-                                        e
-                                    ))
-                                })?;
-                        }
+                        // 用 open -a 启动图形终端(在目标目录打开)。
+                        // 不能去跑 .app/Contents/MacOS 里的可执行文件——Ghostty 这类
+                        // 「GUI+CLI 二合一」的程序被直接调用只会打印帮助、不开窗口。
+                        // 注:自定义图形终端无法通用地自动执行 CLI,打开后在目录里手动运行即可。
+                        Command::new("open")
+                            .args(["-a", &custom, &dir])
+                            .spawn()
+                            .map_err(|e| {
+                                crate::error::AppError::from(format!(
+                                    "启动自定义终端失败: {}",
+                                    e
+                                ))
+                            })?;
                     } else {
                         Command::new(&custom)
                             .current_dir(&dir)

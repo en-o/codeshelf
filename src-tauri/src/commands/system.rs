@@ -28,6 +28,36 @@ fn is_windows_terminal(path: &str) -> bool {
     name == "wt.exe" || name == "windowsterminal.exe"
 }
 
+/// Windows：解析 wt.exe 的可用路径。GUI 进程的 PATH 常常不含
+/// %LOCALAPPDATA%\Microsoft\WindowsApps，裸 `wt.exe` 会「找不到程序」；
+/// 优先用该目录下的应用执行别名全路径。
+#[cfg(target_os = "windows")]
+fn resolve_wt() -> String {
+    if let Some(local) = dirs::data_local_dir() {
+        let p = local.join("Microsoft").join("WindowsApps").join("wt.exe");
+        if p.exists() {
+            return p.to_string_lossy().to_string();
+        }
+    }
+    "wt.exe".to_string()
+}
+
+/// Windows：在目标目录打开终端。优先 Windows Terminal(wt.exe -d <dir>)，
+/// 不可用时退回 cmd(.current_dir 定位，避开 `cd /d "..."` 的引号转义问题)。
+#[cfg(target_os = "windows")]
+fn open_wt_or_cmd(dir: &str) -> AppResult<()> {
+    let wt = resolve_wt();
+    let ok = Command::new(&wt).args(["-d", dir]).spawn().is_ok();
+    if !ok {
+        Command::new("cmd")
+            .current_dir(dir)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| crate::error::AppError::from(format!("打开终端失败: {}", e)))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn open_in_explorer(path: String) -> AppResult<()> {
@@ -127,26 +157,23 @@ pub async fn open_in_terminal(
 
     #[cfg(target_os = "windows")]
     {
+        // 统一用 .current_dir(&path) 定位，而非 `cd /d "..."` / `Set-Location '...'`：
+        // Rust 传参会把内层引号转义成 cmd 不认识的 \"（表现为「语法不正确」），current_dir 从根上绕开。
         match term_type.as_str() {
             "powershell" => {
                 let ps_path = terminal_path.as_deref().unwrap_or("powershell");
-                // Use Set-Location with -LiteralPath for paths with special characters
-                let escaped_path = path.replace("'", "''");
                 Command::new(ps_path)
-                    .args([
-                        "-NoExit",
-                        "-Command",
-                        &format!("Set-Location -LiteralPath '{}'", escaped_path),
-                    ])
+                    .current_dir(&path)
+                    .args(["-NoExit"])
                     .creation_flags(CREATE_NEW_CONSOLE)
                     .spawn()
                     .map_err(|e| crate::error::AppError::from(e.to_string()))?;
             }
             "cmd" => {
                 let cmd_path = terminal_path.as_deref().unwrap_or("cmd");
-                // Use quotes around path for paths with spaces or special characters
                 Command::new(cmd_path)
-                    .args(["/k", &format!("cd /d \"{}\"", path)])
+                    .current_dir(&path)
+                    .args(["/k"])
                     .creation_flags(CREATE_NEW_CONSOLE)
                     .spawn()
                     .map_err(|e| crate::error::AppError::from(e.to_string()))?;
@@ -154,19 +181,12 @@ pub async fn open_in_terminal(
             "custom" => {
                 if let Some(custom) = custom_path {
                     if is_windows_terminal(&custom) {
-                        // Windows Terminal 走 wt.exe -d，直接启动 WindowsTerminal.exe 会 0x80070005
-                        Command::new("wt.exe")
-                            .args(["-d", &path])
-                            .spawn()
-                            .map_err(|e| {
-                                crate::error::AppError::from(format!(
-                                    "Failed to open Windows Terminal: {}",
-                                    e
-                                ))
-                            })?;
+                        // Windows Terminal：wt.exe -d <dir>（全路径解析 + cmd 兜底）。
+                        // 直接启动 WindowsTerminal.exe 会 0x80070005，裸 wt.exe 又常「找不到程序」。
+                        open_wt_or_cmd(&path)?;
                     } else {
                         Command::new(&custom)
-                            .arg(&path)
+                            .current_dir(&path)
                             .creation_flags(CREATE_NEW_CONSOLE)
                             .spawn()
                             .map_err(|e| {
@@ -183,22 +203,7 @@ pub async fn open_in_terminal(
                 }
             }
             _ => {
-                // Default: Windows Terminal if available, otherwise PowerShell
-                let wt_path = terminal_path.as_deref().unwrap_or("wt");
-                let wt_result = Command::new(wt_path).args(["-d", &path]).spawn();
-
-                if wt_result.is_err() {
-                    let escaped_path = path.replace("'", "''");
-                    Command::new("powershell")
-                        .args([
-                            "-NoExit",
-                            "-Command",
-                            &format!("Set-Location -LiteralPath '{}'", escaped_path),
-                        ])
-                        .creation_flags(CREATE_NEW_CONSOLE)
-                        .spawn()
-                        .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-                }
+                open_wt_or_cmd(&path)?;
             }
         }
     }
