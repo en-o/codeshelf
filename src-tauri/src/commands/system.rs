@@ -15,6 +15,19 @@ const CREATE_NEW_CONSOLE: u32 = 0x00000010;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Windows：判断自定义终端是否是 Windows Terminal。
+/// 直接启动 WindowsApps 里的 WindowsTerminal.exe 会 0x80070005(拒绝访问),
+/// 必须改用应用执行别名 wt.exe。
+#[cfg(target_os = "windows")]
+fn is_windows_terminal(path: &str) -> bool {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
+        .to_ascii_lowercase();
+    name == "wt.exe" || name == "windowsterminal.exe"
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn open_in_explorer(path: String) -> AppResult<()> {
@@ -140,16 +153,29 @@ pub async fn open_in_terminal(
             }
             "custom" => {
                 if let Some(custom) = custom_path {
-                    Command::new(&custom)
-                        .arg(&path)
-                        .creation_flags(CREATE_NEW_CONSOLE)
-                        .spawn()
-                        .map_err(|e| {
-                            crate::error::AppError::from(format!(
-                                "Failed to open custom terminal '{}': {}",
-                                custom, e
-                            ))
-                        })?;
+                    if is_windows_terminal(&custom) {
+                        // Windows Terminal 走 wt.exe -d，直接启动 WindowsTerminal.exe 会 0x80070005
+                        Command::new("wt.exe")
+                            .args(["-d", &path])
+                            .spawn()
+                            .map_err(|e| {
+                                crate::error::AppError::from(format!(
+                                    "Failed to open Windows Terminal: {}",
+                                    e
+                                ))
+                            })?;
+                    } else {
+                        Command::new(&custom)
+                            .arg(&path)
+                            .creation_flags(CREATE_NEW_CONSOLE)
+                            .spawn()
+                            .map_err(|e| {
+                                crate::error::AppError::from(format!(
+                                    "Failed to open custom terminal '{}': {}",
+                                    custom, e
+                                ))
+                            })?;
+                    }
                 } else {
                     return Err(crate::error::AppError::from(
                         "Custom terminal path not provided".to_string(),

@@ -408,9 +408,8 @@ export async function dockerPushImage(image: string): Promise<DockerCommandResul
 
 import type { ClaudeCodeInfo, EnvType, QuickConfigOption, ConfigProfile, ConfigFileInfo } from "@/types/toolbox";
 
-export async function checkAllClaudeInstallations(): Promise<ClaudeCodeInfo[]> {
-  const infos: any[] = await invoke("check_all_claude_installations");
-  return infos.map((info: any) => ({
+function mapClaudeInfo(info: any): ClaudeCodeInfo {
+  return {
     envType: info.env_type as EnvType,
     envName: info.env_name,
     installed: info.installed,
@@ -425,7 +424,17 @@ export async function checkAllClaudeInstallations(): Promise<ClaudeCodeInfo[]> {
       modified: f.modified,
       description: f.description,
     })),
-  }));
+  };
+}
+
+export async function checkAllClaudeInstallations(): Promise<ClaudeCodeInfo[]> {
+  const infos: any[] = await invoke("check_all_claude_installations");
+  return infos.map(mapClaudeInfo);
+}
+
+export async function checkCodexInstallations(): Promise<ClaudeCodeInfo[]> {
+  const infos: any[] = await invoke("check_codex_installations");
+  return infos.map(mapClaudeInfo);
 }
 
 export async function checkClaudeByPath(claudePath: string): Promise<ClaudeCodeInfo> {
@@ -594,7 +603,8 @@ export async function launchClaudeInTerminal(
   customPath?: string,
   terminalPath?: string,
   envType?: string,
-  envName?: string
+  envName?: string,
+  cli?: string
 ): Promise<void> {
   return invoke("launch_claude_in_terminal", {
     workDir,
@@ -603,6 +613,7 @@ export async function launchClaudeInTerminal(
     terminalPath,
     envType,
     envName,
+    cli,
   });
 }
 

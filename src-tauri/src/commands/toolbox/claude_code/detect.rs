@@ -510,6 +510,71 @@ fn get_host_name() -> String {
     return "Linux".to_string();
 }
 
+/// 检查 Codex CLI 的安装情况（仅主机环境）。
+/// 复用 ClaudeCodeInfo 结构，只关心 env_type/env_name/installed/version，
+/// 供「打开项目」菜单在 Claude 之外并列出 Codex 选项。
+#[tauri::command]
+#[specta::specta]
+pub async fn check_codex_installations() -> AppResult<Vec<ClaudeCodeInfo>> {
+    let mut info = ClaudeCodeInfo {
+        env_type: EnvType::Host,
+        env_name: get_host_name(),
+        installed: false,
+        version: None,
+        path: None,
+        config_dir: None,
+        config_files: vec![],
+    };
+
+    #[cfg(target_os = "windows")]
+    let (which_cmd, which_args) = ("where", vec!["codex"]);
+    #[cfg(not(target_os = "windows"))]
+    let (which_cmd, which_args) = ("which", vec!["codex"]);
+
+    if let Ok(output) = new_command(which_cmd).args(&which_args).output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                info.installed = true;
+                info.path = Some(path.lines().next().unwrap_or(&path).to_string());
+            }
+        }
+    }
+
+    // GUI 应用拿不到登录 shell 的 PATH，再用登录 shell 找一次
+    #[cfg(not(target_os = "windows"))]
+    if !info.installed {
+        for shell in &["zsh", "bash"] {
+            if let Ok(output) = Command::new(shell).args(["-lc", "which codex"]).output() {
+                if output.status.success() {
+                    let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !p.is_empty() && !p.contains("not found") {
+                        info.installed = true;
+                        info.path = Some(p.lines().next().unwrap_or(&p).to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if info.installed {
+        if let Ok(output) = new_command("codex").arg("--version").output() {
+            let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let src = if out.is_empty() {
+                String::from_utf8_lossy(&output.stderr).trim().to_string()
+            } else {
+                out
+            };
+            if !src.is_empty() {
+                info.version = Some(parse_version(&src));
+            }
+        }
+    }
+
+    Ok(vec![info])
+}
+
 /// 获取 WSL 发行版列表
 #[cfg(target_os = "windows")]
 async fn get_wsl_distros() -> AppResult<Vec<String>> {

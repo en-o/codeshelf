@@ -167,6 +167,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         toolbox::docker::docker_push_image,
         // Toolbox - Claude Code
         toolbox::claude_code::check_all_claude_installations,
+        toolbox::claude_code::check_codex_installations,
         toolbox::claude_code::check_claude_by_path,
         toolbox::claude_code::read_claude_config_file,
         toolbox::claude_code::write_claude_config_file,

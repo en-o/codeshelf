@@ -938,6 +938,30 @@ async listSshConfigHosts() : Promise<Result<string[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * 列出本机所有有效 IP（去重保序），供「远程主机」下拉选择。
+ * 复用 pairdrop 已有的跨平台网卡枚举实现，避免新增依赖。
+ */
+async listLocalIps() : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_local_ips") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 仅迁移分组：只改 group 字段并持久化，不停止运行中的隧道
+ * （与 update_ssh_tunnel 不同，后者会先 stop 运行中的隧道）。
+ */
+async setSshTunnelGroup(tunnelId: string, group: string) : Promise<Result<SshTunnel, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_ssh_tunnel_group", { tunnelId, group }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async testSshTunnel(tunnelId: string) : Promise<Result<TestPortResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("test_ssh_tunnel", { tunnelId }) };
@@ -949,6 +973,89 @@ async testSshTunnel(tunnelId: string) : Promise<Result<TestPortResult, string>> 
 async testLocalPort(port: number) : Promise<Result<TestPortResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("test_local_port", { port }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async addReverseTunnel(input: ReverseTunnelInput) : Promise<Result<ReverseTunnel, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_reverse_tunnel", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateReverseTunnel(tunnelId: string, input: ReverseTunnelInput) : Promise<Result<ReverseTunnel, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_reverse_tunnel", { tunnelId, input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeReverseTunnel(tunnelId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_reverse_tunnel", { tunnelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async startReverseTunnel(tunnelId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_reverse_tunnel", { tunnelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopReverseTunnel(tunnelId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_reverse_tunnel", { tunnelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getReverseTunnels() : Promise<Result<ReverseTunnel[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_reverse_tunnels") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getReverseTunnel(tunnelId: string) : Promise<Result<ReverseTunnel | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_reverse_tunnel", { tunnelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getReverseTunnelStats(tunnelId: string) : Promise<Result<ReverseTunnelStats, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_reverse_tunnel_stats", { tunnelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listReverseSshConfigHosts() : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_reverse_ssh_config_hosts") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 仅迁移分组：只改 group 字段并持久化，不停止运行中的隧道。
+ */
+async setReverseTunnelGroup(tunnelId: string, group: string) : Promise<Result<ReverseTunnel, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_reverse_tunnel_group", { tunnelId, group }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1187,6 +1294,19 @@ async checkAllClaudeInstallations() : Promise<Result<ClaudeCodeInfo[], string>> 
 }
 },
 /**
+ * 检查 Codex CLI 的安装情况（仅主机环境）。
+ * 复用 ClaudeCodeInfo 结构，只关心 env_type/env_name/installed/version，
+ * 供「打开项目」菜单在 Claude 之外并列出 Codex 选项。
+ */
+async checkCodexInstallations() : Promise<Result<ClaudeCodeInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_codex_installations") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * 根据指定路径检查 Claude Code 安装
  */
 async checkClaudeByPath(claudePath: string) : Promise<Result<ClaudeCodeInfo, string>> {
@@ -1385,11 +1505,11 @@ async clearClaudeInstallationsCache() : Promise<Result<null, string>> {
 }
 },
 /**
- * 在终端中启动 Claude Code
+ * 在终端中启动 Claude Code / Codex
  */
-async launchClaudeInTerminal(workDir: string | null, terminalType: string | null, customPath: string | null, terminalPath: string | null, envType: string | null, envName: string | null) : Promise<Result<null, string>> {
+async launchClaudeInTerminal(workDir: string | null, terminalType: string | null, customPath: string | null, terminalPath: string | null, envType: string | null, envName: string | null, cli: string | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("launch_claude_in_terminal", { workDir, terminalType, customPath, terminalPath, envType, envName }) };
+    return { status: "ok", data: await TAURI_INVOKE("launch_claude_in_terminal", { workDir, terminalType, customPath, terminalPath, envType, envName, cli }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1718,6 +1838,86 @@ async writeToClipboard(content: string) : Promise<Result<null, string>> {
 async updateClipboardNote(id: string, note: string) : Promise<Result<ClipboardEntry, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_clipboard_note", { id, note }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 启动服务。port=0 表示由系统选择。
+ */
+async pairdropStart(port: number | null) : Promise<Result<ServiceStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_start", { port }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 停止服务
+ */
+async pairdropStop() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_stop") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 查询当前状态
+ */
+async pairdropStatus() : Promise<Result<ServiceStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 获取当前 peer 列表（用于桌面端不通过 WebSocket 时也能查看）
+ */
+async pairdropPeers() : Promise<Result<PeerInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_peers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 获取局域网中主动发现到的其它桌面端
+ */
+async pairdropDiscovered() : Promise<Result<DiscoveredDevice[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_discovered") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 把缓存中的接收文件直接写到本地。一次性消费 — 调用后 token 立即失效，
+ * 避免再被 HTTP /api/file/:token 又下载一次。
+ */
+async pairdropSaveFile(token: string, savePath: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_save_file", { token, savePath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 从"加入的对方桌面端"按 URL 下载文件并写到本地。
+ * 本机自身收到的文件走 [`pairdrop_save_file`]（读本机内存缓存）；加入对方桌面端时，
+ * 文件缓存在对方服务上，只能通过 HTTP 拉取——走这个命令，避免前端 fs 插件的路径 scope 限制。
+ */
+async pairdropDownloadSave(url: string, savePath: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_download_save", { url, savePath }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2379,6 +2579,21 @@ async resetRecommendedTemplate() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * 获取 Claude 配置模板目录。
+ * 
+ * 顺序：远程 GitHub → 本地缓存（上次成功拉取的"本地历史"）→ 内置默认。
+ * 任何错误（网络异常、文件不存在、解析失败）都静默回退，**永远返回 Ok**，保证调用方每次都能拿到内容。
+ * 远程拉取成功时会同步刷新本地缓存。
+ */
+async getClaudeConfigTemplates() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_claude_config_templates") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getAiProviders() : Promise<Result<AiProviderConfig[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_ai_providers") };
@@ -2427,49 +2642,9 @@ async saveResumes(data: JsonValue) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async saveResumeKnowledge(projectId: string, content: string, userEdited: boolean) : Promise<Result<null, string>> {
+async exportResumeDocx(resume: JsonValue, filePath: string) : Promise<Result<string, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("save_resume_knowledge", { projectId, content, userEdited }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async loadResumeKnowledge(projectId: string) : Promise<Result<string | null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("load_resume_knowledge", { projectId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async listResumeKnowledge() : Promise<Result<string[], string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_resume_knowledge") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async listResumeKnowledgeHistory(projectId: string) : Promise<Result<ResumeKnowledgeHistoryEntry[], string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_resume_knowledge_history", { projectId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async readResumeKnowledgeHistory(projectId: string, timestamp: string) : Promise<Result<string, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("read_resume_knowledge_history", { projectId, timestamp }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async deleteResumeKnowledge(projectId: string) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("delete_resume_knowledge", { projectId }) };
+    return { status: "ok", data: await TAURI_INVOKE("export_resume_docx", { resume, filePath }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2483,65 +2658,113 @@ async llmProxyRequest(request: LlmProxyRequest) : Promise<Result<LlmProxyRespons
     else return { status: "error", error: e  as any };
 }
 },
-async resumeProjectIndex(projectId: string) : Promise<Result<ResumeProjectIndex, string>> {
+async runResumeDeepAgent(request: RunResumeDeepAgentRequest) : Promise<Result<JsonValue, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("resume_project_index", { projectId }) };
+    return { status: "ok", data: await TAURI_INVOKE("run_resume_deep_agent", { request }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async resumeProjectListDir(projectId: string, path: string) : Promise<Result<string, string>> {
+async generateResumeFromKnowledge(request: GenerateResumeFromKnowledgeRequest) : Promise<Result<JsonValue, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("resume_project_list_dir", { projectId, path }) };
+    return { status: "ok", data: await TAURI_INVOKE("generate_resume_from_knowledge", { request }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async resumeProjectReadFile(projectId: string, path: string) : Promise<Result<string, string>> {
+async generateResumeFragment(request: GenerateResumeFragmentRequest) : Promise<Result<JsonValue, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("resume_project_read_file", { projectId, path }) };
+    return { status: "ok", data: await TAURI_INVOKE("generate_resume_fragment", { request }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async resumeProjectGrep(projectId: string, pattern: string, glob: string | null) : Promise<Result<string, string>> {
+async cancelResumeDeepAgent(requestId: string) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("resume_project_grep", { projectId, pattern, glob }) };
+    return { status: "ok", data: await TAURI_INVOKE("cancel_resume_deep_agent", { requestId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async runResumeAgent(request: RunResumeAgentRequest) : Promise<Result<RunResumeAgentResponse, string>> {
+async getResumeAgentRuns(projectId: string) : Promise<Result<JsonValue, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("run_resume_agent", { request }) };
+    return { status: "ok", data: await TAURI_INVOKE("get_resume_agent_runs", { projectId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async cancelResumeAgent(requestId: string) : Promise<Result<null, string>> {
+async readResumeAgentArtifact(projectId: string, artifactId: string) : Promise<Result<JsonValue, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("cancel_resume_agent", { requestId }) };
+    return { status: "ok", data: await TAURI_INVOKE("read_resume_agent_artifact", { projectId, artifactId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async runKnowledgeAgent(request: RunKnowledgeAgentRequest) : Promise<Result<RunKnowledgeAgentResponse, string>> {
+async getResumeAgentPromptConfig() : Promise<Result<JsonValue, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("run_knowledge_agent", { request }) };
+    return { status: "ok", data: await TAURI_INVOKE("get_resume_agent_prompt_config") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async cancelKnowledgeAgent(requestId: string) : Promise<Result<null, string>> {
+async saveResumeAgentPromptConfig(config: JsonValue) : Promise<Result<JsonValue, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("cancel_knowledge_agent", { requestId }) };
+    return { status: "ok", data: await TAURI_INVOKE("save_resume_agent_prompt_config", { config }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resetResumeAgentPromptConfig() : Promise<Result<JsonValue, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_resume_agent_prompt_config") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async loadResumeAgentBackground(projectId: string) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_resume_agent_background", { projectId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveResumeAgentBackground(projectId: string, content: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_resume_agent_background", { projectId, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listResumeAgentBackground() : Promise<Result<JsonValue, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_resume_agent_background") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteResumeAgentBackground(projectId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_resume_agent_background", { projectId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteResumeAgentRuns(projectId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_resume_agent_runs", { projectId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2613,7 +2836,11 @@ paramsSchema: JsonValue;
 /**
  * 响应截断字节数（默认 8192）
  */
-responseTrimBytes?: number | null; createdAt: string; updatedAt: string }
+responseTrimBytes?: number | null; 
+/**
+ * 单接口请求超时（毫秒），缺省 30000
+ */
+timeoutMs?: number | null; createdAt: string; updatedAt: string }
 /**
  * 单次接口调用的结构化返回：给前端做"调用链"展示用
  */
@@ -2671,7 +2898,7 @@ mcp_gateway_port?: number;
 /**
  * MCP Gateway 客户端访问密钥
  */
-mcp_gateway_keys?: McpGatewayKey[];
+mcp_gateway_keys?: McpGatewayKey[]; 
 /**
  * macOS：是否在 Dock 显示应用图标（false=纯菜单栏应用，true=Dock + 菜单栏）
  */
@@ -2760,7 +2987,15 @@ httpJsonPath?: string }
 export type AutoSendMode = "fixed" | "csv" | "template" | "http"
 export type BranchInfo = { name: string; is_current: boolean; is_remote: boolean; upstream: string | null }
 export type CachedDashboardData = { stats: DashboardStats; heatmap_data: DailyActivity[]; recent_commits: RecentCommit[] }
-export type ChatMessage = { id: string; role: string; content: string; createdAt: string; tokens: number | null; thinking: boolean | null; thinkingContent: string | null; edited?: boolean | null; toolCalls?: JsonValue | null; toolCallId?: string | null; toolName?: string | null; toolStatus?: number | null; toolMethod?: string | null; toolUrl?: string | null; toolElapsedMs?: number | null; toolBodyBytes?: number | null; toolTruncated?: boolean | null; attachments?: JsonValue | null }
+export type ChatMessage = { id: string; role: string; content: string; createdAt: string; tokens: number | null; thinking: boolean | null; thinkingContent: string | null; edited?: boolean | null; toolCalls?: JsonValue | null; toolCallId?: string | null; toolName?: string | null; toolStatus?: number | null; toolMethod?: string | null; toolUrl?: string | null; toolElapsedMs?: number | null; toolBodyBytes?: number | null; toolTruncated?: boolean | null; 
+/**
+ * 接口对话内联可重试错误气泡标记（assistant 角色 + error=true）
+ */
+error?: boolean | null; 
+/**
+ * 工具调用进行中占位（"调用中…"）；执行完成后清除并回填结果
+ */
+toolPending?: boolean | null; attachments?: JsonValue | null }
 export type ChatSession = { id: string; title: string; providerId: string; modelId: string; createdAt: string; updatedAt: string; messages: ChatMessage[]; systemPrompt?: string | null; temperature?: number | null; maxTokens?: number | null; topP?: number | null; frequencyPenalty?: number | null; presencePenalty?: number | null; pinned?: boolean | null; 
 /**
  * 会话级"始终允许"的工具名列表（用户在授权弹窗勾"始终允许"后写入）
@@ -2788,7 +3023,7 @@ export type ChatStreamMessage = { role: string;
 /**
  * string 或 OpenAI 多模态内容数组
  */
-content: JsonValue; tool_calls?: JsonValue[] | null; tool_call_id?: string | null; name?: string | null }
+content: JsonValue; reasoning_content?: string | null; tool_calls?: JsonValue[] | null; tool_call_id?: string | null; name?: string | null }
 export type ChatStreamRequest = { requestId: string; providerId: string; model: string; baseUrl: string; apiKey: string | null; thinking: boolean | null; stream: boolean | null; messages: ChatStreamMessage[]; temperature: number | null; maxTokens: number | null; topP: number | null; frequencyPenalty: number | null; presencePenalty: number | null; tools?: JsonValue[] | null; toolChoice?: JsonValue | null }
 export type ChatTask = { id: string; subject: string; description: string; activeForm: string | null; status: string; createdAt: string; updatedAt: string }
 /**
@@ -2863,6 +3098,10 @@ export type DashboardStats = { total_projects: number; today_commits: number; we
  * 数据格式
  */
 export type DataFormat = "text" | "hex" | "base64"
+/**
+ * 局域网中主动发现到的其它桌面端服务
+ */
+export type DiscoveredDevice = { deviceId: string; displayName: string; host: string; port: number; url: string; lastSeenAt: number }
 export type DockerAiGenerateInput = { projectPath: string; dockerfilePath: string | null; imageName: string | null; providerId: string | null; modelId: string | null }
 export type DockerAiGenerateOutput = { content: string; providerName: string; modelName: string }
 export type DockerBuildInput = { projectPath: string; dockerfilePath: string; imageName: string; tag: string | null; noCache: boolean | null }
@@ -2912,6 +3151,8 @@ docPath: string | null }
  * 转发统计
  */
 export type ForwardStats = { ruleId: string; connections: number; bytesIn: number; bytesOut: number }
+export type GenerateResumeFragmentRequest = { requestId: string; provider: AiProviderConfig; jobDirection: NodeJobDirection; jdKeywords: string[]; tone: NodeTone; knowledgeDocs: KnowledgeInput[]; fragment: JsonValue }
+export type GenerateResumeFromKnowledgeRequest = { requestId: string; provider: AiProviderConfig; jobDirection: NodeJobDirection; jdKeywords: string[]; tone: NodeTone; knowledgeDocs: KnowledgeInput[]; promptConfig?: JsonValue | null }
 export type GitRepo = { path: string; name: string }
 export type GitStatus = { branch: string; is_clean: boolean; staged: string[]; unstaged: string[]; untracked: string[]; conflicted: string[]; ahead: number; behind: number }
 export type GlobalShortcutBinding = { id: string; keys: string }
@@ -2919,9 +3160,8 @@ export type GlobalShortcutBinding = { id: string; keys: string }
  * HTTP 请求配置
  */
 export type HttpFetchConfig = { url: string; method?: string | null; headers?: Partial<{ [key in string]: string }> | null; body?: string | null; jsonPath?: string | null }
-export type JobDirection = "backend" | "frontend" | "fullstack"
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
-export type KnowledgeDoc = { projectId: string; projectName: string; content: string; updatedAt: string }
+export type KnowledgeInput = { projectId: string; projectName: string; projectPath: string; content: string }
 export type LlmProxyHeader = { name: string; value: string }
 export type LlmProxyRequest = { method: string; url: string; headers: LlmProxyHeader[]; body: string | null }
 export type LlmProxyResponse = { status: number; status_text: string; headers: LlmProxyHeader[]; body: string }
@@ -2967,10 +3207,24 @@ autoSend?: AutoSendConfig }
  */
 export type NetcatSessionInput = { protocol: Protocol; mode: SessionMode; host: string; port: number; name: string | null; autoReconnect: boolean | null; timeoutMs: number | null }
 /**
+ * 网卡 URL 信息（用于多网卡环境下生成多个 QR）
+ */
+export type NetworkUrl = { interface: string; ip: string; url: string }
+export type NodeJobDirection = "backend" | "frontend" | "fullstack"
+export type NodeTone = "professional" | "concise"
+/**
  * 单条通知
  */
 export type Notification = { id: string; notification_type: string; title: string; message?: string; created_at: string }
 export type NotificationInput = { notification_type: string; title: string; message?: string }
+/**
+ * 单个 peer 的信息
+ */
+export type PeerInfo = { peerId: string; displayName: string; deviceType: string; userAgent: string; 
+/**
+ * 是否是当前桌面客户端自身
+ */
+isSelf: boolean }
 /**
  * 端口占用信息
  */
@@ -3002,24 +3256,68 @@ export type ProxyConfig = { prefix: string; target: string }
 export type QuickConfigOption = { id: string; name: string; description: string; category: string; config_key: string; config_value: JsonValue }
 export type RecentCommit = { hash: string; short_hash: string; message: string; author: string; email: string; date: string; project_name: string; project_path: string }
 export type RemoteInfo = { name: string; url: string; fetch_url: string | null; push_url: string | null }
-export type ResumeKnowledgeHistoryEntry = { 
 /**
- * 文件名上的 timestamp（毫秒级 unix），同时充当主键
+ * 内网穿透规则（反向 SSH 隧道）
  */
-timestamp: string; 
+export type ReverseTunnel = { id: string; name: string; 
 /**
- * 文件字节数（便于 UI 给个尺寸提示）
+ * 要暴露的本地服务主机，默认 127.0.0.1
  */
-size: number }
-export type ResumeProjectExperience = { projectId: string; projectName: string; techStack: string[]; starExperience: StarExperience; customDescription?: string | null; isEdited: boolean }
-export type ResumeProjectIndex = { root_name: string; files: ResumeProjectIndexFile[]; directories: string[]; stats: ResumeProjectIndexStats }
-export type ResumeProjectIndexFile = { path: string; size: number; extension: string | null }
-export type ResumeProjectIndexStats = { file_count: number; directory_count: number; total_bytes: number }
-export type ResumeV2 = { id: string; createdAt: string; updatedAt: string; jobDirection: JobDirection; jdKeywords: string[]; tone: Tone; summary?: string | null; skills: string[]; experiences: ResumeProjectExperience[]; isSaved: boolean }
-export type RunKnowledgeAgentRequest = { requestId: string; provider: AiProviderConfig; projectId: string; initialBackground?: string | null }
-export type RunKnowledgeAgentResponse = { background: string }
-export type RunResumeAgentRequest = { requestId: string; provider: AiProviderConfig; knowledgeDocs: KnowledgeDoc[]; jobDirection: JobDirection; jdKeywords: string[]; tone: Tone }
-export type RunResumeAgentResponse = { resume: ResumeV2 }
+localHost?: string; 
+/**
+ * 要暴露的本地服务端口
+ */
+localPort: number; 
+/**
+ * SSH 服务器（用户自己的 VPS）地址
+ */
+sshHost: string; 
+/**
+ * SSH 服务器端口，默认 22
+ */
+sshPort?: number; 
+/**
+ * SSH 登录用户（使用 SshConfig 时可为空）
+ */
+sshUser?: string; 
+/**
+ * 认证方式（复用共享枚举）
+ */
+auth: SshAuthMethod; 
+/**
+ * VPS 上的监听地址：127.0.0.1=仅本机可达（安全，配 nginx 反代）；
+ * 0.0.0.0=对公网开放（危险，需 VPS `GatewayPorts yes`）
+ */
+remoteBindAddr?: string; 
+/**
+ * VPS 上对外暴露的端口
+ */
+remotePort: number; 
+/**
+ * 可选域名，仅用于展示与拼接公网 URL（不参与转发逻辑）
+ */
+domain?: string | null; status?: string; connections?: number; bytesIn?: number; bytesOut?: number; lastError?: string | null; 
+/**
+ * 断线后自动重连；缺省开启
+ */
+autoReconnect?: boolean; 
+/**
+ * 累计自动重连成功次数（运行期统计，加载时重置）
+ */
+reconnects?: number; 
+/**
+ * 所属分组
+ */
+group?: string; createdAt: string }
+/**
+ * 创建/更新内网穿透的输入
+ */
+export type ReverseTunnelInput = { name: string; localHost?: string | null; localPort: number; sshHost: string; sshPort: number | null; sshUser: string | null; auth: SshAuthMethod; remoteBindAddr?: string | null; remotePort: number; domain?: string | null; autoReconnect?: boolean | null; group?: string | null }
+/**
+ * 内网穿透统计
+ */
+export type ReverseTunnelStats = { tunnelId: string; connections: number; bytesIn: number; bytesOut: number }
+export type RunResumeDeepAgentRequest = { requestId: string; projectId: string; provider: AiProviderConfig; jobDirection: NodeJobDirection; jdKeywords: string[]; tone: NodeTone; promptConfig?: JsonValue | null; toolPermissionMode?: ToolPermissionMode | null }
 export type SaveCompactionInput = { sessionId: string; content: string; sourceMessageCount: number; tailKept: number; model: string | null }
 /**
  * 扫描配置
@@ -3098,6 +3396,10 @@ indexPage: string | null;
  */
 proxies: ProxyConfig[] | null }
 /**
+ * 服务运行状态
+ */
+export type ServiceStatus = { running: boolean; port: number; urls: NetworkUrl[]; peerCount: number }
+/**
  * Session 鉴权中 token 如何注入后续请求
  */
 export type SessionInject = 
@@ -3173,16 +3475,35 @@ sshUser?: string;
 /**
  * 认证方式
  */
-auth: SshAuthMethod; status?: string; connections?: number; bytesIn?: number; bytesOut?: number; lastError?: string | null; createdAt: string }
+auth: SshAuthMethod; status?: string; connections?: number; bytesIn?: number; bytesOut?: number; lastError?: string | null; 
+/**
+ * 断线后自动重连（网络切换/休眠恢复）；缺省开启
+ */
+autoReconnect?: boolean; 
+/**
+ * 累计自动重连成功次数（运行期统计，加载时重置）
+ */
+reconnects?: number; 
+/**
+ * 所属分组；旧数据无此字段时落入「默认分组」
+ */
+group?: string; createdAt: string }
 /**
  * 创建/更新 SSH 隧道的输入
  */
-export type SshTunnelInput = { name: string; localPort: number; remoteHost: string; remotePort: number; sshHost: string; sshPort: number | null; sshUser: string | null; auth: SshAuthMethod }
+export type SshTunnelInput = { name: string; localPort: number; remoteHost: string; remotePort: number; sshHost: string; sshPort: number | null; sshUser: string | null; auth: SshAuthMethod; 
+/**
+ * 断线后自动重连；缺省开启
+ */
+autoReconnect?: boolean | null; 
+/**
+ * 所属分组；为空时落入「默认分组」
+ */
+group?: string | null }
 /**
  * SSH 隧道统计
  */
 export type SshTunnelStats = { tunnelId: string; connections: number; bytesIn: number; bytesOut: number }
-export type StarExperience = { situation: string; task: string; action: string; result: string }
 /**
  * 系统统计信息
  */
@@ -3205,7 +3526,7 @@ output: string;
  * 检测方式："nc" / "Test-NetConnection" / "tcp"
  */
 method: string; durationMs: number }
-export type Tone = "professional" | "concise"
+export type ToolPermissionMode = "read_only" | "workspace_write" | "full_agent"
 export type ToolSchema = { name: string; description: string; parameters: JsonValue; requiresCwd: boolean }
 /**
  * UI 状态

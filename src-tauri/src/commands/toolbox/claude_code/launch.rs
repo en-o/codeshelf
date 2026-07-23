@@ -45,7 +45,30 @@ fn windows_path_to_wsl(path: &str) -> String {
     path.to_string()
 }
 
-/// 在终端中启动 Claude Code
+/// 校验要运行的 CLI：只允许 claude / codex。
+/// cli 会被拼进 shell 命令串(cmd /k、Set-Location; xxx、do script 等),
+/// 用白名单挡住任意命令注入,非法值一律回退 claude。
+fn resolve_cli(cli: Option<String>) -> &'static str {
+    match cli.as_deref() {
+        Some("codex") => "codex",
+        _ => "claude",
+    }
+}
+
+/// Windows：判断自定义终端是否是 Windows Terminal。
+/// 直接启动 WindowsApps 里的 WindowsTerminal.exe 会报 0x80070005(拒绝访问),
+/// 必须改用应用执行别名 wt.exe，且它才认识 -d / 子命令语法。
+#[cfg(target_os = "windows")]
+fn is_windows_terminal(path: &str) -> bool {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
+        .to_ascii_lowercase();
+    name == "wt.exe" || name == "windowsterminal.exe"
+}
+
+/// 在终端中启动 Claude Code / Codex
 #[tauri::command]
 #[specta::specta]
 #[allow(unused_variables)]
@@ -56,6 +79,7 @@ pub async fn launch_claude_in_terminal(
     terminal_path: Option<String>,
     env_type: Option<String>,
     env_name: Option<String>,
+    cli: Option<String>,
 ) -> AppResult<()> {
     let dir = work_dir.unwrap_or_else(|| {
         dirs::home_dir()
@@ -64,6 +88,7 @@ pub async fn launch_claude_in_terminal(
     });
 
     let term_type = terminal_type.unwrap_or_else(|| "default".to_string());
+    let cli = resolve_cli(cli);
 
     #[allow(unused_variables)]
     let is_wsl_env = env_type.as_deref() == Some("wsl");
@@ -81,7 +106,7 @@ pub async fn launch_claude_in_terminal(
         if is_wsl_env {
             let wsl_dir = windows_path_to_wsl(&dir);
             let escaped_dir = wsl_dir.replace("'", "'\\''");
-            let wsl_bash_cmd = format!("cd '{}' && claude", escaped_dir);
+            let wsl_bash_cmd = format!("cd '{}' && {}", escaped_dir, cli);
 
             let mut wsl_args: Vec<String> = Vec::new();
             if !wsl_distro.is_empty() {
@@ -96,13 +121,31 @@ pub async fn launch_claude_in_terminal(
             match term_type.as_str() {
                 "custom" => {
                     if let Some(custom) = custom_path {
-                        Command::new(&custom)
-                            .args(&wsl_args[..wsl_args.len() - 4])
-                            .creation_flags(CREATE_NEW_CONSOLE)
-                            .spawn()
-                            .map_err(|e| {
-                                crate::error::AppError::from(format!("启动自定义终端失败: {}", e))
-                            })?;
+                        if is_windows_terminal(&custom) {
+                            // Windows Terminal 必须走 wt.exe，且能带上完整 wsl 子命令运行 CLI
+                            let mut wt_args = vec!["wsl.exe".to_string()];
+                            wt_args.extend(wsl_args.clone());
+                            Command::new("wt.exe")
+                                .args(&wt_args)
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动 Windows Terminal 失败: {}",
+                                        e
+                                    ))
+                                })?;
+                        } else {
+                            Command::new(&custom)
+                                .args(&wsl_args[..wsl_args.len() - 4])
+                                .creation_flags(CREATE_NEW_CONSOLE)
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动自定义终端失败: {}",
+                                        e
+                                    ))
+                                })?;
+                        }
                     } else {
                         return Err(crate::error::AppError::from(
                             "未提供自定义终端路径".to_string(),
@@ -135,7 +178,7 @@ pub async fn launch_claude_in_terminal(
                         .args([
                             "-NoExit",
                             "-Command",
-                            &format!("Set-Location -LiteralPath '{}'; claude", escaped_path),
+                            &format!("Set-Location -LiteralPath '{}'; {}", escaped_path, cli),
                         ])
                         .creation_flags(CREATE_NEW_CONSOLE)
                         .spawn()
@@ -146,7 +189,7 @@ pub async fn launch_claude_in_terminal(
                 "cmd" => {
                     let cmd_path = terminal_path.as_deref().unwrap_or("cmd");
                     Command::new(cmd_path)
-                        .args(["/k", &format!("cd /d \"{}\" && claude", dir)])
+                        .args(["/k", &format!("cd /d \"{}\" && {}", dir, cli)])
                         .creation_flags(CREATE_NEW_CONSOLE)
                         .spawn()
                         .map_err(|e| {
@@ -155,13 +198,30 @@ pub async fn launch_claude_in_terminal(
                 }
                 "custom" => {
                     if let Some(custom) = custom_path {
-                        Command::new(&custom)
-                            .arg(&dir)
-                            .creation_flags(CREATE_NEW_CONSOLE)
-                            .spawn()
-                            .map_err(|e| {
-                                crate::error::AppError::from(format!("启动自定义终端失败: {}", e))
-                            })?;
+                        if is_windows_terminal(&custom) {
+                            // Windows Terminal 走 wt.exe(-d 定位目录 + cmd /k 运行 CLI),
+                            // 直接启动 WindowsTerminal.exe 会 0x80070005 拒绝访问。
+                            Command::new("wt.exe")
+                                .args(["-d", &dir, "cmd", "/k", cli])
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动 Windows Terminal 失败: {}",
+                                        e
+                                    ))
+                                })?;
+                        } else {
+                            Command::new(&custom)
+                                .arg(&dir)
+                                .creation_flags(CREATE_NEW_CONSOLE)
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动自定义终端失败: {}",
+                                        e
+                                    ))
+                                })?;
+                        }
                     } else {
                         return Err(crate::error::AppError::from(
                             "未提供自定义终端路径".to_string(),
@@ -171,7 +231,7 @@ pub async fn launch_claude_in_terminal(
                 _ => {
                     let wt_path = terminal_path.as_deref().unwrap_or("wt");
                     let wt_result = Command::new(wt_path)
-                        .args(["-d", &dir, "cmd", "/k", "claude"])
+                        .args(["-d", &dir, "cmd", "/k", cli])
                         .spawn();
 
                     if wt_result.is_err() {
@@ -180,7 +240,7 @@ pub async fn launch_claude_in_terminal(
                             .args([
                                 "-NoExit",
                                 "-Command",
-                                &format!("Set-Location -LiteralPath '{}'; claude", escaped_path),
+                                &format!("Set-Location -LiteralPath '{}'; {}", escaped_path, cli),
                             ])
                             .creation_flags(CREATE_NEW_CONSOLE)
                             .spawn()
@@ -202,7 +262,7 @@ pub async fn launch_claude_in_terminal(
         } else {
             format!("export PATH=\"{}:$PATH\" && ", extra_dirs.join(":"))
         };
-        let script_cmd = format!("cd \"{}\" && {}claude", escaped_dir, path_prefix);
+        let script_cmd = format!("cd \"{}\" && {}{}", escaped_dir, path_prefix, cli);
 
         match term_type.as_str() {
             "iterm" => {
@@ -297,9 +357,10 @@ pub async fn launch_claude_in_terminal(
             format!("export PATH='{}:$PATH' && ", extra_dirs.join(":"))
         };
         let bash_cmd = format!(
-            "cd '{}' && {}claude",
+            "cd '{}' && {}{}",
             dir.replace("'", "'\\''"),
-            path_prefix
+            path_prefix,
+            cli
         );
 
         let in_wsl = std::fs::read_to_string("/proc/version")

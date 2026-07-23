@@ -4,7 +4,7 @@ import type { Project } from "@/types";
 import type { ClaudeCodeInfo } from "@/types/toolbox";
 import { useEditorsStore } from "@/stores/editorsStore";
 import { openInTerminal } from "@/services/db";
-import { launchClaudeInTerminal, getClaudeInstallationsCache, checkAllClaudeInstallations, saveClaudeInstallationsCache } from "@/services/toolbox";
+import { launchClaudeInTerminal, getClaudeInstallationsCache, checkAllClaudeInstallations, saveClaudeInstallationsCache, checkCodexInstallations } from "@/services/toolbox";
 import { showToast } from "@/components/ui";
 
 interface TerminalContextMenuProps {
@@ -18,11 +18,22 @@ export function TerminalContextMenu({ project, position, onClose }: TerminalCont
   const menuRef = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState(position);
   const [claudeEnvs, setClaudeEnvs] = useState<ClaudeCodeInfo[]>([]);
+  const [codexEnvs, setCodexEnvs] = useState<ClaudeCodeInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadClaudeEnvs();
+    loadCodexEnvs();
   }, []);
+
+  async function loadCodexEnvs() {
+    try {
+      const infos = await checkCodexInstallations();
+      setCodexEnvs(infos.filter((e) => e.installed));
+    } catch (error) {
+      console.error("Failed to load Codex envs:", error);
+    }
+  }
 
   async function loadClaudeEnvs() {
     try {
@@ -85,7 +96,8 @@ export function TerminalContextMenu({ project, position, onClose }: TerminalCont
     }
   }
 
-  async function handleLaunchClaude(env: ClaudeCodeInfo) {
+  async function handleLaunchCli(env: ClaudeCodeInfo, cli: "claude" | "codex") {
+    const label = cli === "codex" ? "Codex" : "Claude Code";
     try {
       await launchClaudeInTerminal(
         project.path,
@@ -93,12 +105,13 @@ export function TerminalContextMenu({ project, position, onClose }: TerminalCont
         terminalConfig.customPath,
         terminalConfig.paths?.[terminalConfig.type],
         env.envType,
-        env.envName
+        env.envName,
+        cli
       );
-      showToast("success", "已启动", `Claude Code (${env.envName}) 已在终端中打开`);
+      showToast("success", "已启动", `${label} (${env.envName}) 已在终端中打开`);
       onClose();
     } catch (error) {
-      console.error("Failed to launch Claude Code:", error);
+      console.error(`Failed to launch ${label}:`, error);
       showToast("error", "启动失败", String(error));
     }
   }
@@ -133,12 +146,34 @@ export function TerminalContextMenu({ project, position, onClose }: TerminalCont
             <button
               key={i}
               className="editor-context-menu-item"
-              onClick={() => handleLaunchClaude(env)}
+              onClick={() => handleLaunchCli(env, "claude")}
               title={`v${env.version}`}
             >
               <span className="claude-icon-text" style={{ fontSize: 10, width: 18, height: 18, flexShrink: 0 }}>C</span>
               <span className="editor-context-menu-item-name">{env.envName}</span>
               <span className="editor-context-menu-badge-global">v{env.version}</span>
+            </button>
+          ))}
+        </>
+      ) : null}
+
+      {/* Codex 环境 */}
+      {codexEnvs.length > 0 ? (
+        <>
+          <div className="editor-context-menu-divider" />
+          <div className="editor-context-menu-header">Codex</div>
+          {codexEnvs.map((env, i) => (
+            <button
+              key={i}
+              className="editor-context-menu-item"
+              onClick={() => handleLaunchCli(env, "codex")}
+              title={env.version ? `v${env.version}` : "Codex"}
+            >
+              <span className="claude-icon-text" style={{ fontSize: 10, width: 18, height: 18, flexShrink: 0 }}>Cx</span>
+              <span className="editor-context-menu-item-name">{env.envName}</span>
+              {env.version ? (
+                <span className="editor-context-menu-badge-global">v{env.version}</span>
+              ) : null}
             </button>
           ))}
         </>
