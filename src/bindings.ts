@@ -3121,7 +3121,11 @@ export type DownloadConfig = { url: string; saveDir: string | null; fileName: st
 /**
  * 下载任务
  */
-export type DownloadTask = { id: string; url: string; savePath: string; fileName: string; totalSize: number; downloadedSize: number; status: string; speed: number; error: string | null; createdAt: string; updatedAt: string }
+export type DownloadTask = { id: string; url: string; savePath: string; fileName: string; totalSize: number; downloadedSize: number; status: string; speed: number; error: string | null; 
+/**
+ * 重试次数上限，来自创建时的 DownloadConfig；旧数据无此字段，缺省 3
+ */
+maxRetries?: number; createdAt: string; updatedAt: string }
 /**
  * 编辑器配置
  */

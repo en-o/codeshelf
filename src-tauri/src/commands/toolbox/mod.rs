@@ -74,10 +74,17 @@ pub struct DownloadTask {
     pub status: String, // "pending", "downloading", "paused", "completed", "failed"
     pub speed: u64,     // 字节/秒
     pub error: Option<String>,
+    /// 重试次数上限，来自创建时的 DownloadConfig；旧数据无此字段，缺省 3
+    #[serde(default = "default_max_retries", alias = "max_retries")]
+    pub max_retries: u32,
     #[serde(alias = "created_at")]
     pub created_at: String,
     #[serde(alias = "updated_at")]
     pub updated_at: String,
+}
+
+fn default_max_retries() -> u32 {
+    3
 }
 
 /// 下载配置

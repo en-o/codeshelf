@@ -1,17 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Send,
   Paperclip,
   Radio,
   QrCode,
-  Smartphone,
-  Monitor,
-  Globe,
   Power,
   ChevronLeft,
-  Save,
-  Copy,
-  FolderOpen,
   Wifi,
   WifiOff,
   X,
@@ -37,110 +31,36 @@ import type {
 import {
   usePairDropClient,
   type HistoricalPeer,
-  type Peer,
 } from "./pairdrop/usePairDropClient";
 import { UrlsModal } from "./pairdrop/UrlsModal";
+import {
+  LOCAL_ROOM_ID,
+  type RemoteTarget,
+  type ContextMenuState,
+  parseJoinTarget,
+  remoteRoomId,
+  remoteLabel,
+  loadRemoteTargets,
+  saveRemoteTargets,
+  loadPeerAliases,
+  savePeerAliases,
+  targetFromDiscovery,
+  isSameRemoteTarget,
+  avatarLabel,
+  avatarColor,
+  deviceLabel,
+} from "./pairdrop/helpers";
+import {
+  Avatar,
+  DeviceIcon,
+  LocalScopeItem,
+  RemoteTargetItem,
+  PeerItem,
+  MessageBubble,
+} from "./pairdrop/components";
 
 interface PairDropProps {
   onBack: () => void;
-}
-
-/** 跨设备传输默认端口（与后端 DEFAULT_PORT 保持一致）；加入对方桌面端时未填端口用它兜底 */
-const DEFAULT_PAIRDROP_PORT = 8421;
-const REMOTE_TARGETS_STORAGE_KEY = "pairdrop:remote-targets";
-const PEER_ALIASES_STORAGE_KEY = "pairdrop:peer-aliases";
-const LOCAL_ROOM_ID = "local";
-
-interface RemoteTarget {
-  host: string;
-  port: number;
-  deviceId?: string;
-  displayName?: string;
-}
-
-type ContextMenuState =
-  | { kind: "local"; x: number; y: number }
-  | { kind: "remote"; x: number; y: number; target: RemoteTarget }
-  | { kind: "peer"; x: number; y: number; peer: HistoricalPeer };
-
-/** 解析"加入其他桌面端"输入：支持 "192.168.1.5"、"192.168.1.5:8421"、"http://192.168.1.5:8421" */
-function parseJoinTarget(v: string): RemoteTarget | null {
-  // 去掉协议头和路径/末尾斜杠
-  const s = v.trim().replace(/^[a-zA-Z][\w+.-]*:\/\//, "").replace(/\/.*$/, "");
-  if (!s) return null;
-  const idx = s.lastIndexOf(":");
-  const host = idx > 0 ? s.slice(0, idx) : s;
-  const port = idx > 0 ? parseInt(s.slice(idx + 1), 10) : DEFAULT_PAIRDROP_PORT;
-  // host 只允许 IPv4 / 主机名字符（含空格/非法字符一律拒，避免拼出非法 ws:// 导致崩溃）
-  if (!host || !/^[a-zA-Z0-9.\-]+$/.test(host)) return null;
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
-  return { host, port };
-}
-
-function remoteRoomId(target: RemoteTarget): string {
-  if (target.deviceId) return `device:${target.deviceId}`;
-  return `remote:${target.host}:${target.port}`;
-}
-
-function remoteLabel(target: RemoteTarget): string {
-  if (target.displayName) return target.displayName;
-  return `${target.host}:${target.port}`;
-}
-
-function loadRemoteTargets(): RemoteTarget[] {
-  try {
-    const raw = localStorage.getItem(REMOTE_TARGETS_STORAGE_KEY);
-    if (!raw) return [];
-    const values = JSON.parse(raw) as Array<{
-      host?: string;
-      port?: number;
-      deviceId?: string;
-      displayName?: string;
-    }>;
-    if (!Array.isArray(values)) return [];
-    return values.filter(
-      (value): value is RemoteTarget =>
-        !!value.host &&
-        Number.isInteger(value.port) &&
-        value.port! > 0 &&
-        value.port! <= 65535
-    );
-  } catch {
-    return [];
-  }
-}
-
-function saveRemoteTargets(targets: RemoteTarget[]) {
-  localStorage.setItem(REMOTE_TARGETS_STORAGE_KEY, JSON.stringify(targets));
-}
-
-function loadPeerAliases(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(PEER_ALIASES_STORAGE_KEY);
-    if (!raw) return {};
-    const aliases = JSON.parse(raw) as Record<string, string>;
-    return aliases && typeof aliases === "object" ? aliases : {};
-  } catch {
-    return {};
-  }
-}
-
-function savePeerAliases(aliases: Record<string, string>) {
-  localStorage.setItem(PEER_ALIASES_STORAGE_KEY, JSON.stringify(aliases));
-}
-
-function targetFromDiscovery(device: PairDropDiscoveredDevice): RemoteTarget {
-  return {
-    host: device.host,
-    port: device.port,
-    deviceId: device.deviceId,
-    displayName: device.displayName,
-  };
-}
-
-function isSameRemoteTarget(a: RemoteTarget, b: RemoteTarget): boolean {
-  if (a.deviceId && b.deviceId) return a.deviceId === b.deviceId;
-  return a.host === b.host && a.port === b.port;
 }
 
 export function PairDrop({ onBack }: PairDropProps) {
@@ -1265,384 +1185,4 @@ function PairDropContextMenu({
       ) : null}
     </div>
   );
-}
-
-function LocalScopeItem({
-  active,
-  online,
-  onClick,
-  onContextMenu,
-}: {
-  active: boolean;
-  online: boolean;
-  onClick: () => void;
-  onContextMenu: (event: MouseEvent) => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left relative ${
-        active ? "bg-blue-50 dark:bg-blue-900/30" : ""
-      }`}
-    >
-      {active && (
-        <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />
-      )}
-      <Avatar label="本" color="#2563eb" size={32} />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-          本机
-        </div>
-        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <Monitor size={10} />
-          局域网入口 · {online ? "在线" : "已断开"}
-        </div>
-      </div>
-      <span
-        className={`w-2 h-2 rounded-full shrink-0 ${
-          online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
-        }`}
-      />
-    </button>
-  );
-}
-
-function RemoteTargetItem({
-  target,
-  active,
-  online,
-  disabled,
-  onClick,
-  onContextMenu,
-  onForget,
-}: {
-  target: RemoteTarget;
-  active: boolean;
-  online: boolean;
-  disabled: boolean;
-  onClick: () => void;
-  onContextMenu: (event: MouseEvent) => void;
-  onForget: () => void;
-}) {
-  return (
-    <div className="group relative">
-      <button
-        onClick={onClick}
-        onContextMenu={onContextMenu}
-        className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left ${
-          active ? "bg-blue-50 dark:bg-blue-900/30" : ""
-        }`}
-      >
-        {active && (
-          <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />
-        )}
-        <Avatar
-          label={avatarLabel(remoteLabel(target))}
-          color={avatarColor(target.deviceId || `${target.host}:${target.port}`)}
-          size={32}
-        />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-            {remoteLabel(target)}
-          </div>
-          <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-            <Monitor size={10} />
-            桌面端 · {disabled ? "已断开" : online ? "已发现" : "历史"}
-          </div>
-        </div>
-        <span
-          className={`w-2 h-2 rounded-full shrink-0 ${
-            disabled
-              ? "bg-gray-300 dark:bg-gray-600"
-              : online
-              ? "bg-green-500"
-              : "bg-gray-300 dark:bg-gray-600"
-          }`}
-        />
-      </button>
-      <button
-        onClick={onForget}
-        className="absolute right-7 top-1/2 -translate-y-1/2 hidden group-hover:flex w-6 h-6 items-center justify-center rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-        title="移除"
-      >
-        <X size={13} />
-      </button>
-    </div>
-  );
-}
-
-function PeerItem({
-  peer,
-  active,
-  online,
-  unread,
-  onClick,
-  onContextMenu,
-}: {
-  peer: Peer & { lastSeenAt?: number };
-  active: boolean;
-  online: boolean;
-  unread: number;
-  onClick: () => void;
-  onContextMenu: (event: MouseEvent) => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left relative ${
-        active ? "bg-blue-50 dark:bg-blue-900/30" : ""
-      }`}
-    >
-      {active && (
-        <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />
-      )}
-      <Avatar
-        label={avatarLabel(peer.displayName)}
-        color={avatarColor(peer.peerId)}
-        size={32}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-          {peer.displayName}
-        </div>
-        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <DeviceIcon type={peer.deviceType} />
-          {deviceLabel(peer.deviceType)} · {online ? "在线" : "历史"}
-        </div>
-      </div>
-      <span
-        className={`w-2 h-2 rounded-full shrink-0 ${
-          online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
-        }`}
-        title={online ? "在线" : "离线"}
-      />
-      {unread > 0 && (
-        <span className="bg-red-500 text-white text-[10px] font-semibold rounded-full px-1.5 min-w-[18px] h-[18px] flex items-center justify-center">
-          {unread}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function MessageBubble({
-  message,
-  isSelf,
-  onSave,
-  onCopyPath,
-  onOpenPath,
-  onCopyText,
-}: {
-  message: any;
-  isSelf: boolean;
-  onSave?: (token: string, suggestedName: string, messageId: string) => void;
-  onCopyPath?: (path: string) => void;
-  onOpenPath?: (path: string) => void;
-  onCopyText?: (text: string) => void;
-}) {
-  const time = useMemo(() => {
-    const d = new Date(message.ts);
-    const clock = `${String(d.getHours()).padStart(2, "0")}:${String(
-      d.getMinutes()
-    ).padStart(2, "0")}`;
-    const now = new Date();
-    const isToday =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate();
-    return isToday
-      ? clock
-      : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-          d.getDate()
-        ).padStart(2, "0")} ${clock}`;
-  }, [message.ts]);
-
-  if (message.kind === "text") {
-    return (
-      <div
-        className={`flex ${isSelf ? "justify-end" : "justify-start"} max-w-[75%] ${
-          isSelf ? "ml-auto" : ""
-        }`}
-      >
-        <div className="min-w-0 max-w-full group">
-          <div
-            className={`px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
-              isSelf
-                ? "bg-blue-500 text-white rounded-br-md"
-                : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-bl-md"
-            }`}
-          >
-            {message.text}
-          </div>
-          <div
-            className={`flex items-center gap-2 mt-1 ${
-              isSelf ? "justify-start" : "justify-end"
-            }`}
-          >
-            <button
-              onClick={() => onCopyText?.(message.text)}
-              className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] text-gray-400 hover:text-blue-500"
-              title="复制文本"
-            >
-              <Copy size={11} />
-              复制
-            </button>
-            <span className="text-[10px] text-gray-400">{time}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // file
-  const ext = (message.name.split(".").pop() || "").toUpperCase().slice(0, 4);
-  const uploading =
-    isSelf &&
-    typeof message.uploadProgress === "number" &&
-    message.uploadProgress < 100;
-  return (
-    <div
-      className={`flex ${isSelf ? "justify-end" : "justify-start"} max-w-[75%] ${
-        isSelf ? "ml-auto" : ""
-      }`}
-    >
-      <div className="min-w-0 max-w-full">
-        <div
-          className={`px-3 py-2 rounded-2xl text-sm ${
-            isSelf
-              ? "bg-blue-500 text-white rounded-br-md"
-              : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-bl-md"
-          }`}
-        >
-          <div className="flex items-center gap-3 min-w-[200px]">
-            <div
-              className={`w-9 h-9 rounded-md flex items-center justify-center text-[11px] font-bold flex-shrink-0 ${
-                isSelf
-                  ? "bg-white/25 text-white"
-                  : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
-              }`}
-            >
-              {ext || "FILE"}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-xs break-all">
-                {message.name}
-              </div>
-              <div className="text-[10px] opacity-80 mt-0.5">
-                {formatBytes(message.size)}
-                {uploading ? <> · 上传 {message.uploadProgress}%</> : null}
-              </div>
-            </div>
-          </div>
-          {uploading ? (
-            <div
-              className={`mt-2 h-1 rounded-full overflow-hidden ${
-                isSelf ? "bg-white/30" : "bg-gray-200 dark:bg-gray-700"
-              }`}
-            >
-              <div
-                className={`h-full transition-all duration-150 ${
-                  isSelf ? "bg-white/90" : "bg-blue-500"
-                }`}
-                style={{ width: `${message.uploadProgress}%` }}
-              />
-            </div>
-          ) : null}
-          {!isSelf && message.token ? (
-            message.savedPath ? (
-              <div className="mt-2 space-y-1.5">
-                <div
-                  className="text-[10px] opacity-80 break-all"
-                  title={message.savedPath}
-                >
-                  已保存到 {message.savedPath}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => onCopyPath?.(message.savedPath)}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-100 rounded transition-colors"
-                  >
-                    <Copy size={11} />
-                    复制路径
-                  </button>
-                  <button
-                    onClick={() => onOpenPath?.(message.savedPath)}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-100 rounded transition-colors"
-                  >
-                    <FolderOpen size={11} />
-                    打开位置
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() =>
-                  onSave?.(message.token, message.name, message.id)
-                }
-                className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 text-[11px] bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
-              >
-                <Save size={11} />
-                保存到本地
-              </button>
-            )
-          ) : null}
-          {isSelf && !uploading && message.token ? (
-            <div className="mt-2 text-[10px] opacity-80">已发送</div>
-          ) : null}
-        </div>
-        <div
-          className={`text-[10px] text-gray-400 mt-1 ${
-            isSelf ? "text-left" : "text-right"
-          }`}
-        >
-          {time}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Avatar({
-  label,
-  color,
-  size,
-}: {
-  label: string;
-  color: string;
-  size: number;
-}) {
-  return (
-    <div
-      className="rounded-full flex items-center justify-center text-white font-semibold text-xs flex-shrink-0"
-      style={{ width: size, height: size, background: color }}
-    >
-      {label}
-    </div>
-  );
-}
-
-function DeviceIcon({ type }: { type: string }) {
-  if (type === "mobile") return <Smartphone size={10} />;
-  if (type === "desktop") return <Monitor size={10} />;
-  return <Globe size={10} />;
-}
-function deviceLabel(t: string) {
-  if (t === "desktop") return "桌面端";
-  if (t === "mobile") return "手机";
-  return "浏览器";
-}
-function avatarLabel(name: string): string {
-  if (!name) return "?";
-  const ascii = name.match(/[A-Za-z0-9]/);
-  if (ascii) return ascii[0].toUpperCase();
-  return name.trim().charAt(0) || "?";
-}
-function avatarColor(id: string): string {
-  if (!id) return "#9ca3af";
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) & 0xffffff;
-  const hue = hash % 360;
-  return `hsl(${hue}, 65%, 55%)`;
 }

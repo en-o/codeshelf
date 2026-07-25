@@ -20,8 +20,9 @@ static DOWNLOAD_TASKS: Lazy<Arc<Mutex<HashMap<String, DownloadTask>>>> =
 /// 是否已从文件加载
 static TASKS_LOADED: Lazy<Arc<Mutex<bool>>> = Lazy::new(|| Arc::new(Mutex::new(false)));
 
-/// 下载取消标志
-static DOWNLOAD_CANCELLED: Lazy<Arc<Mutex<HashMap<String, AtomicBool>>>> =
+/// 下载取消标志。值为 Arc：下载协程在进入逐 chunk 循环前克隆一份，
+/// 之后每个 chunk 免锁读原子量，不用反复锁全局 map。
+static DOWNLOAD_CANCELLED: Lazy<Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 /// 确保下载任务已从文件加载
@@ -139,6 +140,8 @@ pub async fn start_download(config: DownloadConfig) -> AppResult<String> {
         .unwrap_or_else(|| extract_filename(&config.url));
     let save_path = Path::new(&save_dir).join(&file_name);
 
+    let max_retries = config.max_retries.unwrap_or(3);
+
     // 创建任务
     let task = DownloadTask {
         id: task_id.clone(),
@@ -150,6 +153,7 @@ pub async fn start_download(config: DownloadConfig) -> AppResult<String> {
         status: "pending".to_string(),
         speed: 0,
         error: None,
+        max_retries,
         created_at: current_time(),
         updated_at: current_time(),
     };
@@ -168,14 +172,13 @@ pub async fn start_download(config: DownloadConfig) -> AppResult<String> {
     // 初始化取消标志
     {
         let mut flags = DOWNLOAD_CANCELLED.lock().await;
-        flags.insert(task_id.clone(), AtomicBool::new(false));
+        flags.insert(task_id.clone(), Arc::new(AtomicBool::new(false)));
     }
 
     // 启动下载任务
     let id = task_id.clone();
     let url = config.url.clone();
     let path = save_path.to_string_lossy().to_string();
-    let max_retries = config.max_retries.unwrap_or(3);
 
     tokio::spawn(async move {
         download_with_retry(&id, &url, &path, max_retries).await;
@@ -326,12 +329,19 @@ async fn download_file(task_id: &str, url: &str, save_path: &str) -> AppResult<(
     let mut last_update = std::time::Instant::now();
     let mut last_downloaded = downloaded;
 
+    // 克隆一份取消标志，逐 chunk 免锁读原子量
+    let cancel_flag = DOWNLOAD_CANCELLED.lock().await.get(task_id).cloned();
+
     let mut stream = response.bytes_stream();
     use futures::StreamExt;
 
     while let Some(chunk) = stream.next().await {
         // 检查是否被取消
-        if is_cancelled(task_id).await {
+        let cancelled = cancel_flag
+            .as_ref()
+            .map(|f| f.load(Ordering::SeqCst))
+            .unwrap_or(false);
+        if cancelled {
             return Err(crate::error::AppError::from("下载已取消".to_string()));
         }
 
@@ -457,16 +467,17 @@ pub async fn resume_download(task_id: String) -> AppResult<()> {
     // 重置取消标志
     {
         let mut flags = DOWNLOAD_CANCELLED.lock().await;
-        flags.insert(task_id.clone(), AtomicBool::new(false));
+        flags.insert(task_id.clone(), Arc::new(AtomicBool::new(false)));
     }
 
-    // 重新启动下载
+    // 重新启动下载，沿用创建时配置的重试次数
     let id = task_id.clone();
     let url = task.url.clone();
     let path = task.save_path.clone();
+    let max_retries = task.max_retries;
 
     tokio::spawn(async move {
-        download_with_retry(&id, &url, &path, 3).await;
+        download_with_retry(&id, &url, &path, max_retries).await;
     });
 
     Ok(())
