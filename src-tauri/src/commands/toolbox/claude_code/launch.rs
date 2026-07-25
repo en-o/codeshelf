@@ -66,39 +66,59 @@ fn is_windows_terminal(path: &str) -> bool {
     name == "wt.exe" || name == "windowsterminal.exe"
 }
 
-/// Windows：解析 wt.exe 的可用路径。
-/// GUI 进程的 PATH 常常不含 %LOCALAPPDATA%\Microsoft\WindowsApps，裸 `wt.exe` 会「找不到程序」；
-/// 优先用该目录下的应用执行别名全路径(它可执行，而 Program Files\WindowsApps 里的真身会被拒绝访问)。
+/// Windows：解析 wt.exe 的应用执行别名全路径（%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe）。
+/// GUI 进程的 PATH 常常不含 WindowsApps，裸 `wt.exe` 会「找不到程序」，所以用全路径。
+///
+/// 不做 `exists()` 预检 —— WindowsApps 里的 wt.exe 是 appexec 重解析点(IO_REPARSE_TAG_APPEXECLINK)，
+/// `Path::exists()`/stat 无法解析它、恒返回 false，但 `CreateProcess` 能正常启动它。之前那个
+/// exists() 预检恰恰把这条可用路径判成「不存在」→ 退回裸 wt.exe → PATH 里找不到 → 最终落到 cmd，
+/// 表现就是「自定义了 Windows Terminal 却弹 DOS」。
 #[cfg(target_os = "windows")]
 fn resolve_wt() -> String {
     if let Some(local) = dirs::data_local_dir() {
-        let p = local.join("Microsoft").join("WindowsApps").join("wt.exe");
-        if p.exists() {
-            return p.to_string_lossy().to_string();
-        }
+        return local
+            .join("Microsoft")
+            .join("WindowsApps")
+            .join("wt.exe")
+            .to_string_lossy()
+            .into_owned();
     }
     "wt.exe".to_string()
 }
 
-/// Windows：优先用 Windows Terminal(wt.exe -d <dir> cmd /k <cli>)在目标目录打开并运行 CLI。
-/// wt 不可用(未安装 / 别名不在 PATH)时退回 cmd，保证永不硬失败。
+/// Windows：用 Windows Terminal(wt -d <dir> cmd /k <cli>)在目标目录打开并运行 CLI。
+/// 按可靠性依次尝试候选 wt 路径，第一个 spawn 成功即用；全失败才退 cmd，保证永不硬失败。
+/// `preferred` 是用户在设置里显式选中的 wt 路径，最优先(之前完全被忽略，是弹 DOS 的另一半原因)。
 /// cmd 用 .current_dir 设定目录而非 `cd /d "..."`，避开 Rust 转义把内层引号变成 cmd 不认的 \"。
 #[cfg(target_os = "windows")]
-fn launch_wt_or_cmd(dir: &str, cli: &str) -> AppResult<()> {
+fn launch_wt_or_cmd(preferred: Option<&str>, dir: &str, cli: &str) -> AppResult<()> {
     const CREATE_NEW_CONSOLE: u32 = 0x00000010;
-    let wt = resolve_wt();
-    let wt_ok = Command::new(&wt)
-        .args(["-d", dir, "cmd", "/k", cli])
-        .spawn()
-        .is_ok();
-    if !wt_ok {
-        Command::new("cmd")
-            .current_dir(dir)
-            .args(["/k", cli])
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn()
-            .map_err(|e| crate::error::AppError::from(format!("启动终端失败: {}", e)))?;
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(p) = preferred {
+        let p = p.trim();
+        if !p.is_empty() {
+            candidates.push(p.to_string());
+        }
     }
+    candidates.push(resolve_wt());
+    candidates.push("wt.exe".to_string());
+
+    for wt in candidates {
+        if Command::new(&wt)
+            .args(["-d", dir, "cmd", "/k", cli])
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+    }
+
+    Command::new("cmd")
+        .current_dir(dir)
+        .args(["/k", cli])
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn()
+        .map_err(|e| crate::error::AppError::from(format!("启动终端失败: {}", e)))?;
     Ok(())
 }
 
@@ -239,9 +259,9 @@ pub async fn launch_claude_in_terminal(
                     if let Some(custom) = custom_path {
                         let lower = custom.to_ascii_lowercase();
                         if is_windows_terminal(&custom) {
-                            // Windows Terminal：走 wt.exe -d <dir> cmd /k <cli>，
+                            // Windows Terminal：走 wt -d <dir> cmd /k <cli>，优先用用户选中的路径。
                             // 直接启动 WindowsTerminal.exe 会 0x80070005，裸 wt.exe 又常「找不到程序」。
-                            launch_wt_or_cmd(&dir, cli)?;
+                            launch_wt_or_cmd(Some(&custom), &dir, cli)?;
                         } else if lower.ends_with("powershell.exe") || lower.ends_with("pwsh.exe") {
                             Command::new(&custom)
                                 .current_dir(&dir)
@@ -316,7 +336,7 @@ pub async fn launch_claude_in_terminal(
                     }
                 }
                 _ => {
-                    launch_wt_or_cmd(&dir, cli)?;
+                    launch_wt_or_cmd(None, &dir, cli)?;
                 }
             }
         }

@@ -28,33 +28,51 @@ fn is_windows_terminal(path: &str) -> bool {
     name == "wt.exe" || name == "windowsterminal.exe"
 }
 
-/// Windows：解析 wt.exe 的可用路径。GUI 进程的 PATH 常常不含
-/// %LOCALAPPDATA%\Microsoft\WindowsApps，裸 `wt.exe` 会「找不到程序」；
-/// 优先用该目录下的应用执行别名全路径。
+/// Windows：解析 wt.exe 的应用执行别名全路径（%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe）。
+/// GUI 进程的 PATH 常常不含 WindowsApps，裸 `wt.exe` 会「找不到程序」，所以用全路径。
+///
+/// 不做 `exists()` 预检 —— 该 wt.exe 是 appexec 重解析点，`Path::exists()`/stat 无法解析它、
+/// 恒返回 false，但 `CreateProcess` 能正常启动它。之前的 exists() 预检把它判成「不存在」→
+/// 退回裸 wt.exe → PATH 找不到 → 落到 cmd，表现为「选了 Windows Terminal 却弹 DOS」。
 #[cfg(target_os = "windows")]
 fn resolve_wt() -> String {
     if let Some(local) = dirs::data_local_dir() {
-        let p = local.join("Microsoft").join("WindowsApps").join("wt.exe");
-        if p.exists() {
-            return p.to_string_lossy().to_string();
-        }
+        return local
+            .join("Microsoft")
+            .join("WindowsApps")
+            .join("wt.exe")
+            .to_string_lossy()
+            .into_owned();
     }
     "wt.exe".to_string()
 }
 
-/// Windows：在目标目录打开终端。优先 Windows Terminal(wt.exe -d <dir>)，
-/// 不可用时退回 cmd(.current_dir 定位，避开 `cd /d "..."` 的引号转义问题)。
+/// Windows：在目标目录打开终端。优先 Windows Terminal(wt -d <dir>)，
+/// 按可靠性依次尝试候选 wt 路径，第一个 spawn 成功即用；全失败才退 cmd。
+/// `preferred` 是用户显式选中的 wt 路径，最优先(之前被忽略，是弹 DOS 的另一半原因)。
 #[cfg(target_os = "windows")]
-fn open_wt_or_cmd(dir: &str) -> AppResult<()> {
-    let wt = resolve_wt();
-    let ok = Command::new(&wt).args(["-d", dir]).spawn().is_ok();
-    if !ok {
-        Command::new("cmd")
-            .current_dir(dir)
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn()
-            .map_err(|e| crate::error::AppError::from(format!("打开终端失败: {}", e)))?;
+fn open_wt_or_cmd(preferred: Option<&str>, dir: &str) -> AppResult<()> {
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(p) = preferred {
+        let p = p.trim();
+        if !p.is_empty() {
+            candidates.push(p.to_string());
+        }
     }
+    candidates.push(resolve_wt());
+    candidates.push("wt.exe".to_string());
+
+    for wt in candidates {
+        if Command::new(&wt).args(["-d", dir]).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+
+    Command::new("cmd")
+        .current_dir(dir)
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn()
+        .map_err(|e| crate::error::AppError::from(format!("打开终端失败: {}", e)))?;
     Ok(())
 }
 
@@ -181,9 +199,9 @@ pub async fn open_in_terminal(
             "custom" => {
                 if let Some(custom) = custom_path {
                     if is_windows_terminal(&custom) {
-                        // Windows Terminal：wt.exe -d <dir>（全路径解析 + cmd 兜底）。
+                        // Windows Terminal：wt -d <dir>，优先用用户选中的路径（全路径解析 + cmd 兜底）。
                         // 直接启动 WindowsTerminal.exe 会 0x80070005，裸 wt.exe 又常「找不到程序」。
-                        open_wt_or_cmd(&path)?;
+                        open_wt_or_cmd(Some(&custom), &path)?;
                     } else {
                         Command::new(&custom)
                             .current_dir(&path)
@@ -203,7 +221,7 @@ pub async fn open_in_terminal(
                 }
             }
             _ => {
-                open_wt_or_cmd(&path)?;
+                open_wt_or_cmd(None, &path)?;
             }
         }
     }
