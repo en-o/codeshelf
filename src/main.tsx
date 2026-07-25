@@ -24,12 +24,8 @@ if (!import.meta.env.DEV) {
 window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => e.preventDefault());
 
-console.log("Frontend starting...");
-
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
 );
-
-console.log("Frontend rendered");

@@ -92,6 +92,7 @@ export function useDockerImageTool(options: UseDockerImageToolOptions = {}) {
   useEffect(() => {
     if (!status?.available) return;
     const interval = setInterval(() => {
+      if (document.hidden) return;
       refreshDockerLists({ silent: true }).catch(() => {});
     }, 3000);
     return () => clearInterval(interval);

@@ -431,7 +431,9 @@ pub enum SessionInject {
 /// API 鉴权配置
 #[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[derive(Default)]
 pub enum ApiAuthConfig {
+    #[default]
     None,
     Bearer {
         token: String,
@@ -457,11 +459,6 @@ pub enum ApiAuthConfig {
     },
 }
 
-impl Default for ApiAuthConfig {
-    fn default() -> Self {
-        ApiAuthConfig::None
-    }
-}
 
 /// 接口分组（同一项目共享鉴权）
 #[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]

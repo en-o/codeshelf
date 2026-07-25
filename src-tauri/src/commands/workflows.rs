@@ -603,8 +603,10 @@ pub fn spawn_scheduler(app: AppHandle) -> SchedulerHandle {
                 let app_inner = app_clone.clone();
                 handles.push(tauri::async_runtime::spawn(async move {
                     loop {
-                        let now = Utc::now();
-                        let Some(next) = schedule.upcoming(Utc).next() else {
+                        // 按本地时区调度：UI 的人话预览（"每天 09:00"）说的是本地时间，
+                        // 用 Utc 会让国内用户的任务偏移 8 小时。
+                        let now = chrono::Local::now();
+                        let Some(next) = schedule.upcoming(chrono::Local).next() else {
                             return;
                         };
                         let delta = (next - now).to_std().unwrap_or(Duration::from_secs(60));

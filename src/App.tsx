@@ -142,8 +142,6 @@ async function initializeApp() {
     useAiProvidersStore.setState({ aiProviders: normalizedAiProviders });
     useResumeStore.getState().setSavedResumes(savedResumes || []);
     useUiStore.setState({ initialized: true });
-
-    console.log("应用初始化完成，已从 data 目录加载数据");
   } catch (err) {
     console.error("初始化应用失败:", err);
     setInitialized(true); // 即使失败也标记为已初始化，使用默认值

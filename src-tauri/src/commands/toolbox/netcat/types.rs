@@ -44,18 +44,15 @@ pub enum SessionStatus {
 /// 自动发送模式
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AutoSendMode {
+    #[default]
     Fixed,
     Csv,
     Template,
     Http,
 }
 
-impl Default for AutoSendMode {
-    fn default() -> Self {
-        Self::Fixed
-    }
-}
 
 /// 自动发送配置
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

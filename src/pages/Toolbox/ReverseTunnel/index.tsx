@@ -103,7 +103,7 @@ export function ReverseTunnel({ onBack }: ReverseTunnelProps) {
     listReverseSshConfigHosts()
       .then(setSshConfigHosts)
       .catch((err) => console.warn("读取 ~/.ssh/config 失败:", err));
-    const interval = setInterval(loadAll, 2000);
+    const interval = setInterval(() => { if (!document.hidden) loadAll(); }, 2000);
     return () => clearInterval(interval);
   }, []);
 

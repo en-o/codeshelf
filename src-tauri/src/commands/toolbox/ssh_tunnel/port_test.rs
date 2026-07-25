@@ -96,9 +96,7 @@ async fn test_via_tcp(host: &str, port: u16) -> TestPortResult {
 #[cfg(not(target_os = "windows"))]
 async fn test_via_nc(host: &str, port: u16) -> Option<TestPortResult> {
     // 同步检测命令是否存在，避免 nc 不存在时的 spawn error 体验
-    if which_unix("nc").is_none() {
-        return None;
-    }
+    which_unix("nc")?;
     let output = match timeout(
         Duration::from_secs(TEST_TIMEOUT_SECS + 2),
         Command::new("nc")

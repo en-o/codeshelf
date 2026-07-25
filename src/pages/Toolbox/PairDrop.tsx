@@ -183,7 +183,7 @@ export function PairDrop({ onBack }: PairDropProps) {
   // 周期刷新 peer 计数（WebSocket 已经实时更新 peers，这里主要刷新 urls/state）
   useEffect(() => {
     if (!serviceStatus?.running) return;
-    const t = setInterval(refresh, 5000);
+    const t = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
     return () => clearInterval(t);
   }, [serviceStatus?.running]);
 
@@ -379,7 +379,7 @@ function ChatWorkspace({
       }
     };
     refreshDiscovered();
-    const timer = window.setInterval(refreshDiscovered, 3000);
+    const timer = window.setInterval(() => { if (!document.hidden) refreshDiscovered(); }, 3000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

@@ -55,7 +55,7 @@ export function useSshTunnel() {
     listLocalIps()
       .then(setLocalIps)
       .catch((err) => console.warn("读取本机 IP 失败:", err));
-    const interval = setInterval(loadAll, 2000);
+    const interval = setInterval(() => { if (!document.hidden) loadAll(); }, 2000);
     return () => clearInterval(interval);
   }, []);
 

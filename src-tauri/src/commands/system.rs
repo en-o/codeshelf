@@ -518,7 +518,7 @@ fn test_macos_terminal() -> AppResult<TerminalTestResult> {
             .arg("tell application \"Terminal\" to get version")
             .output();
 
-        return Ok(match result {
+        Ok(match result {
             Ok(_) => TerminalTestResult {
                 available: true,
                 error: None,
@@ -529,7 +529,7 @@ fn test_macos_terminal() -> AppResult<TerminalTestResult> {
                 error: Some(format!("Terminal.app 不可用: {}", e)),
                 suggested_path: None,
             },
-        });
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -548,7 +548,7 @@ fn test_iterm() -> AppResult<TerminalTestResult> {
             .arg("tell application \"iTerm\" to get version")
             .output();
 
-        return Ok(match result {
+        Ok(match result {
             Ok(_) => TerminalTestResult {
                 available: true,
                 error: None,
@@ -559,7 +559,7 @@ fn test_iterm() -> AppResult<TerminalTestResult> {
                 error: Some("iTerm2 未安装或不可用".to_string()),
                 suggested_path: None,
             },
-        });
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -593,7 +593,7 @@ fn test_default_terminal() -> AppResult<TerminalTestResult> {
 
     #[cfg(target_os = "macos")]
     {
-        return test_macos_terminal();
+        test_macos_terminal()
     }
 
     #[cfg(target_os = "linux")]

@@ -107,8 +107,8 @@ fn default_download_dir() -> String {
 fn extract_filename(url: &str) -> String {
     // 尝试解析 URL
     if let Ok(parsed) = url::Url::parse(url) {
-        if let Some(segments) = parsed.path_segments() {
-            if let Some(last) = segments.last() {
+        if let Some(mut segments) = parsed.path_segments() {
+            if let Some(last) = segments.next_back() {
                 // 移除查询参数
                 let name = last.split('?').next().unwrap_or(last);
                 if !name.is_empty() {
@@ -200,7 +200,18 @@ async fn download_with_retry(task_id: &str, url: &str, save_path: &str, max_retr
             Err(e) => {
                 // 检查是否被取消
                 if is_cancelled(task_id).await {
-                    update_task_status(task_id, "cancelled", Some(e.to_string())).await;
+                    // 暂停也是通过取消标志中断下载的：此时状态已被 pause_download 置为
+                    // "paused"，不能覆写成 "cancelled"，否则 resume 的 paused 校验永远不过。
+                    let paused = {
+                        let tasks = DOWNLOAD_TASKS.lock().await;
+                        tasks
+                            .get(task_id)
+                            .map(|t| t.status == "paused")
+                            .unwrap_or(false)
+                    };
+                    if !paused {
+                        update_task_status(task_id, "cancelled", Some(e.to_string())).await;
+                    }
                     return;
                 }
 
@@ -276,7 +287,7 @@ async fn download_file(task_id: &str, url: &str, save_path: &str) -> AppResult<(
                 .headers()
                 .get("content-range")
                 .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.split('/').last())
+                .and_then(|s| s.split('/').next_back())
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(0)
         } else {

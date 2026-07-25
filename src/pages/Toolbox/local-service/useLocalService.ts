@@ -52,7 +52,7 @@ export function useLocalService() {
 
   useEffect(() => {
     loadAll();
-    const interval = setInterval(loadAll, 2000);
+    const interval = setInterval(() => { if (!document.hidden) loadAll(); }, 2000);
     return () => clearInterval(interval);
   }, []);
 

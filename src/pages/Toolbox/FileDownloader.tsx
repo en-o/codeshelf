@@ -46,7 +46,8 @@ export function FileDownloader({ onBack }: FileDownloaderProps) {
   useEffect(() => {
     loadTasks();
     // 定时刷新任务状态
-    const interval = setInterval(loadTasks, 1000);
+    // 窗口隐藏（最小化/托盘）时暂停轮询，避免后台空转 IPC
+    const interval = setInterval(() => { if (!document.hidden) loadTasks(); }, 1000);
     return () => clearInterval(interval);
   }, []);
 

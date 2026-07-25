@@ -395,11 +395,10 @@ pub fn start_clipboard_monitor(app_handle: AppHandle) {
                         }
                     };
 
-                    if is_new {
-                        if upsert_entry(text).await.is_ok() {
+                    if is_new
+                        && upsert_entry(text).await.is_ok() {
                             let _ = app_handle.emit("clipboard-changed", ());
                         }
-                    }
                 }
             }
 

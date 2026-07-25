@@ -64,7 +64,7 @@ pub async fn verify_remote_url(url: String) -> AppResult<()> {
 
     #[cfg(not(target_os = "windows"))]
     let output = Command::new("git")
-        .args(&["ls-remote", "--exit-code", &url])
+        .args(["ls-remote", "--exit-code", &url])
         .output()
         .map_err(|e| crate::error::AppError::from(format!("执行 git 命令失败: {}", e)))?;
 
@@ -140,7 +140,7 @@ pub async fn sync_to_remote(
         .ok()
         .and_then(|output| {
             // Output is like: refs/remotes/origin/main
-            output.trim().split('/').last().map(|s| s.to_string())
+            output.trim().split('/').next_back().map(|s| s.to_string())
         });
 
         // Get all branches from source remote (excluding HEAD)
@@ -193,7 +193,7 @@ pub async fn sync_to_remote(
                 args.push("--force");
             }
 
-            let is_default = default_branch.as_ref().map_or(false, |d| d == branch);
+            let is_default = default_branch.as_ref() == Some(branch);
             match run_git_command(&path, &args) {
                 Ok(_) => {
                     if is_default {

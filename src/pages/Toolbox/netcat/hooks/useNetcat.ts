@@ -183,7 +183,7 @@ export function useNetcat() {
     };
     init();
 
-    const refreshInterval = setInterval(refreshSessions, 2000);
+    const refreshInterval = setInterval(() => { if (!document.hidden) refreshSessions(); }, 2000);
 
     return () => {
       clearInterval(refreshInterval);

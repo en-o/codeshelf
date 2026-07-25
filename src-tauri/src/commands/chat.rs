@@ -917,12 +917,12 @@ fn build_chat_payload(
             if m.role != "assistant" {
                 return true;
             }
-            if m.tool_calls.as_ref().map_or(false, |t| !t.is_empty()) {
+            if m.tool_calls.as_ref().is_some_and(|t| !t.is_empty()) {
                 return true;
             }
             if m.reasoning_content
                 .as_ref()
-                .map_or(false, |s| !s.trim().is_empty())
+                .is_some_and(|s| !s.trim().is_empty())
             {
                 return true;
             }
@@ -1146,18 +1146,19 @@ pub async fn chat_stream(app: AppHandle, request: ChatStreamRequest) -> AppResul
 
         // 流式
         let mut stream = response.bytes_stream();
-        let mut buffer = String::new();
+        // 字节缓冲而非字符串缓冲：网络分片可能把多字节 UTF-8 字符（中文）切成两半，
+        // 按 chunk 做 from_utf8_lossy 会产生 � 乱码；按 \n 切完整行后再转字符串就没有这个问题。
+        let mut buffer: Vec<u8> = Vec::new();
         let mut last_finish: Option<String> = None;
         let mut last_usage: Option<TokenUsage> = None;
 
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    let part = String::from_utf8_lossy(&bytes);
-                    buffer.push_str(&part);
-                    while let Some(pos) = buffer.find("\n") {
-                        let line = buffer[..pos].trim().to_string();
-                        buffer = buffer[pos + 1..].to_string();
+                    buffer.extend_from_slice(&bytes);
+                    while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                        let line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
+                        let line = String::from_utf8_lossy(&line_bytes).trim().to_string();
                         if line.is_empty() || !line.starts_with("data:") {
                             continue;
                         }

@@ -13,7 +13,7 @@ use crate::storage::migrations::{list_backup_timestamps, schedule_restore};
 #[specta::specta]
 pub async fn list_data_backups() -> AppResult<Vec<String>> {
     let config = get_storage_config()?;
-    Ok(list_backup_timestamps(&config.data_dir)?)
+    list_backup_timestamps(&config.data_dir)
 }
 
 #[tauri::command]
