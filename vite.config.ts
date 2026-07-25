@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { nodePolyfills } from "vite-plugin-node-polyfills";
 import path from "path";
 
 const TAURI_UA_TOKEN = "CodeShelf-Tauri-Webview/1.0";
@@ -41,49 +40,17 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    // deepagents / langchain 间接依赖了一批 Node 生态包（fast-glob、micromatch、picomatch…）
-    // 这些包会用 `os.platform()` / `process.platform` / `fs` / `stream` 等 Node 内置。
-    // 浏览器没有，统一用 polyfill 兜底；只 polyfill globals 中真正会被读的 Buffer/process。
-    // overrides：vite-plugin-node-polyfills 自身把 `node:xxx` 在 esbuild prebundle 阶段映射到
-    // node-stdlib-browser 的 polyfill，普通 resolve.alias 这时还没生效，必须用插件自己的
-    // overrides 才能覆盖。下面这几个的默认 polyfill 在 deepagents/langchain 的 named import
-    // 场景下不够用，所以指到本地 stub：
-    //   - fs:            node-stdlib-browser 的浏览器空实现没有 constants，deepagents 顶层会读
-    //                    fs.constants.O_NOFOLLOW
-    //   - child_process: node-stdlib-browser 的 empty.js 没有 spawn 等 named 导出
-    //   - async_hooks:   node-stdlib-browser 根本不识别这个模块（不在它的 36 模块列表里）
-    //   - crypto:        crypto-browserify 缺 randomUUID（Node 14.17+ 才加）
-    //   - fs/promises:   node-stdlib-browser 不支持带子路径的协议导入
-    nodePolyfills({
-      globals: { Buffer: true, global: true, process: true },
-      protocolImports: true,
-      overrides: {
-        "fs/promises": path.resolve(__dirname, "./src/shims/fs-promises-empty.js"),
-        fs: path.resolve(__dirname, "./src/shims/fs-empty.js"),
-        child_process: path.resolve(__dirname, "./src/shims/child-process-empty.js"),
-        crypto: path.resolve(__dirname, "./src/shims/node-crypto-shim.js"),
-      },
-    }),
     restrictToTauri(),
   ],
   // 默认情况下 vite 的 dep scanner 会把项目里所有 .html 当作入口去扫，
-  // 这样会把 docs/example/*.html 和 src-tauri/target/.../tauri-codegen-assets/*.html
-  // （cargo 构建产物）一起拉进来，触发 vite-plugin-node-polyfills 的 inject 路径
-  // 冲突（_buffer.js / _virtual-process-polyfill_.js 报 cannot be marked as external）。
-  // 明确只扫真正的入口。
+  // 会把 docs/example/*.html 和 src-tauri/target/.../tauri-codegen-assets/*.html
+  // （cargo 构建产物）一起拉进来。明确只扫真正的入口。
   optimizeDeps: {
     entries: ["index.html"],
   },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // 这两个 node-stdlib-browser 完全不识别（不在它的模块列表 / 不支持子路径），
-      // 所以放在 vite 的 resolve.alias 里，由 vite 自己的 resolver 兜底。
-      "node:fs/promises": path.resolve(__dirname, "./src/shims/fs-promises-empty.js"),
-      "fs/promises": path.resolve(__dirname, "./src/shims/fs-promises-empty.js"),
-      "node:fs": path.resolve(__dirname, "./src/shims/fs-empty.js"),
-      fs: path.resolve(__dirname, "./src/shims/fs-empty.js"),
-      "node:async_hooks": path.resolve(__dirname, "./src/shims/async-hooks-shim.js"),
     },
   },
   // Vite options tailored for Tauri development
