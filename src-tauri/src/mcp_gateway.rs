@@ -139,6 +139,22 @@ pub async fn apply_settings_from_storage() -> AppResult<McpGatewayStatus> {
 
 pub async fn apply_settings(settings: &AppSettings) -> AppResult<McpGatewayStatus> {
     if settings.mcp_gateway_enabled {
+        // 安全闸：keys 为空时网关不鉴权（见 validate_mcp_auth），此时只允许监听回环地址。
+        // 非回环 + 无密钥 = 局域网内任何人都能无鉴权调用已配置的 API 端点，拒绝启动；
+        // 已在跑的实例也要停掉（鉴权是每个请求实时读设置的，不停会继续裸奔）。
+        // 仅拦这一种危险组合：回环无密钥、任意地址有密钥，行为均不变。
+        let host = settings.mcp_gateway_host.trim();
+        let is_loopback = host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
+        if !is_loopback && settings.mcp_gateway_keys.is_empty() {
+            let _ = stop_gateway().await;
+            return Err(crate::error::AppError::from(format!(
+                "MCP 网关监听非本机地址（{}）时必须至少配置一个访问密钥，否则局域网内任何设备都可无鉴权调用。请先添加密钥，或将监听地址改回 127.0.0.1",
+                host
+            )));
+        }
         start_gateway(settings.mcp_gateway_host.clone(), settings.mcp_gateway_port).await
     } else {
         stop_gateway().await

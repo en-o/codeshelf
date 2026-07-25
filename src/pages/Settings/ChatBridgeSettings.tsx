@@ -56,7 +56,8 @@ export function ChatBridgeSettings() {
     try {
       await invoke("save_app_settings", { input: patch });
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "保存失败");
+      // Tauri invoke 的后端错误是纯字符串，不是 Error 实例
+      showToast("error", typeof e === "string" && e ? e : e instanceof Error ? e.message : "保存失败");
     }
   }
 
