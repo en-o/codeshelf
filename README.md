@@ -66,10 +66,9 @@ CodeShelf 把这些都收进一个桌面应用：集中管理本地 Git 项目�
 本项目基于 **Tauri + React + TypeScript** 构建。环境要求、本地运行、构建打包与发版流程详见 **[开发与构建指南](BUILD.md)**。
 
 更多文档：
-- [开发文档](docs/DEVELOPMENT.md) - 项目结构与模块说明
-- [API 文档](docs/API.md) - 接口文档
-- [Tauri 命令开发指南](docs/TAURI-COMMANDS.md) - 前后端通信
+- [开发文档](docs/DEVELOPMENT.md) - 项目结构、开发约定与前后端通信
 - [MCP Gateway](docs/MCP-GATEWAY.md) - 将接口库暴露给 Claude Code、Kimi、Codex、Copilot 等 MCP 客户端
+- [Chat 设计文档](docs/CHAT-DESIGN.md) / [工具调用原理](docs/CHAT-TOOLS-DESIGN.md) - 助手模块的实现设计
 
 ## 📄 许可证
 

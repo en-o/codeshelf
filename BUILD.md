@@ -1,6 +1,6 @@
 # CodeShelf 开发与构建
 
-> 本文档面向参与开发与发布的同学，内容整理自原 README（未改动）。项目介绍请见 [README](README.md)。
+> 本文档面向参与开发与发布的同学。项目介绍见 [README](README.md)，项目结构与开发约定见 [开发文档](docs/DEVELOPMENT.md)。
 
 ## 🛠 技术栈
 
@@ -14,7 +14,7 @@
 ### 后端
 - **框架**: Tauri 2.x
 - **语言**: Rust
-- **数据库**: SQLite (tauri-plugin-sql)
+- **数据库**: SQLite（sqlx，WAL 模式）
 
 ## 📋 环境要求
 
@@ -152,51 +152,13 @@ scripts\release.bat 0.2.0
 - 便携版（`CodeShelf-Portable-vX.X.X-x64.zip`）
 - 自动更新文件（`latest.json`）
 
-## 📁 项目结构
-
-```
-codeshelf/
-├── src/                          # 前端源代码
-│   ├── components/               # React 组件
-│   │   ├── layout/              # 布局组件（MainLayout, Sidebar）
-│   │   ├── project/             # 项目组件（卡片、详情、扫描）
-│   │   └── ui/                  # 基础 UI 组件（Button, Input, Heatmap）
-│   ├── pages/                   # 页面组件
-│   │   ├── Shelf/               # 项目书架页
-│   │   ├── Dashboard/           # 数据统计页
-│   │   └── Settings/            # 设置页
-│   ├── services/                # API 服务层
-│   │   ├── db/                  # 数据库操作
-│   │   └── git/                 # Git 操作
-│   ├── stores/                  # Zustand 状态管理
-│   ├── types/                   # TypeScript 类型定义
-│   └── styles/                  # 全局样式
-├── src-tauri/                   # Tauri/Rust 后端
-│   ├── src/                     # Rust 源代码
-│   │   ├── commands/            # Tauri Commands
-│   │   ├── db/                  # 数据库模块
-│   │   └── git/                 # Git 操作模块
-│   ├── capabilities/            # 权限配置
-│   ├── Cargo.toml               # Rust 依赖
-│   └── tauri.conf.json          # Tauri 配置
-├── DEVELOPMENT.md               # 开发文档
-├── API.md                       # API 文档
-└── README.md                    # 项目说明
-```
+发版说明正文取自根目录的 `RELEASE_NOTES.md`（CI 会读取其内容作为 GitHub Release 的描述，发版前记得更新它）。updater 签名密钥与 GitHub Secrets 的一次性配置见[在线更新配置指南](docs/更新步骤说明.md)。
 
 ## 📚 文档
 
-### 核心文档
-- [开发文档](docs/DEVELOPMENT.md) - 详细的开发指南和项目结构说明
-- [API 文档](docs/API.md) - 完整的 API 接口文档
-- [Tauri 命令开发指南](docs/TAURI-COMMANDS.md) - 前后端通信开发指南
+- [开发文档](docs/DEVELOPMENT.md) - 项目结构、开发约定、如何加 Tauri 命令
 - [MCP Gateway](docs/MCP-GATEWAY.md) - 将接口库暴露给 Claude Code、Kimi、Codex、Copilot 等 MCP 客户端
-
-### 专题文档
-- [图标管理](ICONS.md) - 图标文件说明和更新指南
-- [图标配置](ICONS-SETUP.md) - 图标配置完整指南
-- [自定义标题栏](docs/TITLEBAR.md) - 标题栏实现和扩展指南
-
+- [在线更新配置](docs/更新步骤说明.md) - updater 签名与发版流水线
 
 ## 🤝 贡献
 
