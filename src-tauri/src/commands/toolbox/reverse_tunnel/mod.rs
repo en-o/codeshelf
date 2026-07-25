@@ -297,7 +297,7 @@ pub(super) async fn save_tunnels_to_file() -> AppResult<()> {
         .map_err(|e| crate::error::AppError::from(format!("序列化内网穿透隧道失败: {}", e)))?;
 
     let path = config.reverse_tunnels_file();
-    fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("写入内网穿透隧道失败: {}", e)))?;
 
     Ok(())

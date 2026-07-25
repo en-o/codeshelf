@@ -34,7 +34,7 @@ pub async fn get_labels() -> AppResult<Vec<String>> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取标签文件失败: {}", e)))?;
 
-    let labels: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
+    let labels: Vec<String> = crate::storage::parse_json_or_backup(&path, &content);
     Ok(labels)
 }
 
@@ -47,7 +47,7 @@ pub async fn save_labels(labels: Vec<String>) -> AppResult<()> {
     let content = serde_json::to_string(&labels)
         .map_err(|e| crate::error::AppError::from(format!("序列化标签失败: {}", e)))?;
 
-    fs::write(config.labels_file(), content)
+    crate::storage::write_atomic(config.labels_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存标签失败: {}", e)))?;
     Ok(())
 }
@@ -92,7 +92,7 @@ pub async fn get_categories() -> AppResult<Vec<String>> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取分类文件失败: {}", e)))?;
 
-    let categories: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
+    let categories: Vec<String> = crate::storage::parse_json_or_backup(&path, &content);
     Ok(categories)
 }
 
@@ -105,7 +105,7 @@ pub async fn save_categories(categories: Vec<String>) -> AppResult<()> {
     let content = serde_json::to_string(&categories)
         .map_err(|e| crate::error::AppError::from(format!("序列化分类失败: {}", e)))?;
 
-    fs::write(config.categories_file(), content)
+    crate::storage::write_atomic(config.categories_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存分类失败: {}", e)))?;
     Ok(())
 }
@@ -153,7 +153,7 @@ pub async fn get_editors() -> AppResult<Vec<EditorConfig>> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取编辑器配置失败: {}", e)))?;
 
-    let editors: Vec<EditorConfig> = serde_json::from_str(&content).unwrap_or_default();
+    let editors: Vec<EditorConfig> = crate::storage::parse_json_or_backup(&path, &content);
     Ok(editors)
 }
 
@@ -164,7 +164,7 @@ async fn save_editors(editors: &[EditorConfig]) -> AppResult<()> {
     let content = serde_json::to_string(editors)
         .map_err(|e| crate::error::AppError::from(format!("序列化编辑器配置失败: {}", e)))?;
 
-    fs::write(config.editors_file(), content)
+    crate::storage::write_atomic(config.editors_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存编辑器配置失败: {}", e)))?;
     Ok(())
 }
@@ -273,7 +273,7 @@ pub async fn get_terminal_config() -> AppResult<TerminalConfig> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取终端配置失败: {}", e)))?;
 
-    let terminal: TerminalConfig = serde_json::from_str(&content).unwrap_or_default();
+    let terminal: TerminalConfig = crate::storage::parse_json_or_backup(&path, &content);
     Ok(terminal)
 }
 
@@ -292,7 +292,7 @@ pub async fn save_terminal_config(input: TerminalInput) -> AppResult<()> {
     let content = serde_json::to_string(&terminal)
         .map_err(|e| crate::error::AppError::from(format!("序列化终端配置失败: {}", e)))?;
 
-    fs::write(config.terminal_file(), content)
+    crate::storage::write_atomic(config.terminal_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存终端配置失败: {}", e)))?;
     Ok(())
 }
@@ -332,9 +332,12 @@ pub async fn get_app_settings() -> AppResult<AppSettings> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取应用设置失败: {}", e)))?;
 
-    let settings: AppSettings = serde_json::from_str(&content).unwrap_or_default();
+    let settings: AppSettings = crate::storage::parse_json_or_backup(&path, &content);
     Ok(settings)
 }
+
+/// save_app_settings 是读-改-写，无锁并发保存会互相覆盖字段，用全局锁串行化。
+static SETTINGS_SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tauri::command]
 #[specta::specta]
@@ -342,6 +345,7 @@ pub async fn save_app_settings(
     app: tauri::AppHandle,
     input: AppSettingsInput,
 ) -> AppResult<AppSettings> {
+    let _guard = SETTINGS_SAVE_LOCK.lock().await;
     let mut settings = get_app_settings().await?;
 
     if let Some(theme) = input.theme {
@@ -401,7 +405,7 @@ pub async fn save_app_settings(
     let content = serde_json::to_string(&settings)
         .map_err(|e| crate::error::AppError::from(format!("序列化应用设置失败: {}", e)))?;
 
-    fs::write(config.app_settings_file(), content)
+    crate::storage::write_atomic(config.app_settings_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存应用设置失败: {}", e)))?;
 
     // 通知聊天桥接 poller 重新加载配置
@@ -431,7 +435,7 @@ pub async fn get_ui_state() -> AppResult<UiState> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取UI状态失败: {}", e)))?;
 
-    let ui_state: UiState = serde_json::from_str(&content).unwrap_or_default();
+    let ui_state: UiState = crate::storage::parse_json_or_backup(&path, &content);
     Ok(ui_state)
 }
 
@@ -450,7 +454,7 @@ pub async fn save_ui_state(input: UiStateInput) -> AppResult<UiState> {
     let content = serde_json::to_string(&ui_state)
         .map_err(|e| crate::error::AppError::from(format!("序列化UI状态失败: {}", e)))?;
 
-    fs::write(config.ui_state_file(), content)
+    crate::storage::write_atomic(config.ui_state_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存UI状态失败: {}", e)))?;
 
     Ok(ui_state)
@@ -479,7 +483,7 @@ pub async fn get_notifications() -> AppResult<Vec<Notification>> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取通知失败: {}", e)))?;
 
-    let notifications: Vec<Notification> = serde_json::from_str(&content).unwrap_or_default();
+    let notifications: Vec<Notification> = crate::storage::parse_json_or_backup(&path, &content);
     Ok(notifications)
 }
 
@@ -490,7 +494,7 @@ async fn save_notifications_internal(notifications: &[Notification]) -> AppResul
     let content = serde_json::to_string(notifications)
         .map_err(|e| crate::error::AppError::from(format!("序列化通知失败: {}", e)))?;
 
-    fs::write(config.notifications_file(), content)
+    crate::storage::write_atomic(config.notifications_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存通知失败: {}", e)))?;
     Ok(())
 }
@@ -582,7 +586,7 @@ pub async fn save_app_shortcuts(shortcuts: Vec<AppShortcutBinding>) -> AppResult
     let content = serde_json::to_string_pretty(&shortcuts)
         .map_err(|e| crate::error::AppError::from(format!("序列化应用快捷键配置失败: {}", e)))?;
 
-    fs::write(config.app_shortcuts_file(), content)
+    crate::storage::write_atomic(config.app_shortcuts_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存应用快捷键配置失败: {}", e)))?;
     Ok(())
 }
@@ -610,7 +614,7 @@ pub async fn get_ai_providers() -> AppResult<Vec<AiProviderConfig>> {
         return Ok(default_ai_providers());
     }
 
-    let providers: Vec<AiProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
+    let providers: Vec<AiProviderConfig> = crate::storage::parse_json_or_backup(&path, &content);
     Ok(providers)
 }
 
@@ -625,7 +629,7 @@ pub async fn save_ai_providers(
     let content = serde_json::to_string_pretty(&providers)
         .map_err(|e| crate::error::AppError::from(format!("序列化 AI 供应商配置失败: {}", e)))?;
 
-    fs::write(config.ai_providers_file(), content)
+    crate::storage::write_atomic(config.ai_providers_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存 AI 供应商配置失败: {}", e)))?;
 
     Ok(providers)
@@ -653,7 +657,7 @@ pub async fn save_recommended_template(content: String) -> AppResult<()> {
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
-    fs::write(config.recommended_template_file(), content)
+    crate::storage::write_atomic(config.recommended_template_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存推荐模板失败: {}", e)))?;
     Ok(())
 }
@@ -675,7 +679,7 @@ pub fn load_sensitive_file_patterns() -> AppResult<Vec<String>> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取敏感文件规则失败: {}", e)))?;
 
-    let patterns: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
+    let patterns: Vec<String> = crate::storage::parse_json_or_backup(&path, &content);
     Ok(patterns)
 }
 
@@ -700,7 +704,7 @@ pub async fn save_sensitive_file_patterns(patterns: Vec<String>) -> AppResult<()
     let content = serde_json::to_string(&patterns)
         .map_err(|e| crate::error::AppError::from(format!("序列化敏感文件规则失败: {}", e)))?;
 
-    fs::write(config.sensitive_file_patterns_file(), content)
+    crate::storage::write_atomic(config.sensitive_file_patterns_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存敏感文件规则失败: {}", e)))?;
     Ok(())
 }
@@ -794,7 +798,7 @@ pub async fn get_claude_config_templates() -> AppResult<String> {
             if let Ok(config) = get_storage_config() {
                 let _ = config.ensure_dirs();
                 // 写缓存失败不影响返回
-                let _ = fs::write(config.claude_config_templates_file(), &body);
+                let _ = crate::storage::write_atomic(config.claude_config_templates_file(), &body);
             }
             return Ok(body);
         }

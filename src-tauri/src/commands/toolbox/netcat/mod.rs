@@ -101,7 +101,7 @@ impl NetcatState {
         let content = serde_json::to_string_pretty(&configs)
             .map_err(|e| crate::error::AppError::from(format!("序列化 Netcat 会话失败: {}", e)))?;
 
-        std::fs::write(&file_path, content).map_err(|e| {
+        crate::storage::write_atomic(&file_path, content).map_err(|e| {
             crate::error::AppError::from(format!("保存 Netcat 会话文件失败: {}", e))
         })?;
 

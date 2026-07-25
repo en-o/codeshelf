@@ -110,7 +110,7 @@ pub(super) async fn save_servers_to_file() -> AppResult<()> {
     let path = config.server_configs_file();
     log::info!("保存服务配置到: {:?}", path);
 
-    fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("写入服务配置失败: {}", e)))?;
 
     log::info!("服务配置保存成功，共 {} 个服务", servers.len());

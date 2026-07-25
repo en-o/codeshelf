@@ -141,7 +141,7 @@ fn get_app_settings() -> AppResult<AppSettings> {
     }
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取应用设置失败: {}", e)))?;
-    let settings: AppSettings = serde_json::from_str(&content).unwrap_or_default();
+    let settings: AppSettings = crate::storage::parse_json_or_backup(&path, &content);
     Ok(settings)
 }
 

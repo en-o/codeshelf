@@ -207,7 +207,7 @@ pub async fn save_resumes(data: serde_json::Value) -> AppResult<()> {
     let content = serde_json::to_string_pretty(&data)
         .map_err(|e| AppError::from(format!("序列化简历数据失败: {}", e)))?;
 
-    fs::write(config.resumes_file(), content)
+    crate::storage::write_atomic(config.resumes_file(), content)
         .map_err(|e| AppError::from(format!("保存简历数据失败: {}", e)))?;
     Ok(())
 }

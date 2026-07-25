@@ -112,7 +112,7 @@ pub async fn save_api_chat_session(mut session: ApiChatSession) -> AppResult<Api
     let path = session_path(&dir, &session.id);
     let content = serde_json::to_string_pretty(&session)
         .map_err(|e| crate::error::AppError::from(format!("序列化会话失败: {}", e)))?;
-    fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("保存会话失败: {}", e)))?;
     Ok(session)
 }

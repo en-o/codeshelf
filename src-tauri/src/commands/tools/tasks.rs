@@ -42,7 +42,7 @@ pub(super) fn write_tasks(session_id: &str, tasks: &[ChatTask]) -> AppResult<()>
     }
     let text = serde_json::to_string_pretty(tasks)
         .map_err(|e| crate::error::AppError::from(format!("序列化任务失败: {}", e)))?;
-    fs::write(&path, text).map_err(|e| crate::error::AppError::from(format!("写入任务失败: {}", e)))
+    crate::storage::write_atomic(&path, text).map_err(|e| crate::error::AppError::from(format!("写入任务失败: {}", e)))
 }
 
 pub(super) fn tool_task_create(ctx: &ToolCtx, args: &Value, app: &AppHandle) -> AppResult<String> {

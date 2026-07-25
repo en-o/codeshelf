@@ -111,7 +111,7 @@ fn save_workflow_sync(wf: &Workflow) -> AppResult<()> {
     let path = workflow_path(&wf.id)?;
     let text = serde_json::to_string_pretty(wf)
         .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-    fs::write(&path, text).map_err(|e| crate::error::AppError::from(format!("写入失败: {}", e)))
+    crate::storage::write_atomic(&path, text).map_err(|e| crate::error::AppError::from(format!("写入失败: {}", e)))
 }
 
 // ========== 校验 ==========

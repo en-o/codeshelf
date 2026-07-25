@@ -111,7 +111,7 @@ async fn save_rules_to_file() -> AppResult<()> {
     let path = config.forward_rules_file();
     log::info!("保存转发规则到: {:?}", path);
 
-    fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("写入转发规则失败: {}", e)))?;
 
     log::info!("转发规则保存成功，共 {} 个规则", rules.len());

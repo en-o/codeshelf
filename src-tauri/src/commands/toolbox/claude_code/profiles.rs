@@ -146,7 +146,7 @@ fn save_profiles(env_type: &EnvType, env_name: &str, profiles: &[ConfigProfile])
     let content = serde_json::to_string(profiles)
         .map_err(|e| crate::error::AppError::from(format!("序列化配置档案失败: {}", e)))?;
 
-    std::fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("保存配置档案失败: {}", e)))
 }
 

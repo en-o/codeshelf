@@ -32,7 +32,7 @@ pub async fn save_global_memory(content: String) -> AppResult<()> {
         fs::create_dir_all(parent)
             .map_err(|e| crate::error::AppError::from(format!("创建目录失败: {}", e)))?;
     }
-    fs::write(&path, content).map_err(|e| crate::error::AppError::from(format!("保存失败: {}", e)))
+    crate::storage::write_atomic(&path, content).map_err(|e| crate::error::AppError::from(format!("保存失败: {}", e)))
 }
 
 // ========== Skills ==========
@@ -202,7 +202,7 @@ pub async fn save_skill(skill: Skill) -> AppResult<()> {
         skill.args_hint.as_deref().unwrap_or(""),
         skill.body
     );
-    fs::write(&path, content).map_err(|e| crate::error::AppError::from(format!("保存失败: {}", e)))
+    crate::storage::write_atomic(&path, content).map_err(|e| crate::error::AppError::from(format!("保存失败: {}", e)))
 }
 
 #[tauri::command]

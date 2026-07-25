@@ -44,6 +44,8 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 keyboard_hook::stop_hook_from_manager(app);
+                // 杀掉仍在跑的 resume-agent node 子进程，防止孤儿进程继续调用 LLM
+                commands::resume_node_agent::kill_all_runs_on_exit();
             }
         });
 }

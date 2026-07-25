@@ -75,7 +75,7 @@ pub(super) fn write_groups(groups: &[ApiGroup]) -> AppResult<()> {
     ensure_parent(&path)?;
     let content = serde_json::to_string_pretty(groups)
         .map_err(|e| crate::error::AppError::from(format!("序列化 groups 失败: {}", e)))?;
-    fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("保存 groups 失败: {}", e)))
 }
 
@@ -98,7 +98,7 @@ pub(super) fn write_endpoints(endpoints: &[ApiEndpoint]) -> AppResult<()> {
     ensure_parent(&path)?;
     let content = serde_json::to_string_pretty(endpoints)
         .map_err(|e| crate::error::AppError::from(format!("序列化 endpoints 失败: {}", e)))?;
-    fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("保存 endpoints 失败: {}", e)))
 }
 

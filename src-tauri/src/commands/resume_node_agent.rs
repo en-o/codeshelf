@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::RwLock;
 
 use crate::error::{AppError, AppResult};
 use crate::storage::schema::{AiProviderConfig, Project};
@@ -23,8 +22,8 @@ const RUN_EVENT: &str = "resume-agent-run-event-v3";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-static RUN_PIDS: Lazy<Arc<RwLock<HashMap<String, u32>>>> =
-    Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
+// std Mutex（非 tokio）：锁内只有 HashMap 增删，且应用退出的同步路径也要能拿锁杀进程。
+static RUN_PIDS: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
@@ -192,10 +191,23 @@ pub async fn generate_resume_fragment(
 #[tauri::command]
 #[specta::specta]
 pub async fn cancel_resume_deep_agent(request_id: String) -> AppResult<()> {
-    if let Some(pid) = RUN_PIDS.write().await.remove(&request_id) {
-        kill_process_tree(pid).await;
+    let pid = RUN_PIDS.lock().ok().and_then(|mut m| m.remove(&request_id));
+    if let Some(pid) = pid {
+        kill_process_tree(pid);
     }
     Ok(())
+}
+
+/// 应用退出时杀掉所有仍在跑的 agent 子进程。
+/// node 是独立进程，不随 Tauri 退出而死；不杀会变成孤儿继续消耗 LLM 配额。
+pub fn kill_all_runs_on_exit() {
+    let pids: Vec<u32> = match RUN_PIDS.lock() {
+        Ok(mut m) => m.drain().map(|(_, pid)| pid).collect(),
+        Err(_) => return,
+    };
+    for pid in pids {
+        kill_process_tree(pid);
+    }
 }
 
 #[tauri::command]
@@ -363,7 +375,9 @@ async fn call_node_rpc_with_events(
         .arg(&runtime.entry_script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // future 被丢弃（超时/上层取消）时杀掉 node，不留孤儿进程
+        .kill_on_drop(true);
     // Windows: 隐藏 node.exe 子进程控制台窗口，避免打包版闪黑窗。
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -372,71 +386,94 @@ async fn call_node_rpc_with_events(
         .map_err(|e| AppError::from(format!("启动 Node resume agent 失败: {}", e)))?;
 
     if let (Some(request_id), Some(pid)) = (request_id_for_pid.clone(), child.id()) {
-        RUN_PIDS.write().await.insert(request_id, pid);
+        if let Ok(mut pids) = RUN_PIDS.lock() {
+            pids.insert(request_id, pid);
+        }
     }
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| AppError::from("Node resume agent stdin 不可用"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AppError::from("Node resume agent stdout 不可用"))?;
-    let stderr = child.stderr.take();
 
     let rpc_id = format!("rpc-{}", chrono::Utc::now().timestamp_micros());
-    let payload = json!({ "id": rpc_id, "method": method, "params": params });
-    stdin
-        .write_all(format!("{}\n", payload).as_bytes())
-        .await
-        .map_err(|e| AppError::from(format!("写入 Node resume agent 请求失败: {}", e)))?;
-    drop(stdin);
+    let app_for_io = app.clone();
+    let rpc_id_for_io = rpc_id.clone();
+    let io = async move {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::from("Node resume agent stdin 不可用"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AppError::from("Node resume agent stdout 不可用"))?;
+        let stderr = child.stderr.take();
 
-    let stderr_task = tokio::spawn(async move {
-        let Some(stderr) = stderr else {
-            return String::new();
-        };
-        let mut lines = BufReader::new(stderr).lines();
-        let mut out = String::new();
-        while let Ok(Some(line)) = lines.next_line().await {
-            out.push_str(&line);
-            out.push('\n');
-        }
-        out
-    });
+        let payload = json!({ "id": rpc_id_for_io, "method": method, "params": params });
+        stdin
+            .write_all(format!("{}\n", payload).as_bytes())
+            .await
+            .map_err(|e| AppError::from(format!("写入 Node resume agent 请求失败: {}", e)))?;
+        drop(stdin);
 
-    let mut lines = BufReader::new(stdout).lines();
-    let mut response: Option<Value> = None;
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .map_err(|e| AppError::from(format!("读取 Node resume agent 输出失败: {}", e)))?
-    {
-        let parsed: Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        if parsed.get("type").and_then(|v| v.as_str()) == Some("event") {
-            if let Some(app) = app.as_ref() {
-                let _ = app.emit(RUN_EVENT, parsed);
+        let stderr_task = tokio::spawn(async move {
+            let Some(stderr) = stderr else {
+                return String::new();
+            };
+            let mut lines = BufReader::new(stderr).lines();
+            let mut out = String::new();
+            while let Ok(Some(line)) = lines.next_line().await {
+                out.push_str(&line);
+                out.push('\n');
             }
-            continue;
+            out
+        });
+
+        let mut lines = BufReader::new(stdout).lines();
+        let mut response: Option<Value> = None;
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .map_err(|e| AppError::from(format!("读取 Node resume agent 输出失败: {}", e)))?
+        {
+            let parsed: Value = match serde_json::from_str(&line) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if parsed.get("type").and_then(|v| v.as_str()) == Some("event") {
+                if let Some(app) = app_for_io.as_ref() {
+                    let _ = app.emit(RUN_EVENT, parsed);
+                }
+                continue;
+            }
+            if parsed.get("id").and_then(|v| v.as_str()) == Some(rpc_id_for_io.as_str()) {
+                response = Some(parsed);
+                break;
+            }
         }
-        if parsed.get("id").and_then(|v| v.as_str()) == Some(rpc_id.as_str()) {
-            response = Some(parsed);
-            break;
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| AppError::from(format!("等待 Node resume agent 退出失败: {}", e)))?;
+        let stderr_text = stderr_task.await.unwrap_or_default();
+        Ok::<_, AppError>((status, response, stderr_text))
+    };
+
+    // 生成类调用（带 request_id，可被 cancel 杀掉）不限时；
+    // 轻查询挂 120s 超时，防止 node 卡死导致命令永不返回。
+    let result = if request_id_for_pid.is_some() {
+        io.await
+    } else {
+        match tokio::time::timeout(std::time::Duration::from_secs(120), io).await {
+            Ok(r) => r,
+            Err(_) => Err(AppError::from("Node resume agent 超时（120 秒），已终止")),
+        }
+    };
+
+    if let Some(request_id) = request_id_for_pid {
+        if let Ok(mut pids) = RUN_PIDS.lock() {
+            pids.remove(&request_id);
         }
     }
 
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| AppError::from(format!("等待 Node resume agent 退出失败: {}", e)))?;
-    if let Some(request_id) = request_id_for_pid {
-        RUN_PIDS.write().await.remove(&request_id);
-    }
-    let stderr_text = stderr_task.await.unwrap_or_default();
+    let (status, response, stderr_text) = result?;
     let Some(response) = response else {
         return Err(AppError::from(format!(
             "Node resume agent 无响应, status={}, stderr={}",
@@ -602,21 +639,21 @@ async fn load_project(project_id: &str) -> AppResult<Project> {
         .ok_or_else(|| AppError::from(format!("项目不存在: {}", project_id)))
 }
 
-async fn kill_process_tree(pid: u32) {
+/// 同步版：kill/taskkill 本身瞬间返回，且应用退出路径没有 async 运行时可用。
+fn kill_process_tree(pid: u32) {
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("taskkill")
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .await;
+            .output();
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = Command::new("kill")
+        let _ = std::process::Command::new("kill")
             .args(["-TERM", &pid.to_string()])
-            .output()
-            .await;
+            .output();
     }
 }
 

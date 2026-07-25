@@ -32,7 +32,7 @@ fn write_shortcuts_file(shortcuts: &[ShortcutEntry]) -> AppResult<()> {
     let content = serde_json::to_string_pretty(shortcuts)
         .map_err(|e| crate::error::AppError::from(format!("序列化快捷键数据失败: {}", e)))?;
 
-    std::fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("写入快捷键文件失败: {}", e)))
 }
 

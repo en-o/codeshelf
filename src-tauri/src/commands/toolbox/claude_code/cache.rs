@@ -22,7 +22,7 @@ pub async fn get_claude_installations_cache() -> AppResult<Option<Vec<ClaudeCode
 
             // 直接解析为安装信息数组
             let installations: Vec<ClaudeInstallation> =
-                serde_json::from_str(&content).unwrap_or_default();
+                crate::storage::parse_json_or_backup(&path, &content);
 
             // 转换为 ClaudeCodeInfo
             let result: Vec<ClaudeCodeInfo> = installations
@@ -92,7 +92,7 @@ pub async fn save_claude_installations_cache(installs: Vec<ClaudeCodeInfo>) -> A
     // 直接保存为安装信息数组
     let content = serde_json::to_string(&installations)
         .map_err(|e| crate::error::AppError::from(format!("序列化安装缓存失败: {}", e)))?;
-    fs::write(config.claude_installations_cache_file(), content)
+    crate::storage::write_atomic(config.claude_installations_cache_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存安装缓存失败: {}", e)))?;
     Ok(())
 }
@@ -140,7 +140,7 @@ pub async fn save_claude_launch_dirs(dirs: Vec<String>) -> AppResult<()> {
     let config = storage::get_storage_config()?;
     let content = serde_json::to_string_pretty(&dirs)
         .map_err(|e| crate::error::AppError::from(format!("序列化启动目录列表失败: {}", e)))?;
-    fs::write(config.claude_launch_dirs_file(), content)
+    crate::storage::write_atomic(config.claude_launch_dirs_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存启动目录列表失败: {}", e)))?;
     Ok(())
 }

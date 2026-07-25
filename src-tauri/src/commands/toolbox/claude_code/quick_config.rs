@@ -185,7 +185,7 @@ pub async fn get_saved_quick_configs() -> AppResult<Vec<ClaudeQuickConfig>> {
 
             // 直接解析为配置数组
             let configs: Vec<ClaudeQuickConfig> =
-                serde_json::from_str(&content).unwrap_or_default();
+                crate::storage::parse_json_or_backup(&path, &content);
             return Ok(configs);
         }
     }
@@ -202,7 +202,7 @@ pub async fn save_quick_configs(configs: Vec<ClaudeQuickConfig>) -> AppResult<()
     // 直接保存为配置数组
     let content = serde_json::to_string(&configs)
         .map_err(|e| crate::error::AppError::from(format!("序列化快捷配置失败: {}", e)))?;
-    fs::write(config.claude_quick_configs_file(), content)
+    crate::storage::write_atomic(config.claude_quick_configs_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存快捷配置失败: {}", e)))?;
     Ok(())
 }

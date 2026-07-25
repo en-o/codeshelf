@@ -156,8 +156,14 @@ mod win {
                 let tid = windows::Win32::System::Threading::GetCurrentThreadId();
                 let _ = tid_tx.send(tid);
 
-                let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0)
-                    .expect("SetWindowsHookExW 失败");
+                // 失败时不能 panic：panic 只杀本线程，主程序无感知。记日志后退化为无钩子。
+                let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0) {
+                    Ok(hook) => hook,
+                    Err(e) => {
+                        log::error!("注册全局键盘钩子失败，全局快捷键不可用: {}", e);
+                        return;
+                    }
+                };
 
                 // 消息循环（WH_KEYBOARD_LL 要求线程有消息循环）
                 let mut msg = MSG::default();

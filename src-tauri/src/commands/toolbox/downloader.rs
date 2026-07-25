@@ -57,7 +57,7 @@ fn load_tasks_from_file() -> AppResult<HashMap<String, DownloadTask>> {
         .map_err(|e| crate::error::AppError::from(format!("读取下载任务失败: {}", e)))?;
 
     // 直接解析为任务数组
-    let tasks: Vec<DownloadTask> = serde_json::from_str(&content).unwrap_or_default();
+    let tasks: Vec<DownloadTask> = crate::storage::parse_json_or_backup(&path, &content);
 
     let result: HashMap<String, DownloadTask> = tasks
         .into_iter()
@@ -89,7 +89,7 @@ async fn save_tasks_to_file() -> AppResult<()> {
     let path = config.download_tasks_file();
     log::info!("保存下载任务到: {:?}", path);
 
-    fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("写入下载任务失败: {}", e)))?;
 
     log::info!("下载任务保存成功，共 {} 个任务", tasks.len());

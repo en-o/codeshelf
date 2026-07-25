@@ -76,7 +76,7 @@ fn write_settings_file(settings: &ClipboardSettings) -> AppResult<()> {
     let content = serde_json::to_string_pretty(settings)
         .map_err(|e| crate::error::AppError::from(format!("序列化剪贴板设置失败: {}", e)))?;
 
-    std::fs::write(&path, content)
+    crate::storage::write_atomic(&path, content)
         .map_err(|e| crate::error::AppError::from(format!("写入剪贴板设置文件失败: {}", e)))
 }
 
