@@ -266,10 +266,48 @@ pub async fn launch_claude_in_terminal(
                                         e
                                     ))
                                 })?;
+                        } else if lower.ends_with("wezterm.exe")
+                            || lower.ends_with("wezterm-gui.exe")
+                        {
+                            // WezTerm：start --cwd <dir> -- cmd /k <cli>。
+                            // 外层是 wezterm 窗口，cmd /k 让 CLI 退出后窗口不关（与 wt 分支一致）。
+                            Command::new(&custom)
+                                .args(["start", "--cwd", &dir, "--", "cmd", "/k", cli])
+                                .creation_flags(CREATE_NEW_CONSOLE)
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动自定义终端失败: {}",
+                                        e
+                                    ))
+                                })?;
+                        } else if lower.ends_with("alacritty.exe") {
+                            // Alacritty：--working-directory <dir> -e cmd /k <cli>
+                            Command::new(&custom)
+                                .args(["--working-directory", &dir, "-e", "cmd", "/k", cli])
+                                .creation_flags(CREATE_NEW_CONSOLE)
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动自定义终端失败: {}",
+                                        e
+                                    ))
+                                })?;
                         } else {
-                            // 未知自定义终端无法通用地注入命令，退回 wt/cmd 确保 CLI 真正跑起来
-                            // (而不是只开一个空终端窗口)。
-                            launch_wt_or_cmd(&dir, cli)?;
+                            // 无法通用注入命令的自定义终端：直接在工作目录打开它，尊重用户选择，
+                            // 绝不退回 cmd/DOS。代价是不会自动运行 CLI，需用户在终端里自行输入。
+                            // ponytail: 无通用的「向任意终端注入命令」机制，已知的几种上面单列；
+                            //           其余保底开窗，要自动跑 CLI 就按需在上面加对应终端的语法。
+                            Command::new(&custom)
+                                .current_dir(&dir)
+                                .creation_flags(CREATE_NEW_CONSOLE)
+                                .spawn()
+                                .map_err(|e| {
+                                    crate::error::AppError::from(format!(
+                                        "启动自定义终端失败: {}",
+                                        e
+                                    ))
+                                })?;
                         }
                     } else {
                         return Err(crate::error::AppError::from(
