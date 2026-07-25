@@ -1,31 +1,12 @@
 ; NSIS Installer Hooks for CodeShelf
 ; This script handles installation customizations
-
-; Helper function to check if path ends with product name
-!macro CheckAndAppendProductName
-  Push $0
-  Push $1
-
-  ; 动态取产品名长度，取 $INSTDIR 末尾同样长度的子串做比较。
-  ; 旧实现硬编码 -10 截取，而 "CodeShelf" 只有 9 个字符，永远不相等，
-  ; 导致对已经以产品名结尾的目录反复追加一层，exe 与 resources 从此分处不同层级。
-  ; StrCmp 本身大小写不敏感，无需再单独判断小写变体。
-  StrLen $0 "${PRODUCTNAME}"
-  IntOp $0 0 - $0
-  StrCpy $1 $INSTDIR "" $0
-  StrCmp $1 "${PRODUCTNAME}" done 0
-  ; 末段不是产品名（用户选了裸目录），追加一层，保证资源自包含
-  StrCpy $INSTDIR "$INSTDIR\${PRODUCTNAME}"
-  done:
-
-  Pop $1
-  Pop $0
-!macroend
+;
+; 注意：不要再往 $INSTDIR 追加产品名。Tauri 的 NSIS 默认已装到 $LOCALAPPDATA\CodeShelf
+; （自带产品名一层），任何"末段不是产品名就补一层"的逻辑都会在每次升级时对
+; 已存在的 CodeShelf 目录再套一层，导致 CodeShelf\CodeShelf\CodeShelf 越来越深，
+; 而数据(data\)跟着 exe 走，于是老数据被留在上一层、表现为"更新后数据丢失"。
 
 !macro NSIS_HOOK_PREINSTALL
-  ; Auto-append product name to install directory if not present
-  !insertmacro CheckAndAppendProductName
-
   ; Delete old desktop shortcut to ensure new icon is used
   Delete "$DESKTOP\CodeShelf.lnk"
   Delete "$DESKTOP\${PRODUCTNAME}.lnk"
