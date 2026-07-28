@@ -1,6 +1,11 @@
 # CodeShelf 开发文档
 
-> 项目结构与开发约定。环境搭建、构建打包与发版见 [BUILD.md](../BUILD.md)。
+> **项目结构与模块导航**——回答"东西在哪、怎么加"。
+>
+> - 必须遵守的硬约束 → [CLAUDE.md](../CLAUDE.md)
+> - 提交/分支/代码风格/测试规范 → [CONVENTIONS.md](CONVENTIONS.md)
+> - AI 协作方法论（SDD） → [AI-CODING.md](AI-CODING.md)
+> - 环境搭建、构建打包与发版 → [BUILD.md](../BUILD.md)
 
 ## 技术栈
 
@@ -98,9 +103,11 @@ codeshelf/
 - [内网穿透使用说明](内网穿透使用说明.md) — SSH 反向隧道工具（用户向）
 - [在线更新配置](更新步骤说明.md) — updater 签名与发版流水线
 
-## 开发约定
+## 本项目特有的机制
 
-- 颜色一律用 CSS 变量（`var(--color-*)`）以支持主题切换。
-- 窗口关闭默认隐藏到托盘；真正退出走托盘"退出程序"（`lib.rs` 的 Exit 事件里做子进程清理）。
-- 自定义标题栏：`decorations: false` + `components/layout/TitleBar.tsx`（`data-tauri-drag-region` 拖拽）。
-- 新增文件系统访问范围需改 `src-tauri/capabilities/default.json`（注意保持 `.ssh` 等敏感目录的 deny 列表）。
+代码风格、提交、测试等通用规范见 [CONVENTIONS.md](CONVENTIONS.md)；这里只记与本项目架构强相关、容易踩坑的点：
+
+- **托盘常驻**：窗口关闭默认隐藏到托盘，真正退出走托盘「退出程序」——`lib.rs` 的 `RunEvent::Exit` 里做键盘钩子卸载与 sidecar 子进程清理。因此**轮询必须加 `document.hidden` 守卫**，否则窗口隐藏后仍在空转 IPC。
+- **自定义标题栏**：`tauri.conf.json` 里 `decorations: false` + `components/layout/TitleBar.tsx`，拖拽靠 `data-tauri-drag-region` 属性。
+- **文件系统权限**：新增访问范围要改 `src-tauri/capabilities/default.json`，注意保留 `.ssh` / `.aws` / 浏览器凭据等敏感目录的 deny 列表。
+- **主题**：颜色一律用 CSS 变量 `var(--color-*)`，硬编码色值会在暗色主题下失效。

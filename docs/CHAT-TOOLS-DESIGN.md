@@ -585,12 +585,12 @@ match tool_name {
 
 | 关注点                                | 文件                                                           |
 | ------------------------------------- | -------------------------------------------------------------- |
-| 所有工具 schema 定义（`all_tools()`） | `src-tauri/src/commands/tools.rs` (≈ L133-388)                 |
-| 工具执行入口与 dispatch               | `src-tauri/src/commands/tools.rs` (`execute_tool`, ≈ L1092)    |
-| 路径沙箱校验                           | `src-tauri/src/commands/tools.rs` (`require_under_cwd`)        |
-| WebFetch 内容感知整理                  | `src-tauri/src/commands/tools.rs` (`run_web_fetch` + `html_to_text`) |
-| Bash 整理（exit + stdout/stderr）     | `src-tauri/src/commands/tools.rs` (`tool_bash`)                |
-| Read 行号渲染                          | `src-tauri/src/commands/tools.rs` (`tool_read`)                |
+| 所有工具 schema 定义（`all_tools()`） | `src-tauri/src/commands/tools/schema.rs`                       |
+| 工具执行入口与 dispatch               | `src-tauri/src/commands/tools/mod.rs` (`execute_tool`)         |
+| 路径沙箱校验                           | `src-tauri/src/commands/tools/ctx.rs` (`require_under_cwd`)    |
+| WebFetch 内容感知整理                  | `src-tauri/src/commands/tools/web_fetch.rs`                    |
+| Bash 整理（exit + stdout/stderr）     | `src-tauri/src/commands/tools/shell.rs` (`tool_bash`)          |
+| Read 行号渲染                          | `src-tauri/src/commands/tools/fs_ops.rs` (`tool_read`)         |
 | 客户端工具循环编排                    | `src/pages/Chat/index.tsx` (`runChatRequest`, `executeAndContinue`) |
 | 客户端 tool_calls 累积                 | `src/pages/Chat/hooks/useChatStream.ts` (`toolCallsRef`)       |
 | 软强制工具识别                         | `src/pages/Chat/index.tsx` (`detectForcedTool`)                |

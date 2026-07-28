@@ -50,12 +50,8 @@ sudo apt install -y \
 ```
 
 ## 🚀 快速开始
-### 0. 分支说明
-main 发版分支
-dev 开发分支
-v开头的是版本分支（不允许改变）
-其他分支用于指定功能开发
 
+> 分支策略见 [开发规范 · 分支](docs/CONVENTIONS.md#分支)：`main` 发版 / `dev` 开发 / `release/x.y.z` 触发构建 / `feat|fix/<简述>` 功能分支。
 
 ### 1. 克隆项目
 ```bash
@@ -156,9 +152,12 @@ scripts\release.bat 0.2.0
 
 ## 📚 文档
 
-- [开发文档](docs/DEVELOPMENT.md) - 项目结构、开发约定、如何加 Tauri 命令
+完整索引见 **[docs/README.md](docs/README.md)**。
+
+- [开发文档](docs/DEVELOPMENT.md) - 项目结构、如何加 Tauri 命令、存储层约定
+- [开发规范](docs/CONVENTIONS.md) - 提交信息、分支策略、代码风格、测试要求
+- [在线更新配置](docs/更新步骤说明.md) - updater 签名密钥、GitHub Secrets、发版排错
 - [MCP Gateway](docs/MCP-GATEWAY.md) - 将接口库暴露给 Claude Code、Kimi、Codex、Copilot 等 MCP 客户端
-- [在线更新配置](docs/更新步骤说明.md) - updater 签名与发版流水线
 
 ## 🤝 贡献
 
