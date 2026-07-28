@@ -180,7 +180,15 @@ pub async fn pairdrop_save_file(token: String, save_path: String) -> AppResult<u
 #[tauri::command]
 #[specta::specta]
 pub async fn pairdrop_download_save(url: String, save_path: String) -> AppResult<u64> {
-    let resp = reqwest::Client::new()
+    // 对端是另一台桌面端，随时可能掉线/关机。裸 Client::new() 没有任何超时，
+    // 对端不可达时这个命令会永久挂起、前端一直转圈。
+    // 只设连接超时与读超时，不设总超时——大文件传输合法地耗时长，总超时会误杀。
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| crate::error::AppError::from(format!("创建 HTTP 客户端失败: {}", e)))?;
+    let resp = client
         .get(&url)
         .send()
         .await

@@ -1,0 +1,79 @@
+name: CI
+
+# 日常校验：push 到 main/dev 与所有 PR 都跑。
+# release.yml 只在 release/** 分支触发（负责出包），两者不重叠。
+# 对应 docs/CONVENTIONS.md 的「提交前自检」表，把人工自检变成强制闸门。
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支上只保留最新一次运行，旧的自动取消，省 CI 时间
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: 前端类型检查
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - name: tsc --noEmit
+        run: npx tsc --noEmit
+
+  rust:
+    name: Rust 检查与测试
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --lib --bins
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --lib
+      - name: cargo clippy
+        working-directory: src-tauri
+        # 暂不加 -D warnings：现存约 10 条历史告警（多为「类型过于复杂」），
+        # 先保证新代码不引入 error 级问题，清完存量再收紧。
+        run: cargo clippy --lib -- -A clippy::type_complexity
+
+  windows-cross:
+    name: Windows 交叉编译检查
+    runs-on: ubuntu-22.04
+    # #[cfg(target_os = "windows")] 代码在 Linux/macOS 上根本不会被编译，
+    # 本地 cargo check 全绿也可能藏着 Windows 专有的编译错误。
+    # 与 scripts/Dockerfile.win-check 同源（mingw-w64 + windows-gnu target）。
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-gnu
+      - name: cargo check --target x86_64-pc-windows-gnu
+        working-directory: src-tauri
+        run: cargo check --lib --target x86_64-pc-windows-gnu

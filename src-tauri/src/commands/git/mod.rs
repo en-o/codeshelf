@@ -132,6 +132,20 @@ pub(super) fn run_git_command(path: &str, args: &[&str]) -> AppResult<String> {
     }
 }
 
+/// `run_git_command` 的异步版：在阻塞线程池里跑，不占用 tokio worker。
+///
+/// 本地 git 操作（status/log/branch）是毫秒级，直接调同步版即可；但**网络类操作**
+/// （push/pull/fetch/clone）耗时可达分钟级，在 async 命令里直接调同步版会把
+/// tokio worker 线程占满整个时长，导致其它 IPC 命令排队、界面转圈。
+pub(super) async fn run_git_command_async(path: String, args: Vec<String>) -> AppResult<String> {
+    tokio::task::spawn_blocking(move || {
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_git_command(&path, &arg_refs)
+    })
+    .await
+    .map_err(|e| crate::error::AppError::from(format!("git 任务调度失败: {}", e)))?
+}
+
 pub(super) fn is_system_junk_file(file: &str) -> bool {
     std::path::Path::new(file)
         .file_name()

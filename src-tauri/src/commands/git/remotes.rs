@@ -94,31 +94,49 @@ pub async fn git_push(
     branch: String,
     force: bool,
 ) -> AppResult<String> {
-    let mut args = vec!["push", &remote, &branch];
+    let mut args = vec!["push".to_string(), remote, branch];
     if force {
-        args.push("--force");
+        args.push("--force".to_string());
     }
-    run_git_command(&path, &args)
+    // 网络操作，走阻塞线程池，避免占用 tokio worker
+    super::run_git_command_async(path, args).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn git_pull(path: String, remote: String, branch: String) -> AppResult<String> {
-    run_git_command(&path, &["pull", &remote, &branch])
+    super::run_git_command_async(path, vec!["pull".to_string(), remote, branch]).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn git_fetch(path: String, remote: Option<String>) -> AppResult<String> {
-    match remote {
-        Some(r) => run_git_command(&path, &["fetch", &r]),
-        None => run_git_command(&path, &["fetch", "--all"]),
-    }
+    let args = match remote {
+        Some(r) => vec!["fetch".to_string(), r],
+        None => vec!["fetch".to_string(), "--all".to_string()],
+    };
+    super::run_git_command_async(path, args).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn sync_to_remote(
+    path: String,
+    source_remote: String,
+    target_remote: String,
+    sync_all_branches: bool,
+    force: bool,
+) -> AppResult<String> {
+    // 整个流程是「fetch + 逐分支 push」，网络耗时可达分钟级；
+    // 函数体全是同步代码，整体丢进阻塞线程池，避免占用 tokio worker。
+    tokio::task::spawn_blocking(move || {
+        sync_to_remote_blocking(path, source_remote, target_remote, sync_all_branches, force)
+    })
+    .await
+    .map_err(|e| crate::error::AppError::from(format!("git 任务调度失败: {}", e)))?
+}
+
+fn sync_to_remote_blocking(
     path: String,
     source_remote: String,
     target_remote: String,

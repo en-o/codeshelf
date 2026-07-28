@@ -95,6 +95,20 @@ pub async fn git_clone(
     target_dir: String,
     repo_name: String,
 ) -> AppResult<String> {
+    // clone 全程要同步阻塞读 stderr 解析进度，大仓库可达分钟级。
+    // 直接在 async 命令里跑会独占一个 tokio worker 线程，期间其它 IPC 命令排队、界面转圈；
+    // 整体丢进阻塞线程池。进度事件用 AppHandle::emit，跨线程安全。
+    tokio::task::spawn_blocking(move || git_clone_blocking(app, url, target_dir, repo_name))
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("git 任务调度失败: {}", e)))?
+}
+
+fn git_clone_blocking(
+    app: tauri::AppHandle,
+    url: String,
+    target_dir: String,
+    repo_name: String,
+) -> AppResult<String> {
     use std::io::BufReader;
     use std::path::PathBuf;
     use tauri::Emitter;
