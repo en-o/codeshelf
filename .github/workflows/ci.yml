@@ -77,3 +77,19 @@ jobs:
       - name: cargo check --target x86_64-pc-windows-gnu
         working-directory: src-tauri
         run: cargo check --lib --target x86_64-pc-windows-gnu
+
+  macos:
+    name: macOS 编译检查
+    runs-on: macos-14
+    # 同理：#[cfg(target_os = "macos")] 的代码在 ubuntu 的 rust job 里不会被编译。
+    # macOS 无法从 Linux 交叉编译（要 Apple SDK），直接用 macOS runner 原生跑。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: macos
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --lib
