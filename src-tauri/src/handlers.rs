@@ -4,7 +4,7 @@
 
 use crate::commands::{
     api_chat, chat, chat_bridge, extras, git, project, resume, resume_docx, resume_node_agent,
-    settings, stats, storage_admin, system, toolbox, tools, workflows,
+    settings, shell_integration, stats, storage_admin, system, toolbox, tools, workflows,
 };
 use crate::{keyboard_hook, mcp_gateway};
 use tauri_specta::{collect_commands, Builder};
@@ -49,6 +49,9 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         // Project
         project::get_projects,
         project::create_project,
+        project::add_project_by_path,
+        shell_integration::get_shell_context_menu_state,
+        shell_integration::set_shell_context_menu,
         project::update_project,
         project::delete_project,
         project::delete_project_directory,

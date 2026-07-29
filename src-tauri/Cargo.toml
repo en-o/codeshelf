@@ -81,4 +81,8 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Threading",
+    # 文件管理器右键菜单：写 HKCU 注册表（commands/shell_integration.rs）。
+    # Win32_Security 是 RegCreateKeyExW 的 SECURITY_ATTRIBUTES 参数所需，少了它这个函数会被 cfg 掉。
+    "Win32_System_Registry",
+    "Win32_Security",
 ] }

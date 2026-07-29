@@ -8,6 +8,7 @@ pub mod resume;
 pub mod resume_node_agent;
 pub mod resume_docx;
 pub mod settings;
+pub mod shell_integration;
 pub mod stats;
 pub mod storage_admin;
 pub mod system;

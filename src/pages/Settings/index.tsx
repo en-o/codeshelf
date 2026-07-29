@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useSettingsStore, Theme } from "@/stores/settingsStore";
 import { useEditorsStore, TerminalConfig } from "@/stores/editorsStore";
 import { useProjectsStore } from "@/stores/projectsStore";
-import { Monitor, Code, Terminal, Search, ChevronRight, Tag, Download, Info, Keyboard, Link2, Server } from "lucide-react";
+import { Monitor, Code, Terminal, Search, ChevronRight, Tag, Download, Info, Keyboard, Link2, Server, MousePointerClick } from "lucide-react";
 import { PageHeader } from "@/components/common";
 import { getVersion } from "@tauri-apps/api/app";
 import { EditorSettings } from "./EditorSettings";
@@ -15,8 +15,9 @@ import { AboutSettings } from "./AboutSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
 import { ChatBridgeSettings } from "./ChatBridgeSettings";
 import { McpGatewaySettings } from "./McpGatewaySettings";
+import { ShellIntegrationSettings } from "./ShellIntegrationSettings";
 
-type SettingsSection = "appearance" | "editor" | "terminal" | "scan" | "labels" | "shortcuts" | "chatBridge" | "mcpGateway" | "update" | "about" | null;
+type SettingsSection = "appearance" | "editor" | "terminal" | "scan" | "labels" | "shortcuts" | "chatBridge" | "mcpGateway" | "shellIntegration" | "update" | "about" | null;
 
 export function SettingsPage() {
   const theme = useSettingsStore((s) => s.theme);
@@ -122,6 +123,14 @@ export function SettingsPage() {
       icon: Server,
       value: "外部调用",
       component: McpGatewaySettings,
+    },
+    {
+      id: "shellIntegration" as const,
+      title: "右键菜单",
+      description: "在文件管理器里右键文件夹加入书架",
+      icon: MousePointerClick,
+      value: "快速添加",
+      component: ShellIntegrationSettings,
     },
     {
       id: "update" as const,

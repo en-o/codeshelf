@@ -303,6 +303,34 @@ async createProject(input: CreateProjectInput) : Promise<Result<Project, string>
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * 只凭一个路径添加项目：拖拽、命令行 `--add-project`、文件管理器右键共用。
+ * 名字从目录名推导，标签留空，用户之后自己补。
+ */
+async addProjectByPath(path: string) : Promise<Result<AddProjectByPathResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_project_by_path", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getShellContextMenuState() : Promise<Result<ShellContextMenuState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_shell_context_menu_state") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setShellContextMenu(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_shell_context_menu", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async updateProject(input: UpdateProjectInput) : Promise<Result<Project, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_project", { input }) };
@@ -2798,6 +2826,11 @@ async unregisterAllGlobalShortcuts() : Promise<Result<null, string>> {
 
 /** user-defined types **/
 
+/**
+ * 只给了路径时的添加结果。`created = false` 表示书架里已有，
+ * 前端据此提示「已在书架中」并定位过去，而不是报错。
+ */
+export type AddProjectByPathResult = { project: Project; created: boolean }
 export type AiModelConfig = { id: string; model: string; enabled: boolean; isDefault: boolean; thinking: boolean; stream?: boolean; vision?: boolean }
 export type AiProviderConfig = { id: string; name: string; providerType: string; presetKey: string | null; baseUrl: string; apiKey: string | null; enabled: boolean; isDefaultProvider: boolean; models: AiModelConfig[] }
 /**
@@ -3423,6 +3456,19 @@ export type SessionMode = "client" | "server"
  * 会话状态
  */
 export type SessionStatus = "connecting" | "connected" | "listening" | "disconnected" | "error"
+export type ShellContextMenuState = { 
+/**
+ * 当前平台是否支持在应用内开关右键菜单
+ */
+supported: boolean; 
+/**
+ * 是否已注册
+ */
+registered: boolean; 
+/**
+ * 平台限制说明，直接显示给用户（不支持时才有内容）
+ */
+note: string }
 /**
  * 快捷键条目
  */

@@ -23,8 +23,76 @@ pub fn run_setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // 启动剪贴板监控（后台任务，无需 manage 返回值）
     commands::toolbox::clipboard::start_clipboard_monitor(app.handle().clone());
 
+    // 右键菜单若已注册，用当前 exe 路径重写一遍（应用移动/升级后旧路径会失效）
+    commands::shell_integration::refresh_registration_on_startup();
+
+    // 冷启动路径：应用没在跑时被右键菜单/命令行拉起，参数在 env 里。
+    // 热启动路径见 lib.rs 的单实例回调。
+    let args: Vec<String> = std::env::args().collect();
+    handle_add_project_args(app.handle(), &args);
+
     println!("Tauri app setup completed with tray icon");
     Ok(())
+}
+
+/// 处理 `--add-project <路径>`：文件管理器右键菜单和命令行共用的入口。
+///
+/// 冷启动（run_setup）和热启动（单实例回调）都调这里，两条路径行为一致。
+/// 添加是异步的，结果通过事件通知前端，失败也发事件——右键菜单点了没反应最难排查。
+pub fn handle_add_project_args(app: &AppHandle, args: &[String]) {
+    if let Some(path) = parse_add_project_arg(args) {
+        add_projects_by_paths(app, vec![path]);
+    }
+}
+
+/// 应用外部触发的添加：Windows 右键菜单 / 命令行 / macOS「打开方式」与 Dock 拖放。
+///
+/// 结果通过事件通知前端，失败也发事件——右键菜单点了没反应最难排查。
+pub fn add_projects_by_paths(app: &AppHandle, paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        focus_main_window(&app);
+        for path in paths {
+            match commands::project::add_project_by_path(path.clone()).await {
+                Ok(result) => {
+                    let _ = app.emit("project-added-externally", &result);
+                }
+                Err(e) => {
+                    log::error!("外部添加项目失败 ({}): {}", path, e);
+                    let _ = app.emit("project-add-failed", e.to_string());
+                }
+            }
+        }
+    });
+}
+
+/// 支持 `--add-project <路径>` 与 `--add-project=<路径>` 两种写法。
+/// Windows 注册表里 `"%V"` 展开后可能带引号或尾部反斜杠，路径校验在
+/// normalize_project_path 里统一做，这里只负责取出参数。
+fn parse_add_project_arg(args: &[String]) -> Option<String> {
+    const FLAG: &str = "--add-project";
+
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if let Some(rest) = arg.strip_prefix(FLAG) {
+            let value = match rest.strip_prefix('=') {
+                Some(v) => v.to_string(),
+                // 裸 flag：路径是下一个参数
+                None if rest.is_empty() => iter.next()?.to_string(),
+                // --add-projectXXX 之类的意外参数，不认
+                None => continue,
+            };
+            let value = value.trim().trim_matches('"').to_string();
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
 }
 
 /// macOS: 根据设置决定是否隐藏 Dock 图标 + 让窗口背景透明以支持圆角。
@@ -338,4 +406,43 @@ fn init_keyboard_hook(app: &tauri::App) {
     }
 
     let _ = app;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_add_project_arg;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_parse_add_project_arg() {
+        let exe = "codeshelf.exe";
+
+        // 两种写法都要认
+        assert_eq!(
+            parse_add_project_arg(&args(&[exe, "--add-project", "/a/b"])),
+            Some("/a/b".into())
+        );
+        assert_eq!(
+            parse_add_project_arg(&args(&[exe, "--add-project=/a/b"])),
+            Some("/a/b".into())
+        );
+
+        // Windows 注册表 "%V" 展开后可能带引号
+        assert_eq!(
+            parse_add_project_arg(&args(&[exe, "--add-project", "\"C:\\a b\""])),
+            Some("C:\\a b".into())
+        );
+
+        // 没有参数 / 缺值 / 形近参数都不能误命中
+        assert_eq!(parse_add_project_arg(&args(&[exe])), None);
+        assert_eq!(parse_add_project_arg(&args(&[exe, "--add-project"])), None);
+        assert_eq!(
+            parse_add_project_arg(&args(&[exe, "--add-project-xyz", "/a/b"])),
+            None
+        );
+        assert_eq!(parse_add_project_arg(&args(&[exe, "--add-project", "   "])), None);
+    }
 }

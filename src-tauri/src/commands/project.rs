@@ -149,6 +149,83 @@ async fn fetch_all_projects() -> AppResult<Vec<Project>> {
         .collect())
 }
 
+/// 规范化并校验项目路径 —— 所有「添加到书架」的入口共用这一处守卫。
+///
+/// 对话框、拖拽、命令行 `--add-project`、文件管理器右键都走这里，
+/// 校验写在收敛点，不在每个入口各写一份。
+///
+/// canonicalize 顺带解决了三件事：相对路径转绝对、symlink 解析、
+/// Windows 大小写归一 —— 都是查重的前提（`/a/b` 与 `/a/b/` 必须算同一个项目）。
+///
+/// 注意：`import_projects` 故意**不**走这里。导入备份文件时，路径可能
+/// 属于另一台机器、本地并不存在，强制校验会让整个导入失败。
+pub fn normalize_project_path(path: &str) -> AppResult<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(crate::error::AppError::from("项目路径为空".to_string()));
+    }
+
+    let p = PathBuf::from(trimmed);
+    if !p.exists() {
+        return Err(crate::error::AppError::from(format!(
+            "路径不存在：{}",
+            trimmed
+        )));
+    }
+    if !p.is_dir() {
+        return Err(crate::error::AppError::from(format!(
+            "不是文件夹：{}",
+            trimmed
+        )));
+    }
+
+    // canonicalize 失败通常是权限不足或路径被占用
+    let canonical = p.canonicalize().map_err(|e| {
+        crate::error::AppError::from(format!("无法访问路径 {}：{}", trimmed, e))
+    })?;
+
+    Ok(strip_verbatim_prefix(canonical.to_string_lossy().as_ref()))
+}
+
+/// Windows 的 canonicalize 返回 verbatim 路径（`\\?\C:\foo`）。
+/// 直接入库会导致与历史记录对不上、界面难看、传给编辑器可能打不开，必须还原。
+/// 网络路径 `\\?\UNC\server\share` 要还原成 `\\server\share`，不能只砍前缀。
+fn strip_verbatim_prefix(path: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{}", rest);
+        }
+        if let Some(rest) = path.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    path.to_string()
+}
+
+/// 从路径推导项目名（取最后一段目录名）
+fn derive_project_name(path: &str) -> String {
+    PathBuf::from(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+/// 按路径查已有项目（查重用）
+async fn fetch_project_by_path(path: &str) -> AppResult<Option<Project>> {
+    let id: Option<(String,)> = sqlx::query_as("SELECT id FROM projects WHERE path = ?")
+        .bind(path)
+        .fetch_optional(pool())
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("查询路径唯一性失败: {}", e)))?;
+
+    match id {
+        Some((id,)) => fetch_project_by_id(&id).await,
+        None => Ok(None),
+    }
+}
+
 async fn project_exists(id: &str) -> AppResult<bool> {
     let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM projects WHERE id = ?")
         .bind(id)
@@ -169,15 +246,12 @@ pub async fn get_projects() -> AppResult<Vec<Project>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn create_project(input: CreateProjectInput) -> AppResult<Project> {
-    // 路径唯一性检查
-    let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM projects WHERE path = ?")
-        .bind(&input.path)
-        .fetch_optional(pool())
-        .await
-        .map_err(|e| crate::error::AppError::from(format!("查询路径唯一性失败: {}", e)))?;
-    if exists.is_some() {
+    let path = normalize_project_path(&input.path)?;
+
+    if fetch_project_by_path(&path).await?.is_some() {
         return Err(crate::error::AppError::from("项目路径已存在".to_string()));
     }
+    let input = CreateProjectInput { path, ..input };
 
     let now = current_iso_time();
     let id = generate_id();
@@ -244,6 +318,42 @@ pub async fn create_project(input: CreateProjectInput) -> AppResult<Project> {
         last_opened: None,
         editor_id: None,
         claude_env_name: None,
+    })
+}
+
+/// 只给了路径时的添加结果。`created = false` 表示书架里已有，
+/// 前端据此提示「已在书架中」并定位过去，而不是报错。
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
+pub struct AddProjectByPathResult {
+    pub project: Project,
+    pub created: bool,
+}
+
+/// 只凭一个路径添加项目：拖拽、命令行 `--add-project`、文件管理器右键共用。
+/// 名字从目录名推导，标签留空，用户之后自己补。
+#[tauri::command]
+#[specta::specta]
+pub async fn add_project_by_path(path: String) -> AppResult<AddProjectByPathResult> {
+    let path = normalize_project_path(&path)?;
+
+    if let Some(project) = fetch_project_by_path(&path).await? {
+        return Ok(AddProjectByPathResult {
+            project,
+            created: false,
+        });
+    }
+
+    let project = create_project(CreateProjectInput {
+        name: derive_project_name(&path),
+        path,
+        tags: None,
+        labels: None,
+    })
+    .await?;
+
+    Ok(AddProjectByPathResult {
+        project,
+        created: true,
     })
 }
 
@@ -680,4 +790,49 @@ pub async fn set_project_claude_env(
     fetch_project_by_id(&id)
         .await?
         .ok_or_else(|| crate::error::AppError::from("项目不存在".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 守卫的三条边界 + 「带不带尾部斜杠必须算同一个路径」（查重的前提）
+    #[test]
+    fn test_normalize_project_path() {
+        let dir = std::env::temp_dir().join("codeshelf_normalize_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir_str = dir.to_string_lossy().to_string();
+
+        let normalized = normalize_project_path(&dir_str).unwrap();
+        assert!(!normalized.is_empty());
+        assert!(!normalized.starts_with(r"\\?\"), "verbatim 前缀没剥掉");
+
+        // 尾部分隔符、前后空格都要归一到同一个结果，否则会重复添加
+        assert_eq!(
+            normalize_project_path(&format!("{}{}", dir_str, std::path::MAIN_SEPARATOR)).unwrap(),
+            normalized
+        );
+        assert_eq!(
+            normalize_project_path(&format!("  {}  ", dir_str)).unwrap(),
+            normalized
+        );
+
+        // 不存在的路径
+        assert!(normalize_project_path(&dir.join("no_such_dir").to_string_lossy()).is_err());
+        // 空路径
+        assert!(normalize_project_path("   ").is_err());
+
+        // 文件不是文件夹
+        let file = dir.join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        assert!(normalize_project_path(&file.to_string_lossy()).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_derive_project_name() {
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(derive_project_name(&format!("{sep}a{sep}b{sep}my-proj")), "my-proj");
+    }
 }

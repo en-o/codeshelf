@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Tauri 打包时会把这个文件合并进 .app 的 Info.plist。
+
+  声明 CodeShelf 能「打开文件夹」，换来两条 macOS 上的快速添加入口：
+    1. Finder 里右键文件夹 →「打开方式」→ CodeShelf
+    2. 把文件夹拖到 Dock 图标上（需在设置里开启 Dock 图标）
+
+  两条都走 RunEvent::Opened（见 lib.rs），不需要 NSServices 那套 Objective-C
+  service provider。层级上和 Windows 的「显示更多选项」是同一档妥协。
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Folder</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.folder</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

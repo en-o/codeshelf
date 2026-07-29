@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { MainLayout } from "@/components/layout";
-import { ToastContainer, UpdateNotification, ShortcutQuickLookup, ClipboardQuickAccess } from "@/components/ui";
+import { ToastContainer, UpdateNotification, ShortcutQuickLookup, ClipboardQuickAccess, showToast } from "@/components/ui";
 import { ConfirmHost } from "@/components/common/useConfirm";
 
 // 页面按需加载：各 page 拆成独立 chunk，避免初始 index.js 突破 1MB。
@@ -164,6 +164,36 @@ function AppContent() {
       useUiStore.getState().navigateToTool(event.payload as ToolType);
     });
     return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
+  // 应用外部添加项目：Windows 右键菜单 / 命令行 / macOS「打开方式」与 Dock 拖放。
+  // 已在书架里的不报错，直接定位过去（后端 created=false）。
+  useEffect(() => {
+    const added = listen<{ project: Project; created: boolean }>(
+      "project-added-externally",
+      (event) => {
+        const { project, created } = event.payload;
+        const store = useProjectsStore.getState();
+        if (created) {
+          store.addProject(project);
+          store.markProjectDirty(project.path);
+        }
+        store.setSelectedProjectId(project.id);
+        useUiStore.getState().setCurrentPage("shelf");
+        showToast(
+          created ? "success" : "info",
+          created ? "已添加到书架" : "该项目已在书架中",
+          project.name
+        );
+      }
+    );
+    const failed = listen<string>("project-add-failed", (event) => {
+      showToast("error", "添加项目失败", event.payload);
+    });
+    return () => {
+      added.then((fn) => fn());
+      failed.then((fn) => fn());
+    };
   }, []);
 
   if (!initialized) {
