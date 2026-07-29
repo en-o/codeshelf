@@ -13,3 +13,6 @@ export { AnimatedLogo } from "./AnimatedLogo";
 export { NotificationPanel } from "./NotificationPanel";
 export { ShortcutQuickLookup } from "./ShortcutQuickLookup";
 export { ClipboardQuickAccess } from "./ClipboardQuickAccess";
+export { ContextMenu } from "./ContextMenu";
+export type { ContextMenuItem } from "./ContextMenu";
+export { AppContextMenu } from "./AppContextMenu";

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { MainLayout } from "@/components/layout";
-import { ToastContainer, UpdateNotification, ShortcutQuickLookup, ClipboardQuickAccess, showToast } from "@/components/ui";
+import { ToastContainer, UpdateNotification, ShortcutQuickLookup, ClipboardQuickAccess, AppContextMenu, showToast } from "@/components/ui";
 import { ConfirmHost } from "@/components/common/useConfirm";
 
 // 页面按需加载：各 page 拆成独立 chunk，避免初始 index.js 突破 1MB。
@@ -243,6 +243,7 @@ function AppContent() {
       <UpdateNotification />
       <ShortcutQuickLookup />
       <ClipboardQuickAccess />
+      <AppContextMenu />
       <ConfirmHost />
     </>
   );

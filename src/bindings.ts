@@ -1863,6 +1863,18 @@ async writeToClipboard(content: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * 读系统剪贴板文本。给应用内右键菜单的「粘贴」用：
+ * webview 的 navigator.clipboard.readText() 受权限与用户手势限制，不可靠。
+ */
+async readFromClipboard() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_from_clipboard") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async updateClipboardNote(id: string, note: string) : Promise<Result<ClipboardEntry, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_clipboard_note", { id, note }) };

@@ -325,6 +325,17 @@ pub async fn write_to_clipboard(content: String) -> AppResult<()> {
         .map_err(|e| crate::error::AppError::from(format!("写入系统剪贴板失败: {}", e)))
 }
 
+/// 读系统剪贴板文本。给应用内右键菜单的「粘贴」用：
+/// webview 的 navigator.clipboard.readText() 受权限与用户手势限制，不可靠。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_from_clipboard() -> AppResult<String> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| crate::error::AppError::from(format!("无法访问系统剪贴板: {}", e)))?;
+    // 剪贴板为空不算错误，返回空串让调用方直接当无事发生
+    Ok(clipboard.get_text().unwrap_or_default())
+}
+
 // ============== 后台监控 ==============
 
 /// 在 tokio runtime 上启动剪贴板轮询。

@@ -224,6 +224,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         toolbox::clipboard::get_clipboard_settings,
         toolbox::clipboard::save_clipboard_settings,
         toolbox::clipboard::write_to_clipboard,
+        toolbox::clipboard::read_from_clipboard,
         toolbox::clipboard::update_clipboard_note,
         // Toolbox - PairDrop (跨设备传输)
         toolbox::pairdrop::pairdrop_start,
