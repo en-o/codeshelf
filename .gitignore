@@ -35,4 +35,7 @@ CodeShelf-Portable-*
 /src-node/resume-agent/dist/rpc.js
 /src-node/resume-agent/dist/types.js
 /src-node/resume-agent/dist/util.js
-/src-tauri/resources/sidecars/
+# 忽略产物，但保留目录本身：tauri.conf.json 把 resources/sidecars/ 声明为资源，
+# 目录不存在时 build.rs 直接报 "resource path doesn't exist"（CI 上 cargo check 必挂）。
+/src-tauri/resources/sidecars/*
+!/src-tauri/resources/sidecars/.gitkeep
