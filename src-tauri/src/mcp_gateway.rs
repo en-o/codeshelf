@@ -89,11 +89,42 @@ struct ToolsCallParams {
 #[derive(Clone)]
 struct HttpState;
 
+/// 允许携带 Origin 访问网关的来源，只有 Tauri webview 这几个。
+///
+/// 应用自己的前端是用浏览器 `fetch()` 打到 `http://127.0.0.1:port/mcp` 的（见
+/// `src/services/mcp/client.ts`），所以 CORS 不能直接删掉；但也绝不能是 `*` ——
+/// loopback 不是身份认证，任何网页都能往 localhost 发请求。
+///
+/// 真正的 MCP 客户端（Claude Desktop、curl、SDK）不是浏览器，不会带 Origin，
+/// 走 `origin_allowed` 里 None 那条分支，只受密钥校验约束。
+const ALLOWED_ORIGINS: [&str; 3] = [
+    "tauri://localhost",       // macOS / Linux
+    "http://tauri.localhost",  // Windows
+    "https://tauri.localhost", // Windows（自定义协议走 https 时）
+];
+
+/// 无 Origin = 非浏览器请求，放行（仍需密钥）；有 Origin 则必须在白名单里。
+fn origin_allowed(headers: &HeaderMap) -> bool {
+    match headers.get("origin").and_then(|v| v.to_str().ok()) {
+        None => true,
+        Some(origin) => ALLOWED_ORIGINS.contains(&origin),
+    }
+}
+
 fn http_router() -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(HeaderValue::from_static("*"))
+        .allow_origin(
+            ALLOWED_ORIGINS
+                .iter()
+                .map(|o| HeaderValue::from_static(o))
+                .collect::<Vec<_>>(),
+        )
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(tower_http::cors::Any);
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderName::from_static("x-api-key"),
+        ]);
 
     Router::new()
         .route("/", get(http_index))
@@ -125,7 +156,7 @@ pub async fn mcp_gateway_internal_endpoint() -> AppResult<Option<McpGatewayInter
         None => return Ok(None),
     };
     let settings = crate::commands::settings::get_app_settings().await?;
-    // keys 为空时，网关本身不鉴权（validate_mcp_auth 直接放行），api_key 返回 None
+    // 网关运行时 ensure_gateway_key 保证至少有一个可用密钥，正常情况下这里必然拿得到
     let api_key = active_mcp_keys(&settings.mcp_gateway_keys)
         .first()
         .map(|k| k.key.clone());
@@ -139,26 +170,64 @@ pub async fn apply_settings_from_storage() -> AppResult<McpGatewayStatus> {
 
 pub async fn apply_settings(settings: &AppSettings) -> AppResult<McpGatewayStatus> {
     if settings.mcp_gateway_enabled {
-        // 安全闸：keys 为空时网关不鉴权（见 validate_mcp_auth），此时只允许监听回环地址。
-        // 非回环 + 无密钥 = 局域网内任何人都能无鉴权调用已配置的 API 端点，拒绝启动；
-        // 已在跑的实例也要停掉（鉴权是每个请求实时读设置的，不停会继续裸奔）。
-        // 仅拦这一种危险组合：回环无密钥、任意地址有密钥，行为均不变。
-        let host = settings.mcp_gateway_host.trim();
-        let is_loopback = host
-            .parse::<std::net::IpAddr>()
-            .map(|ip| ip.is_loopback())
-            .unwrap_or(false);
-        if !is_loopback && settings.mcp_gateway_keys.is_empty() {
-            let _ = stop_gateway().await;
-            return Err(crate::error::AppError::from(format!(
-                "MCP 网关监听非本机地址（{}）时必须至少配置一个访问密钥，否则局域网内任何设备都可无鉴权调用。请先添加密钥，或将监听地址改回 127.0.0.1",
-                host
-            )));
-        }
+        // 不存在「已启动但无鉴权」的状态：没有可用密钥就先自动生成一个再启动。
+        //
+        // 以前是「keys 为空 → validate_mcp_auth 直接放行」，只靠"必须监听回环"兜底。
+        // 但 loopback 不是身份认证 —— 任何网页都能往 127.0.0.1 发请求，
+        // 借用 CodeShelf 已保存的 endpoint 和认证信息打真实 API。
+        ensure_gateway_key().await?;
         start_gateway(settings.mcp_gateway_host.clone(), settings.mcp_gateway_port).await
     } else {
         stop_gateway().await
     }
+}
+
+/// 保证设置里至少有一个启用且未过期的网关密钥，没有就生成一个并落盘。
+/// 返回后 `active_mcp_keys` 必然非空。
+async fn ensure_gateway_key() -> AppResult<()> {
+    let settings = crate::commands::settings::get_app_settings().await?;
+    if !active_mcp_keys(&settings.mcp_gateway_keys).is_empty() {
+        return Ok(());
+    }
+    let key = McpGatewayKey {
+        id: format!("auto-{}", Utc::now().timestamp_millis()),
+        name: "自动生成".to_string(),
+        key: generate_gateway_key()?,
+        enabled: true,
+        created_at: Utc::now().to_rfc3339(),
+        expires_at: None,
+    };
+    let mut keys = settings.mcp_gateway_keys.clone();
+    keys.push(key);
+    crate::commands::settings::set_mcp_gateway_keys(keys).await
+}
+
+/// 生成 v1 格式的网关密钥：`cs_mcp_v1_<43 chars base64url>_<4 chars 校验码>`。
+///
+/// 格式与前端 `src/pages/Settings/mcpGateway/utils.ts` 保持一致 —— 那里定义了
+/// 这套前缀 + 版本号 + FNV-1a 校验码，UI 会按它校验和展示，自动生成的密钥
+/// 不能另起一套格式。随机源用 getrandom（操作系统 CSPRNG），32 字节。
+fn generate_gateway_key() -> AppResult<String> {
+    let mut buf = [0u8; 32];
+    getrandom::getrandom(&mut buf)
+        .map_err(|e| crate::error::AppError::from(format!("生成 MCP 网关密钥失败: {}", e)))?;
+
+    let random = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, buf);
+    // 注意：校验码只覆盖**随机段**，不含 `cs_mcp_v1_` 前缀 —— 前端是 checksumOf(random)
+    Ok(format!("cs_mcp_v1_{}_{}", random, fnv1a_checksum(&random)))
+}
+
+/// 32-bit FNV-1a 取 20bit → 4 字符 base32，与前端 `fnv1a` + `checksumOf` 逐位对应
+/// （`wrapping_mul` 对应 JS 的 `Math.imul`）。
+fn fnv1a_checksum(payload: &str) -> String {
+    const CHECKSUM_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in payload.bytes() {
+        hash ^= b as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    let pick = |shift: u32| CHECKSUM_ALPHABET[((hash >> shift) & 0x1f) as usize] as char;
+    [pick(15), pick(10), pick(5), pick(0)].iter().collect()
 }
 
 async fn start_gateway(host: String, port: u16) -> AppResult<McpGatewayStatus> {
@@ -273,6 +342,20 @@ async fn http_mcp(
     Query(query): Query<HashMap<String, String>>,
     Json(req): Json<JsonRpcRequest>,
 ) -> impl IntoResponse {
+    // Origin 先于密钥检查：跨站页面的「简单请求」（text/plain + 无自定义头）不会触发预检，
+    // CORS 层拦不住它发出去，只能在 handler 里判。
+    if !origin_allowed(&headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(error_response(
+                req.id.unwrap_or(Value::Null),
+                -32002,
+                "Forbidden origin",
+                Some(json!({ "message": "该来源不允许访问本地 MCP 网关" })),
+            )),
+        )
+            .into_response();
+    }
     if let Err(resp) = validate_mcp_auth(&headers, &query, req.id.clone()).await {
         return resp.into_response();
     }
@@ -303,11 +386,10 @@ async fn validate_mcp_auth(
         }
     };
 
+    // 注意：这里**没有**「keys 为空就放行」的分支了。
+    // 网关启动时 ensure_gateway_key 会保证至少有一个可用密钥，
+    // 真出现空列表说明配置被外部改坏了，此时应当拒绝服务而不是裸奔。
     let active_keys = active_mcp_keys(&settings.mcp_gateway_keys);
-    if settings.mcp_gateway_keys.is_empty() {
-        return Ok(());
-    }
-
     if active_keys.is_empty() {
         return Err((
             StatusCode::UNAUTHORIZED,
@@ -315,7 +397,7 @@ async fn validate_mcp_auth(
                 request_id.unwrap_or(Value::Null),
                 -32001,
                 "MCP authentication has no active keys",
-                Some(json!({ "message": "已配置 MCP 密钥，但没有未过期且启用的密钥" })),
+                Some(json!({ "message": "没有未过期且启用的 MCP 密钥，网关拒绝所有请求" })),
             )),
         ));
     }
@@ -708,4 +790,60 @@ fn internal_error<E: ToString>(error: E) -> JsonRpcError {
         "Internal error",
         Some(json!({ "message": error.to_string() })),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 校验码必须与前端 `src/pages/Settings/mcpGateway/utils.ts` 的 fnv1a/checksumOf 逐位一致，
+    /// 否则自动生成的密钥在 UI 里会被标成「校验码不匹配」。
+    /// 下面的期望值是用前端那份 JS 实现直接算出来的。
+    #[test]
+    fn checksum_matches_frontend_algorithm() {
+        assert_eq!(fnv1a_checksum("test"), "a6rf");
+        assert_eq!(fnv1a_checksum("AAAA"), "gi93");
+        assert_eq!(fnv1a_checksum("cs_mcp_v1_test"), "5pux");
+    }
+
+    #[test]
+    fn generated_key_has_v1_shape() {
+        let key = generate_gateway_key().expect("generate");
+        let body = key
+            .strip_prefix("cs_mcp_v1_")
+            .unwrap_or_else(|| panic!("bad prefix: {}", key));
+        // 随机段是 base64url，本身可能含 `_`，所以按最后一个下划线切
+        // （前端 parseKey 用的也是 lastIndexOf("_")）
+        let (random, checksum) = body.rsplit_once('_').expect("missing checksum");
+        assert_eq!(random.len(), 43, "random = {}", random);
+        assert_eq!(checksum.len(), 4, "checksum = {}", checksum);
+        // 校验码必须能被前端复算通过
+        assert_eq!(fnv1a_checksum(random), checksum);
+        assert_ne!(key, generate_gateway_key().expect("generate"));
+    }
+
+    #[test]
+    fn origin_policy_denies_untrusted_pages() {
+        let mut h = HeaderMap::new();
+        // 非浏览器客户端（Claude Desktop / curl）不带 Origin，必须放行
+        assert!(origin_allowed(&h));
+
+        // Tauri webview 自己的来源放行
+        for ok in ALLOWED_ORIGINS {
+            h.insert("origin", HeaderValue::from_static(ok));
+            assert!(origin_allowed(&h), "should allow {}", ok);
+        }
+
+        // 任意网页即使打到 127.0.0.1 也必须被拒 —— loopback 不是身份认证
+        for bad in [
+            "http://evil.example",
+            "https://evil.example",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "null",
+        ] {
+            h.insert("origin", HeaderValue::from_str(bad).unwrap());
+            assert!(!origin_allowed(&h), "should deny {}", bad);
+        }
+    }
 }

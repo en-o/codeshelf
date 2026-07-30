@@ -345,7 +345,7 @@ pub async fn save_app_settings(
     app: tauri::AppHandle,
     input: AppSettingsInput,
 ) -> AppResult<AppSettings> {
-    let _guard = SETTINGS_SAVE_LOCK.lock().await;
+    let guard = SETTINGS_SAVE_LOCK.lock().await;
     let mut settings = get_app_settings().await?;
 
     if let Some(theme) = input.theme {
@@ -408,11 +408,34 @@ pub async fn save_app_settings(
     crate::storage::write_atomic(config.app_settings_file(), content)
         .map_err(|e| crate::error::AppError::from(format!("保存应用设置失败: {}", e)))?;
 
+    // 锁只保护「读-改-写」这一段。必须在 apply_settings 之前放开：
+    // 网关启动会走 ensure_gateway_key → set_mcp_gateway_keys，那里要再拿同一把锁。
+    drop(guard);
+
     // 通知聊天桥接 poller 重新加载配置
     super::chat_bridge::notify_reload(&app).await;
     crate::mcp_gateway::apply_settings(&settings).await?;
 
-    Ok(settings)
+    // 网关可能刚补写了自动生成的密钥，回读一次让前端拿到最新的
+    get_app_settings().await
+}
+
+/// 只更新 `mcp_gateway_keys` 的窄写入口，供网关自动补密钥使用。
+///
+/// 不走 `save_app_settings`：那个函数结尾会调 `apply_settings`，
+/// 而调用方本身就在 `apply_settings` 里面 —— 会无限递归。
+pub async fn set_mcp_gateway_keys(keys: Vec<McpGatewayKey>) -> AppResult<()> {
+    let _guard = SETTINGS_SAVE_LOCK.lock().await;
+    let mut settings = get_app_settings().await?;
+    settings.mcp_gateway_keys = keys;
+
+    let config = get_storage_config()?;
+    config.ensure_dirs()?;
+    let content = serde_json::to_string(&settings)
+        .map_err(|e| crate::error::AppError::from(format!("序列化应用设置失败: {}", e)))?;
+    crate::storage::write_atomic(config.app_settings_file(), content)
+        .map_err(|e| crate::error::AppError::from(format!("保存 MCP 网关密钥失败: {}", e)))?;
+    Ok(())
 }
 
 // ============== UI 状态管理 ==============

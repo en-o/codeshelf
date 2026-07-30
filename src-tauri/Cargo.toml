@@ -60,6 +60,9 @@ sysinfo = "0.30"
 socket2 = "0.5"
 mdns-sd = "0.20.1"
 base64 = "0.22"
+# 生成 MCP 网关访问密钥。getrandom 已经在依赖树里（ring / rustls 都在用），
+# 这里只是把它提成直接依赖，不引入新的加密栈。
+getrandom = "0.2"
 arboard = "3"
 # 简历 docx 导出
 docx-rs = "0.4"

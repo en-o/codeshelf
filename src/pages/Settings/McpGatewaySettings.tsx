@@ -53,13 +53,12 @@ export function McpGatewaySettings() {
   }
 
   async function handleStart() {
-    if (activeKeys.length === 0) {
-      const proceed = confirm(
-        "当前没有任何可用密钥，启动后任何能访问到端口的客户端都能调用 /mcp。\n\n建议先添加并启用至少一条密钥再启动，仍要继续吗？",
-      );
-      if (!proceed) return;
-    }
+    // 后端 ensure_gateway_key 会在启动前补一条自动生成的密钥，
+    // 不再存在「已启动但无鉴权」的状态，所以这里只做提示、不再拦。
     await startGateway();
+    if (activeKeys.length === 0) {
+      showToast("info", "已自动生成访问密钥", "网关不允许无鉴权运行，可在下方密钥列表查看并复制");
+    }
   }
 
   async function handleStop() {

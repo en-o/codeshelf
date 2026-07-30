@@ -32,12 +32,12 @@
 所有 P0/P1 都是发布前置条件，不应带着未验收的 P1 发版。建议按以下顺序推进：
 
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
-2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020~~ 已完成，
-   AUD-007 部分完成；剩 AUD-045～AUD-050。
+2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045~~
+   已完成，AUD-007 部分完成；剩 AUD-046～AUD-050。
 3. **数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
 
-> 进度：17 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044），
+> 进度：18 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044、045），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -47,6 +47,9 @@
 > - AUD-009：端口转发 / SSH 隧道本地口 / 静态服务的默认监听从 `0.0.0.0` 改成 `127.0.0.1`，
 >   依赖局域网访问的用户需要在对应条目里手动勾选「对局域网开放」。
 > - AUD-008：PairDrop 单文件上限 2GB → 256MB，且上传/下载都要求收发双方在线。
+> - AUD-045：MCP Gateway 不再允许无鉴权运行，首次启动会自动生成一条访问密钥；
+>   原先靠"无密钥"连接的客户端需要到设置里复制密钥后重新配置。跨域调用现在只接受
+>   Tauri webview 来源，浏览器页面无法再直连本地网关。
 >
 > 已建立的公共守卫，后续条目应直接复用而不是各写一份：
 > - `src-tauri/src/path_guard.rs` —— 受保护目录、可删除目录、外部 ID → 安全路径。
@@ -864,7 +867,26 @@
 
 ### AUD-045 · P1 · MCP Gateway 在 loopback 上也必须阻止浏览器跨域无鉴权调用
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 实现说明：
+  - **不再存在「已启动但无鉴权」的状态**：`apply_settings` 启动网关前先走 `ensure_gateway_key`，
+    没有可用密钥就自动生成一个并落盘。`validate_mcp_auth` 里那句
+    `if keys.is_empty() { return Ok(()) }` 直接删掉 —— 真出现空列表说明配置被外部改坏了，
+    此时拒绝服务而不是裸奔。原来「必须监听回环」的兜底闸门随之取消（loopback 本来就不是身份认证）。
+  - 密钥沿用前端已有的 v1 格式 `cs_mcp_v1_<43 base64url>_<4 校验码>`，Rust 侧复刻了同一套
+    FNV-1a 校验码；随机源用 `getrandom`（操作系统 CSPRNG，本来就在依赖树里，只是提成直接依赖）。
+    单测拿前端 JS 实现算出的向量做逐位比对。
+  - **Origin 策略**：`Access-Control-Allow-Origin: *` 换成三个 Tauri webview 来源的白名单，
+    `allow_headers(Any)` 换成显式三项。CORS 不能整个删掉 —— 应用自己的前端就是用浏览器
+    `fetch()` 打到 `127.0.0.1:port/mcp` 的（`src/services/mcp/client.ts`）。
+  - 另在 `http_mcp` 里加了 `origin_allowed` 前置判断：跨站页面的「简单请求」
+    （text/plain + 无自定义头）不触发预检，CORS 层拦不住，只能在 handler 里判。
+    无 Origin = 非浏览器客户端（Claude Desktop / curl / SDK），放行但仍校验密钥。
+  - `save_app_settings` 把保存锁提前 `drop` 了：网关启动会回调 `set_mcp_gateway_keys`，
+    不放锁会自锁。新增的 `set_mcp_gateway_keys` 是只写 keys 的窄入口，不回调 `apply_settings`，
+    避免无限递归。
+- 顺带修正：初版把校验码算在了 `cs_mcp_v1_<random>` 全串上，而前端只算随机段，
+  单测立刻抓到 —— 否则每个自动生成的密钥都会在 UI 里显示「校验码不匹配」。
 - 风险：网关允许任意 Origin、方法和请求头；监听回环地址且密钥列表为空时又直接跳过鉴权。
   任何能够向 localhost 发请求的网页来源都可能调用 `tools/list`/`tools/call`，借用 CodeShelf
   已保存的 endpoint 和认证信息执行真实 API 操作。loopback 不是身份认证，不能依赖浏览器 PNA

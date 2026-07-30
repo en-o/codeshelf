@@ -928,6 +928,7 @@ dependencies = [
  "dirs 5.0.1",
  "docx-rs",
  "futures",
+ "getrandom 0.2.17",
  "kuchikiki",
  "log",
  "mdns-sd",
