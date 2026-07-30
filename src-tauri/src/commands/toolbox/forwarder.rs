@@ -211,6 +211,7 @@ pub async fn add_forward_rule(input: ForwardRuleInput) -> AppResult<ForwardRule>
         remote_host: input.remote_host,
         remote_port: input.remote_port,
         doc_path: input.doc_path,
+        expose_lan: input.expose_lan.unwrap_or(false),
         status: "stopped".to_string(),
         connections: 0,
         bytes_in: 0,
@@ -318,10 +319,12 @@ pub async fn start_forwarding(rule_id: String) -> AppResult<()> {
     let local_port = rule.local_port;
     let remote_host = rule.remote_host.clone();
     let remote_port = rule.remote_port;
+    let expose_lan = rule.expose_lan;
 
     tokio::spawn(async move {
         if let Err(e) =
-            run_forward_server(&id, local_port, &remote_host, remote_port, controller).await
+            run_forward_server(&id, local_port, &remote_host, remote_port, expose_lan, controller)
+                .await
         {
             log::error!("转发服务错误: {}", e);
         }
@@ -342,11 +345,14 @@ async fn run_forward_server(
     local_port: u16,
     remote_host: &str,
     remote_port: u16,
+    expose_lan: bool,
     controller: Arc<ForwardController>,
 ) -> AppResult<()> {
-    let addr: std::net::SocketAddr = format!("0.0.0.0:{}", local_port)
-        .parse()
-        .map_err(|e| crate::error::AppError::from(format!("解析地址失败: {}", e)))?;
+    // 默认只绑 loopback：以前一律 0.0.0.0，日志却显示 127.0.0.1
+    let addr = std::net::SocketAddr::from((
+        crate::commands::toolbox::listen_ip(expose_lan),
+        local_port,
+    ));
 
     // 使用 socket2 创建支持快速关闭的 socket
     let socket = Socket::new(Domain::IPV4, Type::STREAM, None)
@@ -676,6 +682,7 @@ pub async fn update_forward_rule(
             rule.remote_host = input.remote_host;
             rule.remote_port = input.remote_port;
             rule.doc_path = input.doc_path;
+            rule.expose_lan = input.expose_lan.unwrap_or(false);
         }
     }
 

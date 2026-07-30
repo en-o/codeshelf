@@ -38,6 +38,7 @@ import {
   stopReverseTunnel,
   updateReverseTunnel,
 } from "@/services/toolbox";
+import { startWithHostKeyTrust } from "@/services/ssh/hostKeyTrust";
 import { DEFAULT_SSH_GROUP } from "@/types/toolbox";
 import type {
   ReverseTunnel as ReverseTunnelModel,
@@ -149,11 +150,13 @@ export function ReverseTunnel({ onBack }: ReverseTunnelProps) {
   }
 
   async function handleStart(id: string) {
+    const t = tunnels.find((x) => x.id === id);
     try {
-      await startReverseTunnel(id);
+      // 首次连接时展示主机密钥指纹让用户确认；密钥变更一律拒绝（见 hostKeyTrust）
+      await startWithHostKeyTrust(t?.sshHost ?? "", t?.sshPort ?? 22, () => startReverseTunnel(id));
       loadAll();
     } catch (err) {
-      showToast("error", `启动失败: ${err}`);
+      showToast("error", `启动失败: ${typeof err === "string" ? err : err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -200,10 +203,14 @@ export function ReverseTunnel({ onBack }: ReverseTunnelProps) {
     }
   }
 
-  // 导出：去掉私钥文件路径（本机路径换机无效），密码 / passphrase 保留
+  // 导出：**一切秘密都不出去**（与正向隧道同一策略）。
+  // 密码 / passphrase 是账户凭据，用户分享 JSON 时会一并泄露；导入方需要重新填。
   function stripForExport(auth: SshAuthMethod): SshAuthMethod {
     if (auth.type === "key") {
-      return { type: "key", keyPath: "", passphrase: auth.passphrase };
+      return { type: "key", keyPath: "", passphrase: "" };
+    }
+    if (auth.type === "password") {
+      return { type: "password", password: "" };
     }
     return auth;
   }

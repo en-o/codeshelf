@@ -223,12 +223,15 @@ impl ReverseTunnelController {
 
 /// russh 客户端 handler —— 反向隧道版：入站连接经此回调回流。
 /// 持有本地目标与控制器，回调里 dial 本地服务并对拷。
-/// 首版不校验 host key（与现有 ssh_tunnel 一致，作为已知限制）。
+/// 主机密钥按 known_hosts 校验，策略与正向隧道共用（见 `super::ssh_hostkey`）。
 #[derive(Clone)]
 pub(super) struct ReverseClient {
     pub(super) local_host: String,
     pub(super) local_port: u16,
     pub(super) controller: Arc<ReverseTunnelController>,
+    /// 主机密钥校验用（策略与正向隧道共用，见 `super::ssh_hostkey`）
+    pub(super) ssh_host: String,
+    pub(super) ssh_port: u16,
 }
 
 /// 监督器共享的「当前 SSH 句柄」槽；重连时整体替换。

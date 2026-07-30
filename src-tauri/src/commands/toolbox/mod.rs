@@ -11,6 +11,7 @@ pub mod process;
 pub mod reverse_tunnel;
 pub mod scanner;
 pub mod server;
+pub mod ssh_hostkey;
 pub mod shortcuts;
 pub mod ssh_tunnel;
 
@@ -154,6 +155,9 @@ pub struct ForwardRule {
     /// 文档路径，如 "doc.html" 或 "swagger-ui.html"，用于快速访问
     #[serde(alias = "doc_path")]
     pub doc_path: Option<String>,
+    /// 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
+    #[serde(default)]
+    pub expose_lan: bool,
     #[serde(default = "default_stopped")]
     pub status: String, // "running", "stopped"
     #[serde(default)]
@@ -176,6 +180,9 @@ pub struct ForwardRuleInput {
     pub remote_port: u16,
     /// 文档路径，如 "doc.html" 或 "swagger-ui.html"
     pub doc_path: Option<String>,
+    /// 对局域网开放；缺省 false（只绑 loopback）
+    #[serde(default)]
+    pub expose_lan: Option<bool>,
 }
 
 /// 转发统计
@@ -188,10 +195,37 @@ pub struct ForwardStats {
     pub bytes_out: u64,
 }
 
+/// 监听地址：默认只绑 loopback。
+///
+/// 三个服务（端口转发 / SSH 正向隧道本地口 / 静态服务）以前一律绑 `0.0.0.0`，
+/// 但日志和界面显示的是 `127.0.0.1` —— 用户以为只有本机能访问，实际整个局域网
+/// 都能连上内部服务、数据库或被共享的目录。
+/// 现在默认 loopback，要对局域网开放必须在界面上显式勾选。
+pub fn listen_ip(expose_lan: bool) -> [u8; 4] {
+    if expose_lan {
+        [0, 0, 0, 0]
+    } else {
+        [127, 0, 0, 1]
+    }
+}
+
+/// 界面/日志里展示的实际可访问地址，必须与真实绑定一致。
+pub fn listen_display_host(expose_lan: bool) -> &'static str {
+    if expose_lan {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    }
+}
+
 // ============== SSH 隧道相关结构 ==============
 
 /// SSH 认证方式（前端 tag 区分：key / password / sshConfig）
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+///
+/// **不要 derive Debug**：`SshTunnel` / `ReverseTunnel` 都 derive 了 Debug，
+/// 任何一处 `{:?}` 打日志或拼错误串都会把密码和 passphrase 原样吐出来。
+/// 下面手写一个只暴露形状、不暴露内容的实现。
+#[derive(Clone, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SshAuthMethod {
     /// 私钥文件（含可选 passphrase）
@@ -206,6 +240,36 @@ pub enum SshAuthMethod {
     /// 读取 ~/.ssh/config 的 Host 别名
     #[serde(rename_all = "camelCase")]
     SshConfig { host_alias: String },
+}
+
+impl std::fmt::Debug for SshAuthMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Key {
+                key_path,
+                passphrase,
+            } => f
+                .debug_struct("Key")
+                .field("key_path", key_path)
+                .field(
+                    "passphrase",
+                    &if passphrase.as_deref().unwrap_or("").is_empty() {
+                        "<none>"
+                    } else {
+                        "<redacted>"
+                    },
+                )
+                .finish(),
+            Self::Password { .. } => f
+                .debug_struct("Password")
+                .field("password", &"<redacted>")
+                .finish(),
+            Self::SshConfig { host_alias } => f
+                .debug_struct("SshConfig")
+                .field("host_alias", host_alias)
+                .finish(),
+        }
+    }
 }
 
 /// SSH 隧道规则
@@ -230,6 +294,9 @@ pub struct SshTunnel {
     pub ssh_user: String,
     /// 认证方式
     pub auth: SshAuthMethod,
+    /// 本地监听口对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
+    #[serde(default)]
+    pub expose_lan: bool,
     #[serde(default = "default_stopped")]
     pub status: String,
     #[serde(default)]
@@ -264,6 +331,9 @@ pub struct SshTunnelInput {
     pub ssh_port: Option<u16>,
     pub ssh_user: Option<String>,
     pub auth: SshAuthMethod,
+    /// 本地监听口对局域网开放；缺省 false（只绑 loopback）
+    #[serde(default)]
+    pub expose_lan: Option<bool>,
     /// 断线后自动重连；缺省开启
     #[serde(default)]
     pub auto_reconnect: Option<bool>,
@@ -330,6 +400,9 @@ pub struct ServerConfig {
     pub index_page: Option<String>,
     /// 多个代理规则
     pub proxies: Vec<ProxyConfig>,
+    /// 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
+    #[serde(default)]
+    pub expose_lan: bool,
     #[serde(default = "default_stopped")]
     pub status: String, // "running", "stopped"
     #[serde(alias = "created_at")]
@@ -360,6 +433,9 @@ pub struct ServerConfigInput {
     pub index_page: Option<String>,
     /// 多个代理规则
     pub proxies: Option<Vec<ProxyConfig>>,
+    /// 对局域网开放；缺省 false（只绑 loopback）
+    #[serde(default)]
+    pub expose_lan: Option<bool>,
 }
 
 /// 服务访问日志

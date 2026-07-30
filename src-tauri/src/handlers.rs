@@ -117,6 +117,8 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         toolbox::forwarder::get_forward_stats,
         toolbox::forwarder::update_forward_rule,
         // Toolbox - SSH Tunnel
+        toolbox::ssh_hostkey::ssh_probe_host_key,
+        toolbox::ssh_hostkey::ssh_trust_host_key,
         toolbox::ssh_tunnel::add_ssh_tunnel,
         toolbox::ssh_tunnel::update_ssh_tunnel,
         toolbox::ssh_tunnel::remove_ssh_tunnel,

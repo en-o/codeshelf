@@ -64,7 +64,7 @@ export function ExportDialog({ tunnels, onCancel, onConfirm }: ExportDialogProps
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">导出 SSH 隧道</h3>
         <p className="text-xs text-gray-400 mb-4">
-          勾选要导出的隧道；私钥路径不会被导出，导入时需重新设置
+          勾选要导出的隧道；私钥路径、密码和 passphrase 都不会导出，导入后需重新填写
         </p>
 
         <label className="flex items-center gap-2 cursor-pointer select-none mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">

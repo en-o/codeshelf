@@ -23,12 +23,15 @@ use crate::error::AppResult;
 impl client::Handler for ReverseClient {
     type Error = russh::Error;
 
-    // 首版不校验 host key（与现有 ssh_tunnel 一致，作为已知限制；后续可加 known_hosts）
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_public_key: &russh::keys::ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        Ok(crate::commands::toolbox::ssh_hostkey::accept_server_key(
+            &self.ssh_host,
+            self.ssh_port,
+            server_public_key,
+        ))
     }
 
     // VPS 收到公网入站连接时，服务端反向打开一个 forwarded-tcpip 通道到这里。

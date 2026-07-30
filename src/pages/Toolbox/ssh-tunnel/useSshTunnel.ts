@@ -13,6 +13,7 @@ import {
   testSshTunnel,
   updateSshTunnel,
 } from "@/services/toolbox";
+import { startWithHostKeyTrust } from "@/services/ssh/hostKeyTrust";
 import { DEFAULT_SSH_GROUP } from "@/types/toolbox";
 import type { SshAuthMethod, SshTunnel, SshTunnelInput } from "@/types/toolbox";
 import type { AuthType, DeleteConfirmState, TestState } from "./types";
@@ -45,6 +46,8 @@ export function useSshTunnel() {
   const [formPassword, setFormPassword] = useState("");
   const [formHostAlias, setFormHostAlias] = useState("");
   const [formAutoReconnect, setFormAutoReconnect] = useState(true);
+  // 默认只监听 127.0.0.1；勾选后才绑 0.0.0.0
+  const [formExposeLan, setFormExposeLan] = useState(false);
   const [formGroup, setFormGroup] = useState(DEFAULT_SSH_GROUP);
 
   useEffect(() => {
@@ -93,6 +96,7 @@ export function useSshTunnel() {
     setFormPassword("");
     setFormHostAlias("");
     setFormAutoReconnect(true);
+    setFormExposeLan(false);
     setFormGroup(DEFAULT_SSH_GROUP);
     setEditing(null);
   }
@@ -122,6 +126,7 @@ export function useSshTunnel() {
     setFormPassword(t.auth.type === "password" ? t.auth.password : "");
     setFormHostAlias(t.auth.type === "sshConfig" ? t.auth.hostAlias : "");
     setFormAutoReconnect(t.autoReconnect ?? true);
+    setFormExposeLan(t.exposeLan === true);
     setFormGroup(t.group || DEFAULT_SSH_GROUP);
   }
 
@@ -209,6 +214,7 @@ export function useSshTunnel() {
       sshPort: Number.isNaN(sshPort) ? 22 : sshPort,
       sshUser: formSshUser.trim() || undefined,
       auth,
+      exposeLan: formExposeLan,
       autoReconnect: formAutoReconnect,
       group: formGroup.trim() || DEFAULT_SSH_GROUP,
     };
@@ -228,12 +234,14 @@ export function useSshTunnel() {
   }
 
   async function handleStart(id: string) {
+    const t = tunnels.find((x) => x.id === id);
     try {
-      await startSshTunnel(id);
+      // 首次连接时展示主机密钥指纹让用户确认；密钥变更一律拒绝（见 hostKeyTrust）
+      await startWithHostKeyTrust(t?.sshHost ?? "", t?.sshPort ?? 22, () => startSshTunnel(id));
       loadAll();
     } catch (err) {
       console.error("启动隧道失败:", err);
-      alert(`启动隧道失败: ${err}`);
+      alert(`启动隧道失败: ${typeof err === "string" ? err : err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -307,10 +315,15 @@ export function useSshTunnel() {
     }
   }
 
-  // 导出：去掉私钥文件路径（本机路径换机无效），密码 / passphrase 保留
+  // 导出：**一切秘密都不出去**。
+  // 私钥路径换机无效，密码 / passphrase 更是账户凭据 —— 用户把 JSON 发给同事、
+  // 传到网盘或贴进工单时，这些字段会一起走。导入方需要自己重新填。
   function stripForExport(auth: SshAuthMethod): SshAuthMethod {
     if (auth.type === "key") {
-      return { type: "key", keyPath: "", passphrase: auth.passphrase };
+      return { type: "key", keyPath: "", passphrase: "" };
+    }
+    if (auth.type === "password") {
+      return { type: "password", password: "" };
     }
     return auth;
   }
@@ -325,6 +338,7 @@ export function useSshTunnel() {
       sshPort: t.sshPort,
       sshUser: t.sshUser,
       auth: stripForExport(t.auth),
+      exposeLan: t.exposeLan,
       autoReconnect: t.autoReconnect,
       group: t.group || DEFAULT_SSH_GROUP,
     };
@@ -391,6 +405,7 @@ export function useSshTunnel() {
       sshPort: item.sshPort != null ? Number(item.sshPort) : undefined,
       sshUser: typeof item.sshUser === "string" && item.sshUser ? item.sshUser : undefined,
       auth,
+      exposeLan: item.exposeLan === true,
       autoReconnect: typeof item.autoReconnect === "boolean" ? item.autoReconnect : undefined,
       group: typeof item.group === "string" && item.group ? item.group : DEFAULT_SSH_GROUP,
     };
@@ -491,6 +506,8 @@ export function useSshTunnel() {
       formPassword,
       formHostAlias,
       formAutoReconnect,
+      formExposeLan,
+      onFormExposeLanChange: setFormExposeLan,
       formGroup,
       sshConfigHosts,
       localIps,

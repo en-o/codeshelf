@@ -82,6 +82,7 @@ pub async fn create_server(input: ServerConfigInput) -> AppResult<ServerConfig> 
         url_prefix,
         index_page,
         proxies: input.proxies.unwrap_or_default(),
+        expose_lan: input.expose_lan.unwrap_or(false),
         status: "stopped".to_string(),
         created_at: current_time(),
     };
@@ -366,6 +367,7 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> AppRe
             server.url_prefix = url_prefix;
             server.index_page = index_page;
             server.proxies = input.proxies.unwrap_or_default();
+            server.expose_lan = input.expose_lan.unwrap_or(false);
         }
     }
 

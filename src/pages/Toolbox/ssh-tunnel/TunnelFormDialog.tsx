@@ -18,6 +18,7 @@ interface TunnelFormDialogProps {
   formPassword: string;
   formHostAlias: string;
   formAutoReconnect: boolean;
+  formExposeLan: boolean;
   formGroup: string;
   sshConfigHosts: string[];
   localIps: string[];
@@ -35,6 +36,7 @@ interface TunnelFormDialogProps {
   onFormPasswordChange: (v: string) => void;
   onFormHostAliasChange: (v: string) => void;
   onFormAutoReconnectChange: (v: boolean) => void;
+  onFormExposeLanChange: (v: boolean) => void;
   onFormGroupChange: (v: string) => void;
   onSelectKey: () => void;
   onCancel: () => void;
@@ -67,6 +69,7 @@ export function TunnelFormDialog(props: TunnelFormDialogProps) {
     formPassword,
     formHostAlias,
     formAutoReconnect,
+    formExposeLan,
     formGroup,
     sshConfigHosts,
     localIps,
@@ -84,6 +87,7 @@ export function TunnelFormDialog(props: TunnelFormDialogProps) {
     onFormPasswordChange,
     onFormHostAliasChange,
     onFormAutoReconnectChange,
+    onFormExposeLanChange,
     onFormGroupChange,
     onSelectKey,
     onCancel,
@@ -161,11 +165,20 @@ export function TunnelFormDialog(props: TunnelFormDialogProps) {
               placeholder="如: 16379"
             />
             <p className="text-xs text-gray-400 mt-1">
-              监听 <code className="font-mono">0.0.0.0</code>：本机用{" "}
-              <code className="font-mono">127.0.0.1:{formLocalPort || "端口"}</code> 连接；
-              同局域网其他电脑可用 <span className="font-mono">本机IP:{formLocalPort || "端口"}</span> 共享连接。
+              {formExposeLan ? (
+                <>
+                  监听 <code className="font-mono">0.0.0.0</code>：本机用{" "}
+                  <code className="font-mono">127.0.0.1:{formLocalPort || "端口"}</code> 连接；
+                  同局域网其他电脑可用 <span className="font-mono">本机IP:{formLocalPort || "端口"}</span> 共享连接。
+                </>
+              ) : (
+                <>
+                  监听 <code className="font-mono">127.0.0.1</code>：仅本机可连接。
+                  需要让手机 / 同事访问时，勾选下方「本地端口对局域网开放」。
+                </>
+              )}
             </p>
-            {localIps.length > 0 && (
+            {formExposeLan && localIps.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {localIps.map((ip) => (
                   <span
@@ -339,7 +352,8 @@ export function TunnelFormDialog(props: TunnelFormDialogProps) {
             )}
 
             <p className="text-xs text-amber-500 dark:text-amber-400 mt-3">
-              ⚠ 私钥 passphrase、密码本地明文存储；首版未做 known_hosts 校验
+              ⚠ 私钥 passphrase、密码在本机明文存储（导出时不会带出）；
+              首次连接会展示主机密钥指纹，请核对后再信任
             </p>
           </div>
 
@@ -355,6 +369,27 @@ export function TunnelFormDialog(props: TunnelFormDialogProps) {
                 断线自动重连
               </span>
               <span className="text-xs text-gray-400">网络切换 / 休眠恢复后自动重建隧道</span>
+            </label>
+
+            {/* 本地监听范围：默认只有本机能用这条隧道。
+                以前一律绑 0.0.0.0 却显示 127.0.0.1，等于把远端服务转发给了整个网段。 */}
+            <label className="flex items-start gap-2 cursor-pointer select-none mt-3">
+              <input
+                type="checkbox"
+                checked={formExposeLan}
+                onChange={(e) => onFormExposeLanChange(e.target.checked)}
+                className="w-4 h-4 mt-0.5 accent-emerald-500"
+              />
+              <span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  本地端口对局域网开放
+                </span>
+                <span className="block text-xs text-gray-400 mt-0.5">
+                  {formExposeLan
+                    ? "将监听 0.0.0.0 —— 同一网络下任何设备都能通过这条隧道访问远端服务"
+                    : "当前只监听 127.0.0.1，仅本机可用（推荐）"}
+                </span>
+              </span>
             </label>
           </div>
         </div>

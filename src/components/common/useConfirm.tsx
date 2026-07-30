@@ -44,16 +44,22 @@ function emit(p: PendingConfirm | null) {
   for (const l of listeners) l(p);
 }
 
+/**
+ * 非 hook 版本，供 service/工具函数在组件外调用（同一个 `<ConfirmHost />`）。
+ * 组件里请用 `useConfirm()`。
+ */
+export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    // 同一时间只允许一个 confirm；若已经有挂起的，拒绝旧的
+    if (current) {
+      current.resolve(false);
+    }
+    emit({ options, resolve });
+  });
+}
+
 export function useConfirm() {
-  return useCallback((options: ConfirmOptions) => {
-    return new Promise<boolean>((resolve) => {
-      // 同一时间只允许一个 confirm；若已经有挂起的，拒绝旧的
-      if (current) {
-        current.resolve(false);
-      }
-      emit({ options, resolve });
-    });
-  }, []);
+  return useCallback(confirmDialog, []);
 }
 
 /**

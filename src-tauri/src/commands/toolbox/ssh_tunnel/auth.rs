@@ -101,9 +101,19 @@ pub(super) async fn connect_and_authenticate(
         effective_port
     );
 
-    let mut session = client::connect(config, (effective_host.as_str(), effective_port), SshClient)
+    let handler = SshClient {
+        host: effective_host.clone(),
+        port: effective_port,
+    };
+    let mut session = client::connect(config, (effective_host.as_str(), effective_port), handler)
         .await
-        .map_err(|e| crate::error::AppError::from(format!("SSH 连接失败: {}", e)))?;
+        .map_err(|e| {
+            crate::error::AppError::from(crate::commands::toolbox::ssh_hostkey::describe_connect_error(
+                &effective_host,
+                effective_port,
+                &e.to_string(),
+            ))
+        })?;
 
     let success = match &tunnel.auth {
         SshAuthMethod::Password { password } => session

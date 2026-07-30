@@ -62,6 +62,7 @@ pub async fn add_ssh_tunnel(input: SshTunnelInput) -> AppResult<SshTunnel> {
         ssh_port: input.ssh_port.unwrap_or(22),
         ssh_user: input.ssh_user.unwrap_or_default(),
         auth: input.auth,
+        expose_lan: input.expose_lan.unwrap_or(false),
         status: "stopped".to_string(),
         connections: 0,
         bytes_in: 0,
@@ -121,6 +122,7 @@ pub async fn update_ssh_tunnel(tunnel_id: String, input: SshTunnelInput) -> AppR
             t.ssh_port = input.ssh_port.unwrap_or(22);
             t.ssh_user = input.ssh_user.unwrap_or_default();
             t.auth = input.auth;
+            t.expose_lan = input.expose_lan.unwrap_or(false);
             t.auto_reconnect = input.auto_reconnect.unwrap_or(true);
             t.group = input
                 .group
@@ -250,12 +252,14 @@ pub async fn start_ssh_tunnel(tunnel_id: String) -> AppResult<()> {
         let local_port = tunnel.local_port;
         let remote_host = tunnel.remote_host.clone();
         let remote_port = tunnel.remote_port;
+        let expose_lan = tunnel.expose_lan;
         tokio::spawn(async move {
             if let Err(e) = run_tunnel_server(
                 id.clone(),
                 local_port,
                 remote_host,
                 remote_port,
+                expose_lan,
                 shared,
                 controller,
             )

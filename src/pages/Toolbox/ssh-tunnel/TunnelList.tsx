@@ -124,7 +124,7 @@ export function TunnelList({ tunnels, copiedId, groups, callbacks }: TunnelListP
                         : "text-gray-400"
                   }`}
                 >
-                  127.0.0.1:{t.localPort}
+                  {t.exposeLan ? "0.0.0.0" : "127.0.0.1"}:{t.localPort}
                 </span>
                 <button
                   onClick={() => callbacks.onCopyLocal(t)}

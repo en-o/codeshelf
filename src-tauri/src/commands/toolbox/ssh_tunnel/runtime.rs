@@ -27,12 +27,15 @@ pub(super) async fn run_tunnel_server(
     local_port: u16,
     remote_host: String,
     remote_port: u16,
+    expose_lan: bool,
     shared: SharedHandle,
     controller: Arc<SshTunnelController>,
 ) -> AppResult<()> {
-    let addr: std::net::SocketAddr = format!("0.0.0.0:{}", local_port)
-        .parse()
-        .map_err(|e| crate::error::AppError::from(format!("解析地址失败: {}", e)))?;
+    // 默认只绑 loopback：以前一律 0.0.0.0，整个局域网都能借这条隧道访问远端服务
+    let addr = std::net::SocketAddr::from((
+        crate::commands::toolbox::listen_ip(expose_lan),
+        local_port,
+    ));
 
     let socket = Socket::new(Domain::IPV4, Type::STREAM, None)
         .map_err(|e| crate::error::AppError::from(format!("创建 socket 失败: {}", e)))?;

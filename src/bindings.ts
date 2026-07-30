@@ -894,6 +894,32 @@ async updateForwardRule(ruleId: string, input: ForwardRuleInput) : Promise<Resul
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * 探测主机密钥并返回指纹与状态。不发送任何凭据。
+ */
+async sshProbeHostKey(host: string, port: number) : Promise<Result<SshHostKeyInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ssh_probe_host_key", { host, port }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 把主机密钥写入 `~/.ssh/known_hosts`。
+ * 
+ * 必须带上用户在界面上看到的那个指纹：这里重新探测一次并比对，
+ * 避免"展示 A 的指纹、信任了 B 的密钥"。
+ * 已记录但发生变更的主机不走这里 —— 变更必须由用户在 known_hosts 里显式清除。
+ */
+async sshTrustHostKey(host: string, port: number, expectedFingerprint: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ssh_trust_host_key", { host, port, expectedFingerprint }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async addSshTunnel(input: SshTunnelInput) : Promise<Result<SshTunnel, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_ssh_tunnel", { input }) };
@@ -3195,7 +3221,11 @@ export type ForwardRule = { id: string; name: string; localPort: number; remoteH
 /**
  * 文档路径，如 "doc.html" 或 "swagger-ui.html"，用于快速访问
  */
-docPath: string | null; status?: string; connections?: number; bytesIn?: number; bytesOut?: number; createdAt: string }
+docPath: string | null; 
+/**
+ * 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
+ */
+exposeLan?: boolean; status?: string; connections?: number; bytesIn?: number; bytesOut?: number; createdAt: string }
 /**
  * 创建转发规则的输入
  */
@@ -3203,7 +3233,11 @@ export type ForwardRuleInput = { name: string; localPort: number; remoteHost: st
 /**
  * 文档路径，如 "doc.html" 或 "swagger-ui.html"
  */
-docPath: string | null }
+docPath: string | null; 
+/**
+ * 对局域网开放；缺省 false（只绑 loopback）
+ */
+exposeLan?: boolean | null }
 /**
  * 转发统计
  */
@@ -3435,7 +3469,11 @@ indexPage: string | null;
 /**
  * 多个代理规则
  */
-proxies: ProxyConfig[]; status?: string; createdAt: string }
+proxies: ProxyConfig[]; 
+/**
+ * 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
+ */
+exposeLan?: boolean; status?: string; createdAt: string }
 /**
  * 创建服务的输入
  */
@@ -3451,7 +3489,11 @@ indexPage: string | null;
 /**
  * 多个代理规则
  */
-proxies: ProxyConfig[] | null }
+proxies: ProxyConfig[] | null; 
+/**
+ * 对局域网开放；缺省 false（只绑 loopback）
+ */
+exposeLan?: boolean | null }
 /**
  * 服务运行状态
  */
@@ -3500,6 +3542,10 @@ export type ShortcutInput = { category: string | null; description: string | nul
 export type Skill = { name: string; description: string; argsHint: string | null; body: string }
 /**
  * SSH 认证方式（前端 tag 区分：key / password / sshConfig）
+ * 
+ * **不要 derive Debug**：`SshTunnel` / `ReverseTunnel` 都 derive 了 Debug，
+ * 任何一处 `{:?}` 打日志或拼错误串都会把密码和 passphrase 原样吐出来。
+ * 下面手写一个只暴露形状、不暴露内容的实现。
  */
 export type SshAuthMethod = 
 /**
@@ -3514,6 +3560,11 @@ export type SshAuthMethod =
  * 读取 ~/.ssh/config 的 Host 别名
  */
 { type: "sshConfig"; hostAlias: string }
+export type SshHostKeyInfo = { 
+/**
+ * "known" | "unknown" | "changed"
+ */
+status: string; fingerprint: string; algorithm: string; host: string; port: number }
 /**
  * SSH 隧道规则
  */
@@ -3545,7 +3596,11 @@ sshUser?: string;
 /**
  * 认证方式
  */
-auth: SshAuthMethod; status?: string; connections?: number; bytesIn?: number; bytesOut?: number; lastError?: string | null; 
+auth: SshAuthMethod; 
+/**
+ * 本地监听口对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
+ */
+exposeLan?: boolean; status?: string; connections?: number; bytesIn?: number; bytesOut?: number; lastError?: string | null; 
 /**
  * 断线后自动重连（网络切换/休眠恢复）；缺省开启
  */
@@ -3562,6 +3617,10 @@ group?: string; createdAt: string }
  * 创建/更新 SSH 隧道的输入
  */
 export type SshTunnelInput = { name: string; localPort: number; remoteHost: string; remotePort: number; sshHost: string; sshPort: number | null; sshUser: string | null; auth: SshAuthMethod; 
+/**
+ * 本地监听口对局域网开放；缺省 false（只绑 loopback）
+ */
+exposeLan?: boolean | null; 
 /**
  * 断线后自动重连；缺省开启
  */

@@ -105,6 +105,8 @@ export interface ForwardRule {
   remotePort: number;
   /** 文档路径，如 "doc.html" 或 "swagger-ui.html" */
   docPath?: string;
+  /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
+  exposeLan?: boolean;
   status: "running" | "stopped";
   connections: number;
   bytesIn: number;
@@ -119,6 +121,8 @@ export interface ForwardRuleInput {
   remotePort: number;
   /** 文档路径，如 "doc.html" 或 "swagger-ui.html" */
   docPath?: string;
+  /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
+  exposeLan?: boolean;
 }
 
 export interface ForwardStats {
@@ -148,6 +152,8 @@ export interface SshTunnel {
   sshPort: number;
   sshUser: string;
   auth: SshAuthMethod;
+  /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
+  exposeLan?: boolean;
   status: "running" | "stopped" | "reconnecting";
   connections: number;
   bytesIn: number;
@@ -171,6 +177,8 @@ export interface SshTunnelInput {
   sshPort?: number;
   sshUser?: string;
   auth: SshAuthMethod;
+  /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
+  exposeLan?: boolean;
   autoReconnect?: boolean;
   /** 所属分组；为空时落入「默认分组」 */
   group?: string;
@@ -265,6 +273,8 @@ export interface ServerConfig {
   indexPage?: string;
   /** 多个代理规则 */
   proxies: ProxyConfig[];
+  /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
+  exposeLan?: boolean;
   status: "running" | "stopped";
   createdAt: string;
 }
@@ -282,6 +292,8 @@ export interface ServerConfigInput {
   indexPage?: string | null;
   /** 多个代理规则 */
   proxies?: ProxyConfig[];
+  /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
+  exposeLan?: boolean;
 }
 
 // ============== Docker 镜像 ==============

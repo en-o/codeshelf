@@ -39,6 +39,8 @@ export function useLocalService() {
   const [formCors, setFormCors] = useState(true);
   const [formGzip, setFormGzip] = useState(true);
   const [formProxies, setFormProxies] = useState<ProxyConfig[]>([]);
+  // 默认只监听 127.0.0.1；勾选后才绑 0.0.0.0（静态服务与端口转发共用这一个状态位）
+  const [formExposeLan, setFormExposeLan] = useState(false);
 
   const [editingRule, setEditingRule] = useState<ForwardRule | null>(null);
   const [formLocalPort, setFormLocalPort] = useState("");
@@ -77,6 +79,7 @@ export function useLocalService() {
     setFormCors(true);
     setFormGzip(true);
     setFormProxies([]);
+    setFormExposeLan(false);
     setFormLocalPort("");
     setFormRemoteHost("");
     setFormRemotePort("");
@@ -141,6 +144,7 @@ export function useLocalService() {
     setFormCors(server.cors);
     setFormGzip(server.gzip);
     setFormProxies(server.proxies || []);
+    setFormExposeLan(server.exposeLan === true);
     setShowAddDialog(true);
   }
 
@@ -152,6 +156,7 @@ export function useLocalService() {
     setFormRemoteHost(rule.remoteHost);
     setFormRemotePort(rule.remotePort.toString());
     setFormDocPath(rule.docPath || "");
+    setFormExposeLan(rule.exposeLan === true);
     setShowAddDialog(true);
   }
 
@@ -180,6 +185,7 @@ export function useLocalService() {
       urlPrefix: formUrlPrefix.trim() || "/",
       indexPage: formIndexPage.trim() || null,
       proxies: validProxies.length > 0 ? validProxies : [],
+      exposeLan: formExposeLan,
     };
 
     try {
@@ -210,6 +216,7 @@ export function useLocalService() {
       remoteHost: formRemoteHost.trim(),
       remotePort,
       docPath: formDocPath.trim() || undefined,
+      exposeLan: formExposeLan,
     };
 
     try {
@@ -453,6 +460,8 @@ export function useLocalService() {
       onFormRemoteHostChange: setFormRemoteHost,
       onFormRemotePortChange: setFormRemotePort,
       onFormDocPathChange: setFormDocPath,
+      formExposeLan,
+      onFormExposeLanChange: setFormExposeLan,
       onSelectDir: handleSelectDir,
       onAddProxy: addProxyRule,
       onUpdateProxy: updateProxyRule,

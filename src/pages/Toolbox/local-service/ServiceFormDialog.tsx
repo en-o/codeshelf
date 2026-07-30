@@ -19,6 +19,7 @@ interface ServiceFormDialogProps {
   formRemoteHost: string;
   formRemotePort: string;
   formDocPath: string;
+  formExposeLan: boolean;
   onServiceTypeChange: (type: ServiceType) => void;
   onFormNameChange: (value: string) => void;
   onFormPortChange: (value: string) => void;
@@ -31,6 +32,7 @@ interface ServiceFormDialogProps {
   onFormRemoteHostChange: (value: string) => void;
   onFormRemotePortChange: (value: string) => void;
   onFormDocPathChange: (value: string) => void;
+  onFormExposeLanChange: (value: boolean) => void;
   onSelectDir: () => void;
   onAddProxy: () => void;
   onUpdateProxy: (index: number, field: "prefix" | "target", value: string) => void;
@@ -55,6 +57,7 @@ export function ServiceFormDialog({
   formRemoteHost,
   formRemotePort,
   formDocPath,
+  formExposeLan,
   onServiceTypeChange,
   onFormNameChange,
   onFormPortChange,
@@ -67,6 +70,7 @@ export function ServiceFormDialog({
   onFormRemoteHostChange,
   onFormRemotePortChange,
   onFormDocPathChange,
+  onFormExposeLanChange,
   onSelectDir,
   onAddProxy,
   onUpdateProxy,
@@ -286,6 +290,27 @@ export function ServiceFormDialog({
               </div>
             </>
           )}
+
+          {/* 监听范围：默认只有本机能访问。以前一律绑 0.0.0.0 却显示 127.0.0.1，
+              用户在咖啡厅 Wi-Fi 上把内部服务/目录暴露给了整个网段还不知道。 */}
+          <div className="rounded-md border border-border p-3">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={formExposeLan}
+                onChange={(e) => onFormExposeLanChange(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium">对局域网开放</span>
+                <span className="block text-xs text-gray-400 mt-1">
+                  {formExposeLan
+                    ? "将监听 0.0.0.0 —— 同一网络下的任何设备都能访问。请确认当前网络可信。"
+                    : "当前只监听 127.0.0.1，仅本机可访问（推荐）。需要手机/同事访问时才勾选。"}
+                </span>
+              </span>
+            </label>
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 mt-6">

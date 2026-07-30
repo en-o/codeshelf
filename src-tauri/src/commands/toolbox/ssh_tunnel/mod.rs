@@ -113,17 +113,25 @@ impl SshTunnelController {
     }
 }
 
-/// russh 客户端 handler - 接受任意 host key（首版不校验 known_hosts）
-pub(super) struct SshClient;
+/// russh 客户端 handler。主机密钥按 `~/.ssh/known_hosts` 校验，
+/// 策略与反向隧道共用（见 `super::ssh_hostkey`）。
+pub(super) struct SshClient {
+    pub(super) host: String,
+    pub(super) port: u16,
+}
 
 impl client::Handler for SshClient {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_public_key: &russh::keys::ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        Ok(super::ssh_hostkey::accept_server_key(
+            &self.host,
+            self.port,
+            server_public_key,
+        ))
     }
 }
 

@@ -146,11 +146,15 @@ pub(super) async fn run_server(
         app = app.layer(CompressionLayer::new());
     }
 
-    // 绑定地址
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    // 绑定地址：默认只绑 loopback，勾了「对局域网开放」才绑 0.0.0.0
+    let addr = SocketAddr::from((
+        crate::commands::toolbox::listen_ip(config.expose_lan),
+        config.port,
+    ));
 
     log::info!(
-        "静态服务启动: http://127.0.0.1:{}{}",
+        "静态服务启动: http://{}:{}{}",
+        crate::commands::toolbox::listen_display_host(config.expose_lan),
         config.port,
         if config.url_prefix == "/" {
             "".to_string()
