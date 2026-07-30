@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, GitBranch, RefreshCw, CloudUpload, FolderOpen, Edit2, FileText, Loader2, GitCommit, Copy, ArrowRightLeft, ArrowLeft } from "lucide-react";
 import { MacWindowControls } from "@/components/layout/MacWindowControls";
 import { CategorySelector } from "./CategorySelector";
@@ -39,6 +39,12 @@ interface ProjectDetailPanelProps {
 }
 
 export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject }: ProjectDetailPanelProps) {
+  // 每次切项目自增。所有异步 Git 结果落回 state 之前都要核对这个序号 ——
+  // 否则慢仓库的响应会晚到并覆盖新项目的数据，而操作 handler 已经指向新路径了，
+  // 结果就是拿旧仓库的 commit hash / 文件名去对新仓库做 discard / revert / cherry-pick。
+  const loadTokenRef = useRef(0);
+  const isStale = (token: number) => loadTokenRef.current !== token;
+
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -127,7 +133,13 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
   }, [project.id, project.tags, project.labels]);
 
   useEffect(() => {
-    loadProjectDetails();
+    // 立刻清空旧仓库数据：切换瞬间界面上不能还留着上一个仓库的状态和提交列表
+    const token = ++loadTokenRef.current;
+    setGitStatus(null);
+    setCommits([]);
+    setRemotes([]);
+    setCurrentRemote(null);
+    loadProjectDetails(token);
   }, [project.path, historyLimit]);
 
   // 当远程列表加载完成后，设置默认当前远程
@@ -155,16 +167,18 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
       return;
     }
 
+    const token = loadTokenRef.current;
     const timer = window.setTimeout(async () => {
       try {
         setLoading(true);
         const result = await searchCommits(project.path, query, "message", 50);
+        if (isStale(token)) return;
         setCommits(result);
       } catch (error) {
         console.error("Failed to search commits:", error);
-        setCommits([]);
+        if (!isStale(token)) setCommits([]);
       } finally {
-        setLoading(false);
+        if (!isStale(token)) setLoading(false);
       }
     }, 250);
 
@@ -173,30 +187,36 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
 
   async function loadCommitHistory() {
     if (!gitStatus?.branch) return;
+    const token = loadTokenRef.current;
     try {
       const commitHistory = await getCommitHistory(project.path, historyLimit);
+      if (isStale(token)) return;
       setCommits(commitHistory);
     } catch (error) {
       console.error("Failed to load commit history:", error);
       try {
         const localCommits = await getCommitHistory(project.path, historyLimit);
+        if (isStale(token)) return;
         setCommits(localCommits);
       } catch {
-        setCommits([]);
+        if (!isStale(token)) setCommits([]);
       }
     }
   }
 
   async function loadDivergenceCommits(view: "ahead" | "behind") {
+    const token = loadTokenRef.current;
     try {
       setLoading(true);
       setSearchQuery("");
       setCommitView(view);
       const range = view === "ahead" ? "@{upstream}..HEAD" : "HEAD..@{upstream}";
       const result = await getCommitHistory(project.path, historyLimit, range);
+      if (isStale(token)) return;
       setCommits(result);
     } catch (error) {
       console.error("Failed to load divergence commits:", error);
+      if (isStale(token)) return;
       setCommits([]);
       showToast("error", view === "ahead" ? "读取待推送提交失败" : "读取待拉取提交失败", "当前分支可能没有设置 upstream，或需要先执行 git fetch");
     } finally {
@@ -209,22 +229,24 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
     await loadCommitHistory();
   }
 
-  async function loadProjectDetails() {
+  async function loadProjectDetails(token = loadTokenRef.current) {
     try {
       setLoading(true);
       const [status, remoteList] = await Promise.all([
         getGitStatus(project.path),
         getRemotes(project.path),
       ]);
+      if (isStale(token)) return;
       setGitStatus(status);
       setRemotes(remoteList);
       if (commitView !== "history") {
         const range = commitView === "ahead" ? "@{upstream}..HEAD" : "HEAD..@{upstream}";
         try {
           const commitHistory = await getCommitHistory(project.path, historyLimit, range);
+          if (isStale(token)) return;
           setCommits(commitHistory);
         } catch {
-          setCommits([]);
+          if (!isStale(token)) setCommits([]);
         }
         return;
       }
@@ -232,20 +254,22 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
       if (status.branch) {
         try {
           const commitHistory = await getCommitHistory(project.path, historyLimit);
+          if (isStale(token)) return;
           setCommits(commitHistory);
         } catch {
           try {
             const localCommits = await getCommitHistory(project.path, historyLimit);
+            if (isStale(token)) return;
             setCommits(localCommits);
           } catch {
-            setCommits([]);
+            if (!isStale(token)) setCommits([]);
           }
         }
       }
     } catch (error) {
       console.error("Failed to load project details:", error);
     } finally {
-      setLoading(false);
+      if (!isStale(token)) setLoading(false);
     }
   }
 
@@ -715,7 +739,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
         <AddRemoteModal
           projectPath={project.path}
           onClose={() => setShowAddRemoteModal(false)}
-          onSuccess={loadProjectDetails}
+          onSuccess={() => loadProjectDetails()}
         />
       )}
 

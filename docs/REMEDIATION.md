@@ -32,12 +32,12 @@
 所有 P0/P1 都是发布前置条件，不应带着未验收的 P1 发版。建议按以下顺序推进：
 
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
-2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-020~~ 已完成，
-   AUD-007 部分完成；剩 AUD-016～AUD-019（前端竞态）、AUD-045～AUD-050。
+2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020~~ 已完成，
+   AUD-007 部分完成；剩 AUD-045～AUD-050。
 3. **数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
 
-> 进度：13 / 61 已整改（AUD-001、002、003、004、005、006、008、009、011、020、039、044），
+> 进度：17 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -421,7 +421,16 @@
 
 ### AUD-016 · P1 · 项目切换时隔离 Git 请求和破坏性操作
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 实现说明：
+  - `ProjectDetailPanel` 增加 `loadTokenRef`：每次切项目自增，所有异步 Git 结果落回 state 前
+    先核对序号（`isStale(token)`）—— 慢仓库的响应晚到时直接丢弃，不会覆盖新项目的数据。
+    覆盖 `loadProjectDetails` / `loadCommitHistory` / `loadDivergenceCommits` / 搜索防抖四处。
+  - 切换的**同一个 effect 里同步清空** gitStatus / commits / remotes / currentRemote，
+    界面上不会有一帧还挂着上一个仓库的状态。
+  - 破坏性操作因此自动失效：`handlePull` / `handlePush` 的 `if (!gitStatus || !currentRemote)`
+    直接 return，revert / cherry-pick / discard 也没有旧 commit 和旧文件名可点 ——
+    不需要在每个 handler 里各加一份判断。
 - 风险：详情面板复用旧的 gitStatus、commit、remote 等数据，而操作 handler 已切换到新项目路径；
   快速切换后可能把旧 commit hash 或文件名用于新仓库。
 - 涉及位置：
@@ -433,7 +442,15 @@
 
 ### AUD-017 · P1 · Chat 流事件必须先监听后启动请求
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 实现说明：
+  - `useChatStream` 与 `ChatOverlay` 的监听器都改成**挂载时注册一次**，按 `requestIdRef`
+    过滤，不再 `useEffect(..., [requestId])`。原写法里 `setRequestId` 之后立刻 invoke，
+    而 effect 要等下一次渲染、`listen()` 本身还是异步的 —— 快速失败、非流式秒回、
+    本地模型都可能抢在监听器之前到达。
+  - 新增 `listenerReadyRef`：`start()` 在 invoke **之前** `await` 它，保证监听器真正就位。
+  - 过滤用 ref 而不是闭包里的 state，取消/切换后旧请求的事件会被丢弃。
+  - `useChatStream` 里那个只用于触发 effect 的 `requestId` state 一并删掉了。
 - 风险：前端先启动请求，React effect 稍后才异步注册监听器。快速 error/done 或本地快速响应可先到，
   导致内容丢失、`streaming=true` 卡死或工具循环 Promise 永不结束。
 - 涉及位置：
@@ -445,7 +462,16 @@
 
 ### AUD-018 · P1 · 会话选中 ID、内容和流请求保持一致
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 实现说明：
+  - **切会话先取消在途请求**：`ChatOverlay.handleSelectSession` 与
+    `ApiChat.handleSelectSession` 都在切换前 `chatCancel` / `stop()` 并复位流状态。
+    以前旧流会继续送 delta，而 `loadSession` 又因为 `streamingRef` 为 true 跳过加载，
+    表现是「侧栏选中 B、正文还是 A、streaming 卡住」。
+  - **置顶不再改当前会话**：`handleTogglePin` 原来无条件走 `persistSession`，
+    而它内部会 `setActiveSession(saved)` —— 置顶别人的会话会把正文换成那一条，
+    `activeSessionId` 却还指着原来的。现在只有目标就是当前会话时才更新 activeSession，
+    其余只 `syncSummary`。
 - 风险：API Chat/供应商验证页流式过程中允许切会话，旧请求可覆盖新会话；置顶非当前会话又会
   无条件替换 activeSession，但不更新 activeSessionId。
 - 涉及位置：
@@ -459,7 +485,17 @@
 
 ### AUD-019 · P1 · 在任何异步准备前建立单请求锁
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 实现说明：
+  - 三处各加一把**同步 ref 锁**，锁在任何 `await` 之前建立、`finally` 释放：
+    `Chat/index.tsx` 的 `withSendLock`（handleSend / 编辑重发 / 重新生成 / 重试四个入口共用）、
+    `useApiChatOrchestration` 的 `withRunLock`（send / regenerate / retryUser / retryFromError）、
+    `ChatOverlay` 的 `sendLockRef`。
+  - 根因是 `loading` / `streaming` 都是 state：`handleSend` 在 `setLoading(true)` 之前
+    先 `await` 了 URL 抓取（可能几秒），两次点击 / 两次 Enter 会双双通过判断，
+    然后覆盖同一份 requestId、buffer 和 callbacks，并且重复计费。ref 在同一个事件循环里就可见。
+  - `useChatStream.start` 里再加一道兜底：`streamingRef.current` 为真时直接拒绝，
+    防止将来新增入口时又漏一处。
 - 风险：普通 Chat 在抓取 URL 上下文后才进入 loading；API Chat 与验证页的 Enter 路径也没有统一服从
   loading。快速重复发送会覆盖共享 requestId、buffer 和 callbacks，并可能重复计费。
 - 涉及位置：

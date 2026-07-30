@@ -62,6 +62,10 @@ export function ChatOverlay({ providers, onClose }: ChatOverlayProps) {
   const activeSessionRef = useRef<ChatSession | null>(null);
   const prevStreamingRef = useRef(false);
   const streamingRef = useRef(false);
+  const streamRequestIdRef = useRef<string | null>(null);
+  const listenerReadyRef = useRef<Promise<void> | null>(null);
+  // single-flight：锁同步建立，连续两次点击/Enter 之间没有渲染，state 判断会双双落空
+  const sendLockRef = useRef(false);
 
   const modelOptions = useMemo(() => buildModelOptions(providers), [providers]);
   const defaultKey = useMemo(() => getDefaultOptionKey(providers), [providers]);
@@ -131,18 +135,21 @@ export function ChatOverlay({ providers, onClose }: ChatOverlayProps) {
     loadSession();
   }, [activeSessionId]);
 
+  // 监听器挂载时注册一次，按 requestIdRef 过滤。
+  // 原来 keyed on streamRequestId：setState 之后立刻 invoke，effect 要等下一次渲染，
+  // `listen()` 本身还是异步的 —— 快速失败 / 非流式秒回会抢在监听器之前到达。
   useEffect(() => {
-    if (!streamRequestId) return;
     let unlisten: (() => void) | null = null;
     let cancelled = false;
-    listen<{ requestId: string; delta?: string; done: boolean; error?: string; thinkingDelta?: string }>("chat-stream", (event) => {
+    listenerReadyRef.current = listen<{ requestId: string; delta?: string; done: boolean; error?: string; thinkingDelta?: string }>("chat-stream", (event) => {
       if (cancelled) return;
-      if (event.payload.requestId !== streamRequestId) return;
+      if (event.payload.requestId !== streamRequestIdRef.current) return;
       if (event.payload.error) {
         showToast("error", event.payload.error);
         setStreaming(false);
         streamingRef.current = false;
         setStreamRequestId(null);
+        streamRequestIdRef.current = null;
         setThinkingVisible(false);
         streamBufferRef.current = "";
         return;
@@ -176,6 +183,7 @@ export function ChatOverlay({ providers, onClose }: ChatOverlayProps) {
         setStreaming(false);
         streamingRef.current = false;
         setStreamRequestId(null);
+        streamRequestIdRef.current = null;
         setThinkingVisible(false);
         streamBufferRef.current = "";
         setExpandedThinkingIds((prev) => {
@@ -195,8 +203,9 @@ export function ChatOverlay({ providers, onClose }: ChatOverlayProps) {
     return () => {
       cancelled = true;
       if (unlisten) unlisten();
+      listenerReadyRef.current = null;
     };
-  }, [streamRequestId]);
+  }, []);
 
   activeSessionRef.current = activeSession;
 
@@ -251,6 +260,18 @@ export function ChatOverlay({ providers, onClose }: ChatOverlayProps) {
 
   async function handleSelectSession(sessionId: string) {
     if (sessionId === activeSessionId || sessionLoading) return;
+    // 切会话前先取消在途请求：否则旧流的 delta 会继续到达，
+    // loadSession 又因为 streamingRef 为 true 而跳过加载，
+    // 结果是「侧栏选中 B、正文还挂着 A 的内容、streaming 卡住」。
+    if (streamingRef.current && streamRequestIdRef.current) {
+      await chatCancel(streamRequestIdRef.current).catch(() => {});
+      streamingRef.current = false;
+      setStreaming(false);
+      setStreamRequestId(null);
+      streamRequestIdRef.current = null;
+      streamBufferRef.current = "";
+      thinkingBufferRef.current = "";
+    }
     setActiveSessionId(sessionId);
     setInput("");
     setThinkingBuffer("");
@@ -406,6 +427,17 @@ export function ChatOverlay({ providers, onClose }: ChatOverlayProps) {
 
   async function handleSend() {
     if (!activeSession || !selected || (!input.trim() && attachedFiles.filter((f) => f.enabled).length === 0) || streaming) return;
+    if (sendLockRef.current) return;
+    sendLockRef.current = true;
+    try {
+      await sendInner();
+    } finally {
+      sendLockRef.current = false;
+    }
+  }
+
+  async function sendInner() {
+    if (!activeSession || !selected) return;
     const userInput = input.trim();
     const enabledFiles = attachedFiles.filter((f) => f.enabled);
 
@@ -437,12 +469,15 @@ export function ChatOverlay({ providers, onClose }: ChatOverlayProps) {
       setActiveSession(saved);
       const requestId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       setStreamRequestId(requestId);
+      streamRequestIdRef.current = requestId;
       setStreaming(true);
       streamingRef.current = true;
       streamBufferRef.current = "";
       thinkingBufferRef.current = "";
       setThinkingBuffer("");
 
+      // 先确保监听器就位，再发请求
+      await listenerReadyRef.current;
       await chatStream({
         requestId,
         providerId: selected.providerId,

@@ -94,6 +94,24 @@ export function ChatPage() {
   activeSessionRef.current = activeSession;
   const modelSelectRef = useRef<HTMLSelectElement>(null);
   const mentionContextRef = useRef<string>("");
+  // single-flight：所有"会发起一次请求"的入口共用这一把**同步**锁。
+  //
+  // 只看 `streaming`/`loading` 这两个 state 不够：handleSend 在 setLoading(true) 之前
+  // 先 await 了 URL 抓取（可能几秒），这段时间里两次点击 / 两次 Enter 会双双通过判断，
+  // 然后覆盖同一份 requestId、buffer 和 callbacks，并且重复计费。
+  // ref 在同一个事件循环里就能看见写入，没有渲染间隙。
+  const sendLockRef = useRef(false);
+
+  /** 入口统一包一层：锁在**任何 await 之前**同步建立，finally 里释放。 */
+  async function withSendLock(fn: () => Promise<void>): Promise<void> {
+    if (sendLockRef.current) return;
+    sendLockRef.current = true;
+    try {
+      await fn();
+    } finally {
+      sendLockRef.current = false;
+    }
+  }
 
   const { streaming, thinkingBuffer, start: startStream, stop: stopStream } = useChatStream();
 
@@ -308,9 +326,14 @@ export function ChatPage() {
 
   async function handleTogglePin(target: ChatSessionSummary) {
     try {
-      const full = activeSession?.id === target.id ? activeSession : await getChatSession(target.id);
+      const isActive = activeSession?.id === target.id;
+      const full = isActive && activeSession ? activeSession : await getChatSession(target.id);
       const next: ChatSession = { ...full, pinned: !full.pinned };
-      await persistSession(next);
+      const saved = await saveChatSession(next);
+      // 置顶别人的会话**不能**改当前会话：persistSession 会 setActiveSession(saved)，
+      // 而 activeSessionId 还指着原来那条 —— 侧栏高亮、正文内容和发送目标就此分家。
+      if (isActive) setActiveSession(saved);
+      syncSummary(saved);
     } catch {
       showToast("error", "操作失败");
     }
@@ -342,30 +365,32 @@ export function ChatPage() {
   async function handleSend() {
     if (!activeSession || !selected || streaming) return;
     if (!input.trim() && pendingAttachments.length === 0) return;
-    const content = input.trim();
-    const [mentions, urls] = await Promise.all([
-      resolveMentions(content, activeSession.allowedCwd),
-      resolveUrls(content, activeSession.id),
-    ]);
-    mentionContextRef.current = [mentions, urls].filter((s) => s.trim()).join("\n\n---\n\n");
-    const userMessage = makeMessage("user", content, {
-      attachments: pendingAttachments.length ? pendingAttachments : undefined,
+    await withSendLock(async () => {
+      const content = input.trim();
+      const [mentions, urls] = await Promise.all([
+        resolveMentions(content, activeSession.allowedCwd),
+        resolveUrls(content, activeSession.id),
+      ]);
+      mentionContextRef.current = [mentions, urls].filter((s) => s.trim()).join("\n\n---\n\n");
+      const userMessage = makeMessage("user", content, {
+        attachments: pendingAttachments.length ? pendingAttachments : undefined,
+      });
+      const nextSession: ChatSession = {
+        ...activeSession,
+        providerId: selected.providerId,
+        modelId: selected.modelId,
+        messages: [...activeSession.messages, userMessage],
+      };
+      setInput("");
+      setPendingAttachments([]);
+      setLoading(true);
+      try {
+        const saved = await persistSession(nextSession);
+        await runChatRequest(saved);
+      } finally {
+        setLoading(false);
+      }
     });
-    const nextSession: ChatSession = {
-      ...activeSession,
-      providerId: selected.providerId,
-      modelId: selected.modelId,
-      messages: [...activeSession.messages, userMessage],
-    };
-    setInput("");
-    setPendingAttachments([]);
-    setLoading(true);
-    try {
-      const saved = await persistSession(nextSession);
-      await runChatRequest(saved);
-    } finally {
-      setLoading(false);
-    }
   }
 
   async function handleStop() {
@@ -417,15 +442,17 @@ export function ChatPage() {
     if (!activeSession || !selected || streaming) return;
     const idx = activeSession.messages.findIndex((m) => m.id === msg.id);
     if (idx < 0) return;
-    const appended = makeMessage("user", newContent, {
-      attachments: msg.attachments,
+    await withSendLock(async () => {
+      const appended = makeMessage("user", newContent, {
+        attachments: msg.attachments,
+      });
+      const nextSession: ChatSession = {
+        ...activeSession,
+        messages: [...activeSession.messages, appended],
+      };
+      const saved = await persistSession(nextSession);
+      await runChatRequest(saved);
     });
-    const nextSession: ChatSession = {
-      ...activeSession,
-      messages: [...activeSession.messages, appended],
-    };
-    const saved = await persistSession(nextSession);
-    await runChatRequest(saved);
   }
 
   async function handleRegenerateAssistant(msg: ChatMessage) {
@@ -434,15 +461,17 @@ export function ChatPage() {
     if (idx < 0) return;
     const prevUser = [...activeSession.messages.slice(0, idx)].reverse().find((m) => m.role === "user");
     if (!prevUser) return;
-    const appended = makeMessage("user", prevUser.content, {
-      attachments: prevUser.attachments,
+    await withSendLock(async () => {
+      const appended = makeMessage("user", prevUser.content, {
+        attachments: prevUser.attachments,
+      });
+      const nextSession: ChatSession = {
+        ...activeSession,
+        messages: [...activeSession.messages, appended],
+      };
+      const saved = await persistSession(nextSession);
+      await runChatRequest(saved);
     });
-    const nextSession: ChatSession = {
-      ...activeSession,
-      messages: [...activeSession.messages, appended],
-    };
-    const saved = await persistSession(nextSession);
-    await runChatRequest(saved);
   }
 
   async function handleRetryUserMessage(msg: ChatMessage) {
@@ -450,15 +479,17 @@ export function ChatPage() {
     if (msg.role !== "user") return;
     const idx = activeSession.messages.findIndex((m) => m.id === msg.id);
     if (idx < 0) return;
-    const appended = makeMessage("user", msg.content, {
-      attachments: msg.attachments,
+    await withSendLock(async () => {
+      const appended = makeMessage("user", msg.content, {
+        attachments: msg.attachments,
+      });
+      const nextSession: ChatSession = {
+        ...activeSession,
+        messages: [...activeSession.messages, appended],
+      };
+      const saved = await persistSession(nextSession);
+      await runChatRequest(saved);
     });
-    const nextSession: ChatSession = {
-      ...activeSession,
-      messages: [...activeSession.messages, appended],
-    };
-    const saved = await persistSession(nextSession);
-    await runChatRequest(saved);
   }
 
   async function handleClearMessages() {

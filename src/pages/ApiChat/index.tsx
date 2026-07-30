@@ -249,6 +249,9 @@ export function ApiChatPage() {
 
   async function handleSelectSession(id: string) {
     if (id === activeSessionId) return;
+    // 切会话前先取消在途请求：否则旧流会继续往新会话里写 delta，
+    // 落盘的也是被污染的那一份。
+    if (streaming) await stop().catch(() => {});
     setActiveSessionId(id);
     setInput("");
   }

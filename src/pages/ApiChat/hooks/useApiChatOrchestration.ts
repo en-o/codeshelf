@@ -84,6 +84,10 @@ function toStreamMessages(session: ApiChatSession): ChatStreamMessage[] {
 export function useApiChatOrchestration() {
   const { streaming, thinkingBuffer, start, stop } = useChatStream();
   const [loading, setLoading] = useState(false);
+  // single-flight：send / regenerate / retryUser / retryFromError 共用这一把**同步**锁。
+  // `loading` 是 state，setLoading 之后到重新渲染之间还能再进来一次；
+  // 而 send 在 setLoading 之前就要 await persist，窗口足够两次 Enter 双双通过。
+  const runLockRef = useRef(false);
   const currentSessionRef = useRef<ApiChatSession | null>(null);
   const onSessionRef = useRef<((s: ApiChatSession) => void) | null>(null);
   const onErrorRef = useRef<((msg: string) => void) | null>(null);
@@ -254,7 +258,22 @@ export function useApiChatOrchestration() {
     }
   }
 
+  /** 入口统一包一层：锁在任何 await 之前同步建立。 */
+  async function withRunLock(fn: () => Promise<void>): Promise<void> {
+    if (runLockRef.current) return;
+    runLockRef.current = true;
+    try {
+      await fn();
+    } finally {
+      runLockRef.current = false;
+    }
+  }
+
   async function send(args: RunArgs, userText: string): Promise<void> {
+    await withRunLock(() => sendInner(args, userText));
+  }
+
+  async function sendInner(args: RunArgs, userText: string): Promise<void> {
     const { session, llm, onSession, onError } = args;
     currentSessionRef.current = session;
     onSessionRef.current = onSession;
@@ -293,6 +312,10 @@ export function useApiChatOrchestration() {
 
   /** 错误气泡"重试"：丢弃最后一条 user 之后的所有消息（错误气泡 / 半截 assistant / tool），从该 user 重跑（不重复追加 user） */
   async function retryFromError(args: RunArgs): Promise<void> {
+    await withRunLock(() => retryFromErrorInner(args));
+  }
+
+  async function retryFromErrorInner(args: RunArgs): Promise<void> {
     const { session, llm, onSession, onError } = args;
     currentSessionRef.current = session;
     onSessionRef.current = onSession;
