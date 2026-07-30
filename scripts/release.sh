@@ -58,10 +58,38 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
     error "当前分支是 $CURRENT_BRANCH，请在 main 分支上运行此脚本"
 fi
 
-# 检查工作区是否干净（可选，允许有未提交的更改）
-# if [ -n "$(git status --porcelain)" ]; then
-#     warn "工作区有未提交的更改，将一并提交"
-# fi
+# 工作树与暂存区必须干净。
+#
+# 之前这段检查是注释掉的，而脚本只 `git add` 五个版本文件 —— 组合起来有两个坑：
+#   1. 预先 staged 的文件会被 `git commit` 一并带进发版提交（不在那五个文件里，
+#      却出现在 release 分支上）；
+#   2. 未暂存的改动参与了本地构建和校验，却**不会**进入 release，
+#      于是「我本地测过」和「发出去的包」根本不是同一份代码。
+if [ -n "$(git status --porcelain)" ]; then
+    echo ""
+    git status --short
+    echo ""
+    error "工作树/暂存区不干净（见上）。发版必须从确定的源码开始：请先提交或 stash。"
+fi
+
+# 基线必须与远程一致，否则发出去的 commit 不是团队看到的那个
+info "校验 main 与 origin/main 是否同步..."
+git fetch origin main --quiet || error "无法 fetch origin/main，请检查网络或远程配置"
+
+LOCAL_SHA=$(git rev-parse HEAD)
+REMOTE_SHA=$(git rev-parse origin/main)
+BASE_SHA=$(git merge-base HEAD origin/main)
+
+if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+    if [ "$LOCAL_SHA" = "$BASE_SHA" ]; then
+        error "本地 main 落后于 origin/main，请先 git pull"
+    elif [ "$REMOTE_SHA" = "$BASE_SHA" ]; then
+        error "本地 main 领先于 origin/main（有未推送的提交），请先 git push"
+    else
+        error "本地 main 与 origin/main 已分叉，请先处理后再发版"
+    fi
+fi
+success "基线一致: $LOCAL_SHA"
 
 # 检查 release 分支是否已存在
 BRANCH_NAME="release/$VERSION"
@@ -144,9 +172,25 @@ fi
 echo ""
 info "版本号更新完成，开始 Git 操作..."
 
-# 6. Git add
+# 6. Git add —— 只有这五个版本文件
+VERSION_FILES=(package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock)
 info "暂存更改..."
-git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+git add "${VERSION_FILES[@]}"
+
+# 提交内容必须**可预测**：因为开工前已确认工作树干净，此刻 staged 的应当
+# 恰好是这五个文件。多出任何一个都说明中途有别的东西混进来了，停下来。
+STAGED=$(git diff --cached --name-only | sort)
+EXPECTED=$(printf '%s\n' "${VERSION_FILES[@]}" | sort)
+UNEXPECTED=$(comm -23 <(echo "$STAGED") <(echo "$EXPECTED"))
+if [ -n "$UNEXPECTED" ]; then
+    echo ""
+    echo "$UNEXPECTED"
+    echo ""
+    error "暂存区出现了非版本文件（见上），已中止。发版提交只应包含版本号改动。"
+fi
+
+info "本次发版提交将包含："
+echo "$STAGED" | sed 's/^/    /'
 
 # 7. Git commit
 info "提交更改..."
