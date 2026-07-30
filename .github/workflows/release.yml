@@ -22,8 +22,13 @@ jobs:
       release_id: ${{ steps.create_release.outputs.result }}
       version: ${{ steps.get_version.outputs.version }}
       release_notes: ${{ steps.release_notes.outputs.notes }}
+      # 所有构建任务都必须 checkout 这个 SHA。分支在 workflow 运行期间可能又收到新提交，
+      # 各任务各自解析分支名会拿到不同的树，产物之间以及产物与 tag 都会对不上。
+      build_sha: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
 
       - name: Get version from tauri.conf.json
         id: get_version
@@ -78,6 +83,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   release_id: release.id,
+                  target_commitish: context.sha,
                   body: releaseNotes
                 });
                 return release.id;
@@ -90,8 +96,12 @@ jobs:
               }
             }
 
-            // 不存在则创建新的草稿 release
+            // 不存在则创建新的草稿 release。
+            // target_commitish 必须显式绑定到**本次 workflow 的 SHA**：
+            // 不指定时 GitHub 会把 tag 打在默认分支 HEAD 上，而附件是从
+            // release 分支的这个 commit 构建的 —— tag 源码与二进制对不上。
             const { data } = await github.rest.repos.createRelease({
+              target_commitish: context.sha,
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tagName,
@@ -126,8 +136,24 @@ jobs:
             config: 'src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows.conf.json'
 
     runs-on: ${{ matrix.platform }}
+    env:
+      # 写进产物，安装后可核对「这个二进制到底是哪个 commit 构建的」
+      CODESHELF_BUILD_SHA: ${{ needs.create-release.outputs.build_sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.create-release.outputs.build_sha }}
+
+      - name: Verify checkout matches release commit
+        shell: bash
+        run: |
+          ACTUAL=$(git rev-parse HEAD)
+          EXPECTED="${{ needs.create-release.outputs.build_sha }}"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::checkout 的 commit ($ACTUAL) 与 Release 绑定的 commit ($EXPECTED) 不一致"
+            exit 1
+          fi
+          echo "构建 commit: $ACTUAL"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -170,8 +196,32 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path $portableDir
           Copy-Item "src-tauri/target/release/CodeShelf.exe" "$portableDir/"
+
+          # sidecar 必须一起打包。Tauri 把 resources/sidecars/ 映射到安装目录的 sidecars/，
+          # 便携版只复制 exe 的话，简历生成必然报「未找到内置 Node resume agent」。
+          # 布局要与安装版一致：exe 旁边一个 sidecars/ 目录。
+          $sidecarSrc = "src-tauri/resources/sidecars"
+          if (-not (Test-Path "$sidecarSrc/node/node.exe") -or -not (Test-Path "$sidecarSrc/resume-agent/main.cjs")) {
+            Write-Error "sidecar 产物缺失（$sidecarSrc），便携包会缺少简历生成功能，中止构建"
+            exit 1
+          }
+          Copy-Item -Recurse "$sidecarSrc" "$portableDir/sidecars"
+
           Set-Content -Path "$portableDir/.portable" -Value "This is a portable version. Auto-update is disabled."
           Compress-Archive -Path "$portableDir/*" -DestinationPath $zipName
+
+          # 打包后回查 ZIP 内容，确认 sidecar 真的进去了
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipName))
+          $names = $zip.Entries | ForEach-Object { $_.FullName }
+          $zip.Dispose()
+          foreach ($need in @("sidecars/node/node.exe", "sidecars/resume-agent/main.cjs")) {
+            if (-not ($names -contains $need)) {
+              Write-Error "便携包缺少 $need；实际条目: $($names -join ', ')"
+              exit 1
+            }
+          }
+          Write-Host "便携包已包含 sidecar（$($names.Count) 个条目）"
 
           echo "PORTABLE_ZIP=$zipName" >> $env:GITHUB_OUTPUT
         shell: pwsh
@@ -200,37 +250,49 @@ jobs:
 
             console.log(`Uploaded: ${data.browser_download_url}`);
 
-  # 所有构建完成后，发布 Release
-  publish-release:
+  # 所有构建完成后**不自动发布**：Release 停在 Draft，由人工确认后点 Publish。
+  #
+  # 之前 workflow 在构建成功后直接 `draft: false`，而 docs/更新步骤说明.md 写的是
+  # 「到 Releases 页面找到草稿，确认无误后 Publish release」—— 两边矛盾，
+  # 实际行为是没有任何门禁就把更新推给了所有用户（发布即触发自动更新）。
+  #
+  # 统一选择「人工批准」：发布是对外且不可逆的动作，构建成功不等于可以发版
+  # （还要人工核对产物、签名、release notes）。
+  summarize-release:
     needs: [create-release, build]
     permissions:
-      contents: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - name: Publish Release
+      - name: Summarize draft release
         uses: actions/github-script@v8
         with:
           script: |
             const releaseId = ${{ needs.create-release.outputs.release_id }};
-
-            // 先获取当前 release 状态
             const { data: release } = await github.rest.repos.getRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: releaseId
             });
 
-            // 如果已经发布，跳过
-            if (!release.draft) {
-              console.log('Release is already published, skipping...');
-              return;
-            }
+            const assets = release.assets.map(a => `- ${a.name} (${(a.size/1024/1024).toFixed(1)} MiB)`).join('\n');
+            const body = [
+              `### Draft Release 已就绪：${release.tag_name}`,
+              '',
+              `- 构建 commit：\`${{ needs.create-release.outputs.build_sha }}\``,
+              `- Release 绑定 commit：\`${release.target_commitish}\``,
+              `- 状态：${release.draft ? 'Draft（等待人工发布）' : '已发布'}`,
+              '',
+              '**产物：**',
+              assets || '（无）',
+              '',
+              `确认无误后到 [Release 页面](${release.html_url}) 点 **Publish release**。`,
+              '在此之前用户不会收到自动更新。',
+            ].join('\n');
 
-            // 否则发布
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: releaseId,
-              draft: false
-            });
-            console.log('Release published successfully!');
+            await core.summary.addRaw(body).write();
+            console.log(body);
+
+            if (!release.draft) {
+              core.warning('Release 已经是发布状态 —— 按当前策略它本应停在 Draft 等待人工确认。');
+            }

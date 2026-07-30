@@ -17,6 +17,55 @@ pub struct StorageConfig {
     pub logs_dir: PathBuf,
 }
 
+/// 目录是否真的可写。
+///
+/// 不看 permissions 位：只读挂载（AppImage、squashfs）下权限位可能是 0755，
+/// 真正写的时候才会失败。所以直接试着创建一个临时文件。
+///
+/// `allow(dead_code)`：非 Linux 平台不调用它，但**故意保持编译**（见 `linux_base_dir`）。
+#[allow(dead_code)]
+fn is_writable(dir: &std::path::Path) -> bool {
+    let probe = dir.join(format!(".codeshelf-write-probe-{}", std::process::id()));
+    match fs::File::create(&probe) {
+        Ok(_) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 用户数据目录下的应用目录（XDG / Application Support / AppData）。
+#[allow(dead_code)]
+fn user_data_base() -> AppResult<PathBuf> {
+    dirs::data_dir()
+        .ok_or_else(|| {
+            crate::error::AppError::from(
+                "无法获取用户数据目录（XDG_DATA_HOME / ~/.local/share）".to_string(),
+            )
+        })
+        .map(|d| d.join("com.codeshelf.desktop"))
+}
+
+/// Linux 的数据根目录选择。
+///
+/// **刻意不加 `#[cfg(target_os = "linux")]`**：加了的话这段逻辑在 macOS/Windows 上
+/// 根本不参与编译，本机 `cargo check` 全绿也说明不了什么（CLAUDE.md 硬约束 3 说的
+/// 就是这个坑）。写成普通函数后，任何平台的编译和单测都能覆盖它，
+/// 只有最后「调不调用它」那一行才是平台相关的。
+///
+/// 规则：exe 旁边**已经有** data/ 且该目录可写时沿用（兼容早期以可写方式安装的用户），
+/// 否则用 XDG 用户数据目录 —— deb 装在 /usr/... 、AppImage 跑在只读挂载点，
+/// 普通用户在 exe 旁边建不了 data/ 和 logs/，首次启动就会失败。
+#[allow(dead_code)]
+fn linux_base_dir(exe_dir: Option<PathBuf>) -> AppResult<PathBuf> {
+    let legacy = exe_dir.filter(|dir| dir.join("data").is_dir() && is_writable(dir));
+    match legacy {
+        Some(dir) => Ok(dir),
+        None => user_data_base(),
+    }
+}
+
 impl StorageConfig {
     /// 创建存储配置
     pub fn new() -> AppResult<Self> {
@@ -30,13 +79,37 @@ impl StorageConfig {
             })?
             .join("com.codeshelf.desktop");
 
-        // Windows/Linux: 使用安装目录
-        #[cfg(not(target_os = "macos"))]
+        // Windows: 数据放安装目录旁边。
+        //
+        // 这是既定现状，**不要改**：Windows 的便携版就是靠「数据跟着 exe 走」实现的，
+        // 而安装版的数据目录位置也已经被 NSIS 升级逻辑和用户的既有数据绑定
+        // （见 CLAUDE.md 硬约束 7：安装目录一旦多套一层，老数据就被留在上一层，
+        // 表现为「更新后数据全没了」）。改这里影响面极大。
+        #[cfg(target_os = "windows")]
         let base_dir = std::env::current_exe()
             .map_err(|e| crate::error::AppError::from(format!("获取可执行文件路径失败: {}", e)))?
             .parent()
             .map(|p| p.to_path_buf())
             .ok_or_else(|| crate::error::AppError::from("无法获取安装目录".to_string()))?;
+
+        // Linux: 用 XDG 用户数据目录。
+        //
+        // 原来 Linux 跟着 Windows 走「exe 旁边」，但 deb 装到 /usr/... 、AppImage 从
+        // 只读挂载点运行，普通用户在那里根本建不了 data/ 和 logs/ —— 首次启动就失败。
+        //
+        // 兼容既有安装：exe 旁边**已经存在** data/ 目录且可写时继续用它，
+        // 免得早期用可写目录跑起来的用户升级后看到「数据全没了」。
+        // Linux：见 `linux_base_dir`（逻辑写在 cfg 外面，好让本机也能编译和测试）
+        #[cfg(target_os = "linux")]
+        let base_dir = linux_base_dir(
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf())),
+        )?;
+
+        // 其它类 Unix（BSD 等）：同样走用户数据目录，别往安装目录写
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        let base_dir = user_data_base()?;
 
         Ok(Self {
             data_dir: base_dir.join("data"),
@@ -273,5 +346,70 @@ pub fn get_storage_config() -> AppResult<&'static StorageConfig> {
             // 未初始化，尝试初始化
             init_storage()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `linux_base_dir` 的分支逻辑。之所以能在 macOS 上测，正是因为这个函数
+    /// 没有藏在 `#[cfg(target_os = "linux")]` 里 —— 藏起来的代码本机一行都不编译。
+    #[test]
+    fn linux_prefers_existing_writable_data_dir_else_xdg() {
+        let xdg = user_data_base().expect("测试环境应能取到用户数据目录");
+
+        // 1) exe 目录不可知（取不到 current_exe）→ 用户数据目录
+        assert_eq!(linux_base_dir(None).unwrap(), xdg);
+
+        // 2) exe 旁边没有 data/ → 用户数据目录（deb 首次安装就是这种）
+        let empty = std::env::temp_dir().join(format!("codeshelf-nodata-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&empty);
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(linux_base_dir(Some(empty.clone())).unwrap(), xdg);
+
+        // 3) exe 旁边已有 data/ 且可写 → 沿用旧位置，不能让老用户「数据全没了」
+        let legacy = std::env::temp_dir().join(format!("codeshelf-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&legacy);
+        std::fs::create_dir_all(legacy.join("data")).unwrap();
+        assert_eq!(linux_base_dir(Some(legacy.clone())).unwrap(), legacy);
+
+        // 4) 有 data/ 但目录不可写（只读挂载 / 系统目录）→ 退回用户数据目录
+        let readonly =
+            std::env::temp_dir().join(format!("codeshelf-readonly-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&readonly);
+        std::fs::create_dir_all(readonly.join("data")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o555)).unwrap();
+            // root 无视权限位，这种环境下跳过该断言
+            if !is_writable(&readonly) {
+                assert_eq!(linux_base_dir(Some(readonly.clone())).unwrap(), xdg);
+            }
+            std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        for d in [empty, legacy, readonly] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    /// 探针文件不能留在用户目录里
+    #[test]
+    fn write_probe_leaves_no_trace() {
+        let dir = std::env::temp_dir().join(format!("codeshelf-probe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert!(is_writable(&dir));
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(leftovers.is_empty(), "探针文件残留: {leftovers:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

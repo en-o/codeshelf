@@ -26,6 +26,18 @@ mkdir "%PORTABLE_DIR%"
 :: 复制可执行文件
 copy "src-tauri\target\release\CodeShelf.exe" "%PORTABLE_DIR%\"
 
+:: 复制 sidecar：布局必须与安装版一致（exe 旁边一个 sidecars\ 目录），
+:: 否则简历生成会报「未找到内置 Node resume agent」
+if not exist "src-tauri\resources\sidecars\node\node.exe" (
+    echo 错误：sidecar 产物缺失，请先运行 npm run resume-agent:prepare-sidecar
+    exit /b 1
+)
+if not exist "src-tauri\resources\sidecars\resume-agent\main.cjs" (
+    echo 错误：sidecar 产物缺失，请先运行 npm run resume-agent:prepare-sidecar
+    exit /b 1
+)
+xcopy /e /i /y "src-tauri\resources\sidecars" "%PORTABLE_DIR%\sidecars" >nul
+
 :: 创建便携版标记
 echo This is a portable version. Auto-update is disabled. > "%PORTABLE_DIR%\.portable"
 

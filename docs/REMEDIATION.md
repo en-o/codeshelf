@@ -34,10 +34,10 @@
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
 2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
    已完成（AUD-007 部分完成）。
-3. **数据、升级与发布 P1**：~~AUD-010~~ 已完成；剩 AUD-021～AUD-025、AUD-051。
+3. **数据、升级与发布 P1**：~~AUD-010、AUD-021～AUD-025~~ 已完成；剩 AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
 
-> 进度：24 / 61 已整改（AUD-001～006、008～011、016～020、039、044～050），
+> 进度：29 / 61 已整改（AUD-001～006、008～011、016～025、039、044～050），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -54,6 +54,10 @@
 > - AUD-047：导入 Chat 会话默认创建新 ID 的独立会话，不再按文件里的原 ID 覆盖；
 >   要覆盖需在冲突弹窗里显式选「替换现有会话」。导出 JSON 新增 `schemaVersion` 字段
 >   （旧导出仍可导入）。
+> - AUD-023：Linux 数据目录从「exe 旁边」改为 XDG 用户数据目录。
+>   exe 旁边已有可写 `data/` 的老安装会继续沿用原位置，不需要用户手动迁移。
+> - AUD-025：CI **不再自动发布** Release，构建完成后停在 Draft，需人工到 Release 页面
+>   点 Publish。发版流程文档已同步。
 > - AUD-050：项目详情页的默认远程改为「记住的选择 → upstream → origin → 首项」，
 >   不再是列表第一个；「同步全部分支」在全部失败时如实报错、部分失败时保留明细不自动关闭。
 >
@@ -571,7 +575,13 @@
 
 ### AUD-021 · P1 · Windows 便携包包含完整 sidecar
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待真机回归）
+- CI 与 `scripts/build-portable.bat` 都改为把 `src-tauri/resources/sidecars/` 整个复制到
+  `<便携目录>/sidecars/` —— 布局与安装版一致（exe 旁边一个 `sidecars/`），
+  正是 `node_agent_runtime()` 的 exe-parent 候选路径能命中的位置。
+- 两处都加了**前置存在性检查**（缺 `node/node.exe` 或 `resume-agent/main.cjs` 直接失败），
+  CI 还在 `Compress-Archive` 之后回读 ZIP 条目复核这两个文件确实在包里 ——
+  否则这类问题只有等用户解压后点「生成简历」才会暴露。
 - 风险：Tauri 将 sidecar 作为外部资源，便携 ZIP 却只复制 `CodeShelf.exe` 和 `.portable`，
   简历生成功能必然报“未找到内置 Node resume agent”。
 - 涉及位置：
@@ -584,7 +594,22 @@
 
 ### AUD-022 · P1 · macOS sidecar Node 架构匹配目标产物
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- `prepare-resume-agent-sidecar.mjs` 不再无条件拷 `process.execPath`：
+  - 目标架构来自 **Tauri target**，优先级 `--target` 参数 > `CODESHELF_SIDECAR_TARGET` >
+    `TAURI_ENV_TARGET_TRIPLE` / `TAURI_ENV_ARCH` > 当前进程。后两个是 Tauri v2 传给
+    `beforeBuildCommand` 的，所以 `tauri build --target x86_64-apple-darwin` 自动就对，
+    **CI 不需要改任何一行**（本地交叉构建同理）。
+  - 架构不匹配时从 nodejs.org 下载对应平台/架构的官方运行时（版本与本地一致）。
+  - **无条件校验产物**：直接读可执行文件头判架构（Mach-O / ELF / PE，并支持 macOS
+    universal 的 FAT 头），与目标不符就让构建当场失败，而不是等装到真机才发现起不来。
+- 验证（本机 macOS arm64 实跑）：
+  - 头部识别：本机 node → `arm64`，`/bin/ts` 类 universal 二进制 → `fat:x64+arm64`（
+    FAT 是第一版漏掉的分支，实测发现后补上）。
+  - target 解析：`x86_64-apple-darwin` → x64，`aarch64-apple-darwin` → arm64。
+  - **交叉路径实跑**：`TAURI_ENV_ARCH=x86_64` 时真的下载了 `node-v20.20.0-darwin-x64`
+    并通过 Mach-O 头校验（`darwin/x64, 86.8 MiB`），随后恢复了本机 arm64 产物。
+- 待真机回归：两个安装包分别在 Intel / Apple Silicon 机器上启动 sidecar。
 - 风险：ARM64 和 x86_64 构建都复制 runner 当前的 `process.execPath`，至少一个目标可能内置错误架构 Node。
 - 涉及位置：
   - `.github/workflows/release.yml`
@@ -594,7 +619,23 @@
 
 ### AUD-023 · P1 · Linux 使用用户可写的数据目录
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待真机回归）
+- Linux 改用 XDG 用户数据目录（`$XDG_DATA_HOME/com.codeshelf.desktop`）。
+  原来 Linux 跟着 Windows 走「exe 旁边」，但 deb 装在 /usr/... 、AppImage 跑在只读挂载点，
+  普通用户在那里建不了 `data/`、`logs/`，首次启动直接失败。
+- **兼容既有安装**：exe 旁边已经有 `data/` 且该目录**确实可写**时继续用它，
+  免得早期以可写方式跑起来的用户升级后看到「数据全没了」。
+  可写判定是**试着创建探针文件**，不看 permissions 位 —— 只读挂载下权限位可能仍是 0755。
+- **Windows 一行未改**：便携版就是靠「数据跟着 exe 走」实现的，安装版也已与 NSIS
+  升级逻辑绑定（硬约束 7）。这也是 Non-Goals 明确划掉的范围。`docs/DEVELOPMENT.md`
+  已按平台分别写清楚。
+- 关于验证方式（值得记一笔）：**故意没有把这段逻辑放进 `#[cfg(target_os = "linux")]`**。
+  cfg 里的代码在本机一行都不编译（硬约束 3 说的就是这个坑），
+  写成普通函数 `linux_base_dir(exe_dir)` 后，本机 `cargo check` 和单测都能覆盖它，
+  只剩「调不调用它」那一行是平台相关的。非 Linux 平台的 dead_code 警告用
+  `#[allow(dead_code)]` 显式压掉并注明原因。
+- 验证：新增 2 条单测，覆盖「取不到 exe 目录」「旁边没有 data/」「有 data/ 且可写」
+  「有 data/ 但只读」四种分支，以及「探针文件不留痕」。macOS 本机 + Windows 交叉编译均通过。
 - 风险：所有非 macOS 平台把 data/logs 放在 exe 相邻目录。deb 通常位于系统目录，AppImage 常从只读挂载运行，
   普通用户无法初始化存储。
 - 涉及位置：
@@ -607,7 +648,15 @@
 
 ### AUD-024 · P1 · Release tag 与构建提交必须相同
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待一次真实发布验证）
+- `createRelease` / `updateRelease` 都显式传 `target_commitish: context.sha`。
+  不传时 GitHub 把 tag 打在**默认分支 HEAD** 上，而附件是从 release 分支的那个 commit
+  构建的 —— tag 指向的源码与二进制根本不是一回事。
+- `create-release` job 新增输出 `build_sha`，所有构建任务用
+  `actions/checkout@v6` + `ref: ${{ needs.create-release.outputs.build_sha }}` 固定到同一 SHA。
+  分支在 workflow 运行期间可能又收到新提交，各任务各自解析分支名会拿到不同的树。
+- 构建任务加了一步 `Verify checkout matches release commit`，`git rev-parse HEAD`
+  与预期 SHA 不符直接 fail；同时把 SHA 以 `CODESHELF_BUILD_SHA` 注入构建环境。
 - 风险：创建 Release 时未指定 `target_commitish`，新 tag 可能落在默认分支 HEAD；附件却从触发 workflow 的
   release 分支构建，tag 源码与二进制不一致。
 - 涉及位置：
@@ -617,7 +666,16 @@
 
 ### AUD-025 · P1 · 明确 Draft 与人工发布策略
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **选择「人工批准」**，理由：发布是对外且不可逆的动作（Release 一转正式，用户端立刻
+  能检测到自动更新），构建成功不等于可以发版 —— 还要人工核对产物、签名、release notes。
+  而且 `docs/更新步骤说明.md` 本来写的就是人工发布，是 workflow 偷偷自动化了。
+- 删掉自动 `draft: false` 的 `publish-release` job，换成 `summarize-release`：
+  只在 workflow Summary 里输出 tag、**构建 commit 与 Release 绑定 commit**、产物清单
+  和一个「去 Release 页面点 Publish」的链接；若发现 Release 已不是 Draft 会发 warning。
+  两个 commit 并列展示，正好也是 AUD-024 的人工核对点。
+- `docs/更新步骤说明.md` 补上「CI 不会自动发布」以及两个 commit 必须一致、
+  不一致就别发布的说明。
 - 风险：文档和发版脚本要求人工发布 Draft，但 workflow 在构建成功后自动设置 `draft=false`。
 - 涉及位置：
   - `.github/workflows/release.yml`

@@ -84,7 +84,13 @@ codeshelf/
 
 ## 存储层约定
 
-- 数据目录：macOS 在 `~/Library/Application Support/com.codeshelf.desktop`，Windows/Linux 在安装目录（详见 `storage/config.rs`）。
+- 数据目录（详见 `storage/config.rs`）：
+  - **macOS**：`~/Library/Application Support/com.codeshelf.desktop`
+  - **Windows**：安装目录旁边的 `data/`、`logs/`。便携版正是靠「数据跟着 exe 走」实现的，
+    安装版也已与 NSIS 升级逻辑绑定（见 CLAUDE.md 硬约束 7），**不要改**。
+  - **Linux**：`$XDG_DATA_HOME/com.codeshelf.desktop`（默认 `~/.local/share/...`）。
+    deb 装在系统目录、AppImage 从只读挂载运行，普通用户在 exe 旁边建不了目录。
+    例外：exe 旁边**已经存在** `data/` 且可写时沿用旧位置，兼容早期用户。
 - SQLite 经 `storage::db::pool()` 全局连接池访问；schema 变更走 `storage/migrations/`。
 - JSON 数据文件**必须**用 `storage::write_atomic` 写入（tmp + rename，防半截文件）、用 `storage::parse_json_or_backup` 解析（损坏时备份原文件再回默认值，绝不静默覆盖）。
 
