@@ -4,10 +4,23 @@ import { showToast } from "@/components/ui";
 import type { GitStatus, RemoteInfo } from "@/types";
 import { getGitStatus, getRemotes, gitAdd, gitUnstage, gitCommit, gitPush } from "@/services/git";
 
+/**
+ * 同一个文件可以**同时**有已暂存和未暂存的改动（先 `git add` 再继续改），
+ * 所以状态不能是互斥枚举。
+ *
+ * 原来用 `Map.set(path, {type})` 去重，unstaged 那一轮会把 staged 覆盖掉；
+ * 于是「取消暂存未选中文件」那步按 `type === "staged"` 过滤时漏掉它，
+ * 用户取消勾选后它的暂存内容仍留在 index 里，`git commit -m`（无 pathspec）
+ * 照样把这份没选中的改动提交上去。
+ */
 interface FileItem {
   path: string;
-  /** staged: 已暂存, unstaged: 已修改, untracked: 新文件 */
-  type: "staged" | "unstaged" | "untracked";
+  /** index 里有改动（`git add` 过） */
+  staged: boolean;
+  /** 工作区里有未暂存的改动 */
+  unstaged: boolean;
+  /** 未跟踪的新文件 */
+  untracked: boolean;
 }
 
 interface GitCommitModalProps {
@@ -33,8 +46,9 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
   const [message, setMessage] = useState("");
   // Selected remote for push
   const [selectedRemote, setSelectedRemote] = useState<string>("");
-  // Whether to push after commit
-  const [pushAfterCommit, setPushAfterCommit] = useState(true);
+  // 提交后是否推送。默认**关闭**：推送是对外、不可逆的动作，
+  // 默认勾选会让一次误提交立刻扩散到远程。要推的人自己勾。
+  const [pushAfterCommit, setPushAfterCommit] = useState(false);
 
   useEffect(() => {
     loadGitInfo();
@@ -55,17 +69,21 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
         setSelectedRemote(currentRemote || remoteList[0].name);
       }
 
-      // 构建统一的文件列表，去重（同一文件可能同时出现在 staged 和 unstaged）
+      // 合并三个来源，同一路径**叠加**标志而不是互相覆盖
       const fileMap = new Map<string, FileItem>();
-      for (const file of status.staged) {
-        fileMap.set(file, { path: file, type: "staged" });
-      }
-      for (const file of status.unstaged) {
-        fileMap.set(file, { path: file, type: "unstaged" });
-      }
-      for (const file of status.untracked) {
-        fileMap.set(file, { path: file, type: "untracked" });
-      }
+      const mark = (file: string, key: "staged" | "unstaged" | "untracked") => {
+        const entry = fileMap.get(file) ?? {
+          path: file,
+          staged: false,
+          unstaged: false,
+          untracked: false,
+        };
+        entry[key] = true;
+        fileMap.set(file, entry);
+      };
+      for (const file of status.staged) mark(file, "staged");
+      for (const file of status.unstaged) mark(file, "unstaged");
+      for (const file of status.untracked) mark(file, "untracked");
 
       const files = Array.from(fileMap.values());
       setAllFiles(files);
@@ -116,9 +134,11 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
         .filter(f => selectedFiles.has(f.path))
         .map(f => f.path);
 
-      // 需要取消暂存的文件（未选中的 staged 文件）
+      // 未选中但 index 里有内容的文件，必须先 reset 出去。
+      // 判据是 `f.staged` 这个独立标志，不是被覆盖过的类型枚举。
+      // `git reset HEAD -- <file>` 只动 index，改动仍留在工作区，不会丢。
       const filesToUnstage = allFiles
-        .filter(f => !selectedFiles.has(f.path) && f.type === "staged")
+        .filter(f => !selectedFiles.has(f.path) && f.staged)
         .map(f => f.path);
 
       // 取消暂存未选中的文件
@@ -128,6 +148,7 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
         } catch (error) {
           console.error("Failed to unstage files:", error);
           showToast("error", "取消暂存失败", String(error));
+          await loadGitInfo();
           return;
         }
       }
@@ -139,8 +160,35 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
         } catch (error) {
           console.error("Failed to stage files:", error);
           showToast("error", "暂存文件失败", String(error));
+          await loadGitInfo();
           return;
         }
+      }
+
+      // 提交前以 Git index 为准复核一次：`git commit -m` 不带 pathspec，
+      // 提交的是 index 的**全部**内容，界面上的勾选不构成任何约束。
+      // 上面 unstage/add 少动一个文件，多出来的改动就会被一起提交（还可能立刻推上远程）。
+      try {
+        const verify = await getGitStatus(projectPath);
+        const selected = new Set(selectedFilePaths);
+        const inIndex = new Set(verify.staged);
+        const unexpected = [...inIndex].filter((f) => !selected.has(f));
+        const missing = [...selected].filter((f) => !inIndex.has(f));
+        if (unexpected.length > 0 || missing.length > 0) {
+          const detail = [
+            unexpected.length ? `多出：${unexpected.join("、")}` : "",
+            missing.length ? `缺少：${missing.join("、")}` : "",
+          ]
+            .filter(Boolean)
+            .join("；");
+          showToast("error", "暂存区与所选文件不一致，已取消提交", detail);
+          await loadGitInfo();
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to verify index:", error);
+        showToast("error", "无法校验暂存区，已取消提交", String(error));
+        return;
       }
 
       // Commit
@@ -196,12 +244,15 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
 
   const hasChanges = allFiles.length > 0;
 
-  function getFileTypeLabel(type: FileItem["type"]) {
-    switch (type) {
-      case "staged": return { text: "已暂存", color: "text-green-600 bg-green-50" };
-      case "unstaged": return { text: "已修改", color: "text-orange-600 bg-orange-50" };
-      case "untracked": return { text: "新文件", color: "text-blue-600 bg-blue-50" };
+  function getFileTypeLabel(file: FileItem) {
+    if (file.untracked) return { text: "新文件", color: "text-blue-600 bg-blue-50" };
+    // 双重状态要如实显示：勾选它会把工作区剩下的改动一起暂存进来，
+    // 取消勾选则连已暂存的部分也会被 reset 出 index（改动仍留在工作区）。
+    if (file.staged && file.unstaged) {
+      return { text: "已暂存+已修改", color: "text-purple-600 bg-purple-50" };
     }
+    if (file.staged) return { text: "已暂存", color: "text-green-600 bg-green-50" };
+    return { text: "已修改", color: "text-orange-600 bg-orange-50" };
   }
 
   return (
@@ -271,7 +322,7 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
                 <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
                   {/* 统一显示所有文件 */}
                   {allFiles.map((file) => {
-                    const label = getFileTypeLabel(file.type);
+                    const label = getFileTypeLabel(file);
                     return (
                       <div
                         key={file.path}
@@ -283,7 +334,7 @@ export function GitCommitModal({ projectPath, currentRemote, currentBranch, onCl
                         ) : (
                           <Square size={16} className="text-gray-400" />
                         )}
-                        {file.type === "untracked" ? (
+                        {file.untracked ? (
                           <Plus size={14} className="text-green-600" />
                         ) : (
                           <Minus size={14} className="text-orange-500" />
