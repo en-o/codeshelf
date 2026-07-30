@@ -413,6 +413,19 @@ pub async fn execute_api_endpoint(
     endpoint_id: String,
     arguments_json: String,
 ) -> AppResult<ApiExecutionResult> {
+    execute_api_endpoint_inner(endpoint_id, arguments_json, false).await
+}
+
+/// `relogged_in` 是重登深度标记：Session 鉴权收到 401/403 时清缓存重登**最多一次**。
+///
+/// 之前是无标记的自递归：如果服务端登录成功但发的 token 永远无效（配置写错、
+/// 权限被回收、登录接口返回了另一个环境的 token），这里会无限重登 + 无限重发，
+/// 每层还都在 `Box::pin` 里累积 future —— 命令永不返回，配额也白烧。
+async fn execute_api_endpoint_inner(
+    endpoint_id: String,
+    arguments_json: String,
+    relogged_in: bool,
+) -> AppResult<ApiExecutionResult> {
     // 1. 加载 endpoint 和所属 group
     let endpoints = load_endpoints()?;
     let endpoint = endpoints
@@ -564,14 +577,28 @@ pub async fn execute_api_endpoint(
     let started = Instant::now();
     let resp = send_with_transient_retry(builder).await?;
 
-    let resp = if matches!(auth, ApiAuthConfig::Session { .. })
-        && (resp.status() == reqwest::StatusCode::UNAUTHORIZED
-            || resp.status() == reqwest::StatusCode::FORBIDDEN)
-    {
-        // 清 client 缓存，重登重发
+    let unauthorized = resp.status() == reqwest::StatusCode::UNAUTHORIZED
+        || resp.status() == reqwest::StatusCode::FORBIDDEN;
+    let resp = if matches!(auth, ApiAuthConfig::Session { .. }) && unauthorized {
+        if relogged_in {
+            // 已经重登过一次还是 401/403 —— 不是 token 过期，是配置或权限的问题。
+            // 直接返回可诊断的错误，不再重试。
+            return Err(crate::error::AppError::from(format!(
+                "Session 鉴权失败（{}）：重新登录后仍被拒绝。请检查登录接口返回的 token \
+                 是否被正确注入，以及该账号是否有权访问 {} {}",
+                resp.status(),
+                endpoint.method.to_uppercase(),
+                final_url
+            )));
+        }
+        // 清 client 缓存，重登重发（仅此一次）
         drop_session_client(group_cache_key.unwrap_or("__endpoint_override__")).await;
-        // 重走一遍整体流程（简单直接：递归一次）
-        return Box::pin(execute_api_endpoint(endpoint_id, arguments_json)).await;
+        return Box::pin(execute_api_endpoint_inner(
+            endpoint_id,
+            arguments_json,
+            true,
+        ))
+        .await;
     } else {
         resp
     };

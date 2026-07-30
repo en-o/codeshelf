@@ -511,7 +511,10 @@ function renderMessages(){
       const ext = (m.name.split('.').pop() || '').toUpperCase().slice(0,4);
       const isUploading = isSelf && typeof m.uploadProgress === 'number' && m.uploadProgress < 100;
       const isFailed = isSelf && m.uploadFailed;
-      const downloadUrl = m.token ? `/api/file/${encodeURIComponent(m.token)}` : '';
+      // 下载带不了自定义请求头，身份用 query 传；服务端会校验只有收/发件人能取
+    const downloadUrl = m.token
+      ? `/api/file/${encodeURIComponent(m.token)}?peer=${encodeURIComponent(state.selfId || '')}`
+      : '';
       let actionsHtml = '';
       if (isFailed){
         actionsHtml = `<div class="msg-file-status msg-file-error">上传失败</div>`;
@@ -578,7 +581,8 @@ async function sendFiles(files){
   for (const file of files) await sendOneFile(file);
 }
 async function sendOneFile(file){
-  if (file.size > 2 * 1024 * 1024 * 1024){ toast(`${file.name} 超过 2GB 上限`, 'error'); return; }
+  // 与后端 MAX_FILE_SIZE 保持一致（中继是全内存的，2GB 会把桌面端打到 OOM）
+  if (file.size > 256 * 1024 * 1024){ toast(`${file.name} 超过 256MB 上限`, 'error'); return; }
   const peerId = state.selected;
   const localId = genLocalId();
   // 立即插入占位气泡,uploadProgress=0 显示进度条
@@ -596,7 +600,9 @@ async function sendOneFile(file){
 
   try {
     const form = new FormData();
+    // to / from 必须排在 file 之前：服务端在开始读文件内容前就要能判断这次上传是否被授权
     form.append('to', peerId);
+    form.append('from', state.selfId || '');
     form.append('file', file, file.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload', true);

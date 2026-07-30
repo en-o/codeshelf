@@ -19,8 +19,18 @@ pub const DEFAULT_PORT: u16 = 8421;
 /// 文件中继缓存的 TTL（秒）
 pub const FILE_TTL_SECS: u64 = 300; // 5 分钟
 
-/// 单文件最大大小（字节）。默认 2GB，足以覆盖常见场景。
-pub const MAX_FILE_SIZE: usize = 2 * 1024 * 1024 * 1024;
+/// 单文件最大大小（字节）。
+///
+/// 中继是**全内存**的（收完整个文件才落 token），所以这个值就是单次请求能吃掉的内存。
+/// 原来是 2GB —— 局域网里任何一台设备匿名 POST 几次就能把桌面端打到 OOM。
+/// 256MB 覆盖照片/文档/短视频这类实际用法；更大的文件本来也不该走内存中继。
+pub const MAX_FILE_SIZE: usize = 256 * 1024 * 1024;
+
+/// 缓存里所有待领取文件的总字节上限。单文件限额挡不住"多传几个"。
+pub const MAX_TOTAL_CACHE: usize = 512 * 1024 * 1024;
+
+/// 同时进行的上传数上限。每个上传都在攒内存，必须限并发而不只是限单个大小。
+pub const MAX_CONCURRENT_UPLOADS: usize = 3;
 
 /// 单个 peer 的信息
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -132,6 +142,8 @@ pub type PeerSender = mpsc::UnboundedSender<ServerMessage>;
 pub struct AppState {
     /// 所有在线 peer
     pub peers: Mutex<HashMap<String, PeerEntry>>,
+    /// 正在进行的上传数（并发限额用）
+    pub uploads_in_flight: std::sync::atomic::AtomicUsize,
     /// 局域网中发现到的其它桌面端
     pub discovered: Mutex<HashMap<String, DiscoveredDevice>>,
     /// 文件中继缓存
@@ -144,6 +156,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             peers: Mutex::new(HashMap::new()),
+            uploads_in_flight: std::sync::atomic::AtomicUsize::new(0),
             discovered: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
             stop_signal: Arc::new(tokio::sync::Notify::new()),
@@ -158,15 +171,17 @@ pub struct PeerEntry {
 }
 
 /// 文件缓存条目
-#[allow(dead_code)]
 pub struct CachedFile {
     pub name: String,
     pub mime: Option<String>,
-    pub bytes: Vec<u8>,
-    /// 接收方 peer id（用于校验，可选）
-    pub to: Option<String>,
+    /// 用 `Bytes` 而不是 `Vec<u8>`：multipart 收到的就是 `Bytes`，
+    /// 转成响应体时也是 `Bytes`，全程零拷贝，少一次整文件复制。
+    /// 走 axum 的再导出，不为此新增一个直接依赖。
+    pub bytes: axum::body::Bytes,
+    /// 接收方 peer id —— 下载时**必须**校验，不是"可选"
+    pub to: String,
     /// 发送方 peer id
-    pub from: Option<String>,
+    pub from: String,
     /// 创建时间，用于 TTL 过期
     pub created_at: Instant,
 }
@@ -174,6 +189,12 @@ pub struct CachedFile {
 impl CachedFile {
     pub fn is_expired(&self) -> bool {
         self.created_at.elapsed() > Duration::from_secs(FILE_TTL_SECS)
+    }
+
+    /// 只有收件人和发件人本人能取。以前这个字段存了却从来没校验过，
+    /// 任何拿到 token 的人（局域网里 token 会随 WS 广播/日志泄漏）都能下载。
+    pub fn may_download(&self, peer_id: &str) -> bool {
+        self.to == peer_id || self.from == peer_id
     }
 }
 
@@ -471,4 +492,52 @@ fn collect_local_ipv4() -> Vec<(String, String)> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached(to: &str, from: &str, len: usize) -> CachedFile {
+        CachedFile {
+            name: "a.bin".into(),
+            mime: None,
+            bytes: axum::body::Bytes::from(vec![0u8; len]),
+            to: to.into(),
+            from: from.into(),
+            created_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn only_sender_and_recipient_may_download() {
+        let f = cached("bob", "alice", 1);
+        assert!(f.may_download("bob"), "收件人可下载");
+        assert!(f.may_download("alice"), "发件人可重取");
+        // token 会随 WS 通知广播，光有 token 不构成授权
+        assert!(!f.may_download("mallory"));
+        assert!(!f.may_download(""));
+    }
+
+    #[test]
+    fn total_cache_accounting_skips_expired() {
+        // 复现上传时的额度计算：先剔除过期条目，再累加
+        let mut files: HashMap<String, CachedFile> = HashMap::new();
+        files.insert("live".into(), cached("bob", "alice", 100));
+        let mut stale = cached("bob", "alice", 900);
+        stale.created_at = Instant::now() - Duration::from_secs(FILE_TTL_SECS + 1);
+        files.insert("stale".into(), stale);
+
+        files.retain(|_, f| !f.is_expired());
+        let used: usize = files.values().map(|f| f.bytes.len()).sum();
+        assert_eq!(used, 100, "过期条目不应继续占额度");
+    }
+
+    #[test]
+    fn limits_are_sane() {
+        // 中继是全内存的：单文件上限 × 并发上限 不能超过总缓存上限太多，
+        // 否则限额形同虚设。这条断言就是防止有人只调其中一个常数。
+        assert!(MAX_FILE_SIZE <= MAX_TOTAL_CACHE);
+        assert!(MAX_FILE_SIZE * MAX_CONCURRENT_UPLOADS <= 4 * MAX_TOTAL_CACHE);
+    }
 }

@@ -350,12 +350,74 @@ fn discovery_instance_name() -> String {
 
 // ============== File relay ==============
 
+/// 上传前的准入：发送方与接收方都必须是**当前在线的 peer**。
+///
+/// 以前 `/api/upload` 谁都能打：局域网里任何设备（或被诱导访问该地址的网页）
+/// 都能匿名塞 2GB 进内存。token 也从来没和接收方绑定过。
+async fn check_upload_peers(
+    state: &AppState,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<(String, String), Response> {
+    let deny = |msg: &str| {
+        (StatusCode::FORBIDDEN, Json(json!({ "error": msg }))).into_response()
+    };
+    let from = from.map(str::to_string).filter(|s| !s.is_empty());
+    let to = to.map(str::to_string).filter(|s| !s.is_empty());
+    let (Some(from), Some(to)) = (from, to) else {
+        return Err(deny("缺少 from / to：请先加入会话"));
+    };
+    let peers = state.peers.lock().await;
+    if !peers.contains_key(&from) {
+        return Err(deny("发送方不在会话中"));
+    }
+    if !peers.contains_key(&to) {
+        return Err(deny("接收方不在会话中"));
+    }
+    Ok((from, to))
+}
+
+/// in-flight 计数的 RAII 守卫：任何提前 return（含错误分支）都会归还名额。
+struct UploadSlot(Arc<AppState>);
+
+impl UploadSlot {
+    fn acquire(state: &Arc<AppState>) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        let n = state.uploads_in_flight.fetch_add(1, Ordering::SeqCst);
+        if n >= MAX_CONCURRENT_UPLOADS {
+            state.uploads_in_flight.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(UploadSlot(state.clone()))
+    }
+}
+
+impl Drop for UploadSlot {
+    fn drop(&mut self) {
+        self.0
+            .uploads_in_flight
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 async fn api_upload(
     State(handle): State<ServerHandle>,
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
-    let from = headers
+    let _slot = match UploadSlot::acquire(&handle.state) {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({ "error": format!("并发上传已达上限（{}），请稍后重试", MAX_CONCURRENT_UPLOADS) })),
+            )
+                .into_response()
+        }
+    };
+
+    // from 优先取 header（桌面端），其次取表单字段（浏览器端）
+    let mut from = headers
         .get("x-peer-id")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
@@ -363,7 +425,7 @@ async fn api_upload(
     let mut to: Option<String> = None;
     let mut name: Option<String> = None;
     let mut mime: Option<String> = None;
-    let mut bytes: Option<Vec<u8>> = None;
+    let mut bytes: Option<axum::body::Bytes> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let field_name = field.name().unwrap_or("").to_string();
@@ -371,7 +433,20 @@ async fn api_upload(
             if let Ok(text) = field.text().await {
                 to = Some(text);
             }
+        } else if field_name == "from" {
+            if let Ok(text) = field.text().await {
+                if from.is_none() {
+                    from = Some(text);
+                }
+            }
         } else if field_name == "file" {
+            // 准入检查放在读 file 之前：未授权请求不该先把整个文件收进内存。
+            // multipart 的 to/from 字段由两个客户端排在 file 之前发送。
+            if let Err(resp) =
+                check_upload_peers(&handle.state, from.as_deref(), to.as_deref()).await
+            {
+                return resp;
+            }
             name = field.file_name().map(|s| s.to_string());
             mime = field.content_type().map(|s| s.to_string());
             match field.bytes().await {
@@ -379,11 +454,11 @@ async fn api_upload(
                     if b.len() > MAX_FILE_SIZE {
                         return (
                             StatusCode::PAYLOAD_TOO_LARGE,
-                            Json(json!({ "error": "文件超出大小上限" })),
+                            Json(json!({ "error": format!("文件超出单文件上限（{} MB）", MAX_FILE_SIZE / 1024 / 1024) })),
                         )
                             .into_response();
                     }
-                    bytes = Some(b.to_vec());
+                    bytes = Some(b);
                 }
                 Err(e) => {
                     return (
@@ -395,6 +470,11 @@ async fn api_upload(
             }
         }
     }
+
+    let (from, to) = match check_upload_peers(&handle.state, from.as_deref(), to.as_deref()).await {
+        Ok(pair) => pair,
+        Err(resp) => return resp,
+    };
 
     let bytes = match bytes {
         Some(b) => b,
@@ -412,14 +492,30 @@ async fn api_upload(
 
     {
         let mut files = handle.state.files.lock().await;
+        // 先清掉过期条目，再算总量 —— 否则过期文件会一直占着额度
+        files.retain(|_, f| !f.is_expired());
+        let used: usize = files.values().map(|f| f.bytes.len()).sum();
+        if used + bytes.len() > MAX_TOTAL_CACHE {
+            return (
+                StatusCode::INSUFFICIENT_STORAGE,
+                Json(json!({
+                    "error": format!(
+                        "待领取文件缓存已满（{} / {} MB），请让接收方先取走已发送的文件",
+                        used / 1024 / 1024,
+                        MAX_TOTAL_CACHE / 1024 / 1024
+                    )
+                })),
+            )
+                .into_response();
+        }
         files.insert(
             token.clone(),
             CachedFile {
                 name: name.clone().unwrap_or_else(|| "file".to_string()),
                 mime: mime.clone(),
                 bytes,
-                to: to.clone(),
-                from: from.clone(),
+                to,
+                from,
                 created_at: Instant::now(),
             },
         );
@@ -433,11 +529,32 @@ async fn api_upload(
     .into_response()
 }
 
-async fn api_file(State(handle): State<ServerHandle>, Path(token): Path<String>) -> Response {
+/// `GET /api/file/:token?peer=<自己的 peerId>`
+///
+/// 下载走 `<a href>` / 后端拉取，带不了自定义请求头，所以身份用 query 参数传。
+/// token 会随 WS 通知广播，光有 token 不构成授权 —— 必须是这份文件的收/发件人本人。
+async fn api_file(
+    State(handle): State<ServerHandle>,
+    Path(token): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>,
+) -> Response {
+    let peer_id = q.get("peer").cloned().unwrap_or_default();
+    if peer_id.is_empty() {
+        return (StatusCode::FORBIDDEN, "缺少 peer 参数").into_response();
+    }
+
     let cached = {
         let mut files = handle.state.files.lock().await;
-        // 一次性消费：取出后从缓存中删除
-        files.remove(&token)
+        match files.get(&token) {
+            // 无权下载时**不要**从缓存里删掉：否则任何人拿 token 打一次
+            // 就能让真正的收件人再也取不到（一次性消费被当成删除原语用了）
+            Some(f) if !f.may_download(&peer_id) => {
+                return (StatusCode::FORBIDDEN, "无权下载该文件").into_response()
+            }
+            // 一次性消费：取出后从缓存中删除
+            Some(_) => files.remove(&token),
+            None => None,
+        }
     };
 
     match cached {

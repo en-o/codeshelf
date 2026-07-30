@@ -576,7 +576,10 @@ function ChatWorkspace({
       const bytes =
         currentRoomIsRemote && client.apiBase
           ? await pairdropDownloadSave(
-              `${client.apiBase}/api/file/${encodeURIComponent(token)}`,
+              // 服务端校验只有收/发件人能取，身份走 query（下载请求带不了自定义头）
+              `${client.apiBase}/api/file/${encodeURIComponent(token)}?peer=${encodeURIComponent(
+                client.selfId || ""
+              )}`,
               path
             )
           : await pairdropSaveFile(token, path);

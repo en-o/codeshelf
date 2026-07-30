@@ -411,10 +411,13 @@ export function usePairDropClient({
 
       try {
         const form = new FormData();
+        // to / from 必须排在 file 之前：服务端在开始读文件内容前就要能判断这次上传是否被授权
         form.append("to", to);
+        form.append("from", selfId || "");
         form.append("file", file, file.name);
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${apiBase}/api/upload`, true);
+        if (selfId) xhr.setRequestHeader("x-peer-id", selfId);
         xhr.upload.onprogress = (e) => {
           if (!e.lengthComputable) return;
           const pct = Math.round((e.loaded / e.total) * 100);
