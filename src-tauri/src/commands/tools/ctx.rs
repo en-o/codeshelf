@@ -61,9 +61,32 @@ pub(super) fn require_under_cwd(ctx: &ToolCtx, target: &Path) -> AppResult<PathB
 
 pub(super) fn truncate(s: String, max: usize) -> String {
     if s.len() <= max {
-        s
-    } else {
-        format!("{}\n… [已截断，共 {} 字节]", &s[..max], s.len())
+        return s;
+    }
+    // `&s[..max]` 会在多字节字符中间切断并 panic。命令输出、文件内容里
+    // 中文和 emoji 很常见，按字符边界回退到 max 之前最近的合法位置。
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n… [已截断，共 {} 字节]", &s[..end], s.len())
+}
+
+#[cfg(test)]
+mod truncate_tests {
+    #[test]
+    fn does_not_split_multibyte_chars() {
+        // 「中」是 3 字节：max=4 落在第二个字符中间，旧实现会 panic
+        let s = "中文abc".to_string();
+        let out = super::truncate(s.clone(), 4);
+        assert!(out.starts_with("中"), "{out}");
+        assert!(out.contains("已截断"));
+        // emoji 是 4 字节，同样不能切开
+        let e = "🙂🙂🙂".to_string();
+        let out = super::truncate(e, 6);
+        assert!(out.starts_with("🙂"), "{out}");
+        // 不超限时原样返回
+        assert_eq!(super::truncate("abc".to_string(), 10), "abc");
     }
 }
 

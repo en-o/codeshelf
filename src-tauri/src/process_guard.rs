@@ -7,8 +7,6 @@
 //
 // 正确做法是让子进程成为**新进程组的组长**，然后对整个进程组发信号。
 
-use std::path::Path;
-
 /// 让子进程独立成组（Unix）/ 隐藏控制台窗口（Windows）。
 ///
 /// Unix：`process_group(0)` 等价于子进程 fork 后立刻 `setpgid(0, 0)`，
@@ -97,17 +95,6 @@ pub fn clamp_timeout_ms(requested: u64) -> u64 {
     requested.clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
 }
 
-/// 供日志展示：路径太长时只留末尾两段。
-pub fn short_path(p: &Path) -> String {
-    let s = p.to_string_lossy();
-    if s.len() <= 60 {
-        return s.into_owned();
-    }
-    let tail: Vec<_> = p.components().rev().take(2).collect();
-    let tail: Vec<_> = tail.into_iter().rev().collect();
-    format!(".../{}", tail.iter().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,43 +112,60 @@ mod tests {
         assert_eq!(clamp_timeout_ms(MAX_TIMEOUT_MS), MAX_TIMEOUT_MS);
     }
 
-    /// 进程组是「取消能杀干净后代」的前提，这里验证它确实生效：
-    /// sh 起一个后台 sleep，杀掉 sh 所在的进程组后，sleep 必须也没了。
+    /// 进程组是「取消能杀干净后代」的前提，这里验证它确实生效。
+    ///
+    /// 注意断言方式：不能用 `ps -g <pid>` 查进程组 —— 没有进程组时 ps 直接返回空，
+    /// 断言会**空过**（第一版就是这么写的，把 `configure` 注释掉照样通过，等于没测）。
+    /// 所以让 sh 把后台子进程的 PID 写到文件里，直接对那个 PID 做存活检查。
     #[cfg(unix)]
     #[tokio::test]
     async fn kill_tree_reaps_grandchildren() {
         use tokio::process::Command;
 
-        let marker = std::env::temp_dir().join(format!("codeshelf-pg-{}", std::process::id()));
-        let _ = std::fs::remove_file(&marker);
+        let dir = std::env::temp_dir().join(format!("codeshelf-pg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pidfile = dir.join("grandchild.pid");
 
-        // sh 拉起一个后台子进程：它 30 秒后写 marker。
-        // 只杀 sh 的话，这个孙子进程会活下来并写出 marker。
+        // sh 拉起一个后台 sleep（孙子进程）并记下它的 PID，自己也 sleep 住。
+        // 只杀 sh 的话，这个孙子会活下来 —— 正是 `kill <pid>` 的老问题。
         let mut cmd = Command::new("/bin/sh");
-        cmd.arg("-c")
-            .arg(format!("(sleep 30; touch {}) & sleep 30", marker.display()));
-        // configure(&mut cmd);  // 临时关掉，验证用例确实能抓到问题
+        cmd.arg("-c").arg(format!(
+            "sleep 60 & echo $! > {}; sleep 60",
+            pidfile.display()
+        ));
+        configure(&mut cmd);
         let mut child = cmd.spawn().expect("spawn");
         let pid = child.id().expect("pid");
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // 等 sh 把孙子的 PID 写出来
+        let mut grandchild = String::new();
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Ok(v) = std::fs::read_to_string(&pidfile) {
+                if !v.trim().is_empty() {
+                    grandchild = v.trim().to_string();
+                    break;
+                }
+            }
+        }
+        let gpid: i32 = grandchild.parse().expect("拿不到孙子进程 PID");
+
+        // 前置断言：孙子此刻确实活着，否则后面的「已被杀掉」毫无意义
+        assert_eq!(unsafe { libc_kill(gpid, 0) }, 0, "孙子进程本应在运行");
+
         kill_tree(pid);
-        // 回收自己 spawn 的那个，否则它以僵尸态留在进程组里，干扰下面的断言
         let _ = child.wait().await;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // 用 pgid 查组内进程，排除僵尸（Z 态已经死了，只是还没被父进程回收）
-        let out = std::process::Command::new("ps")
-            .args(["-o", "pid=,stat=", "-g", &pid.to_string()])
-            .output()
-            .expect("ps");
-        let alive: Vec<String> = String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.split_whitespace().nth(1).unwrap_or("").starts_with('Z'))
-            .map(str::to_string)
-            .collect();
-        assert!(alive.is_empty(), "进程组里还有残留: {alive:?}");
-        assert!(!marker.exists(), "后台孙子进程不该活到写出 marker");
+        // 核心断言：signal 0 只做存活探测。孙子必须已经不在了。
+        // 注释掉上面的 configure() 时这一条会失败 —— 这就是它在测的东西。
+        assert_ne!(
+            unsafe { libc_kill(gpid, 0) },
+            0,
+            "后台孙子进程 {gpid} 仍在运行，进程树没杀干净"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

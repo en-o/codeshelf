@@ -16,12 +16,6 @@ use crate::storage::get_storage_config;
 
 const RUN_EVENT: &str = "resume-agent-run-event-v3";
 
-/// Windows: 隐藏子进程控制台窗口。release/打包版无控制台父级，任何 spawn 都会
-/// 新建一个一闪而过的黑窗；本模块每次 RPC 都会拉起 node.exe，必须加此 flag。
-/// tokio 的 Command 在 Windows 上有内建 creation_flags，无需引入 std 的 CommandExt。
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 // std Mutex（非 tokio）：锁内只有 HashMap 增删，且应用退出的同步路径也要能拿锁杀进程。
 static RUN_PIDS: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -193,7 +187,7 @@ pub async fn generate_resume_fragment(
 pub async fn cancel_resume_deep_agent(request_id: String) -> AppResult<()> {
     let pid = RUN_PIDS.lock().ok().and_then(|mut m| m.remove(&request_id));
     if let Some(pid) = pid {
-        kill_process_tree(pid);
+        crate::process_guard::kill_tree(pid);
     }
     Ok(())
 }
@@ -206,7 +200,7 @@ pub fn kill_all_runs_on_exit() {
         Err(_) => return,
     };
     for pid in pids {
-        kill_process_tree(pid);
+        crate::process_guard::kill_tree(pid);
     }
 }
 
@@ -378,9 +372,10 @@ async fn call_node_rpc_with_events(
         .stderr(Stdio::piped())
         // future 被丢弃（超时/上层取消）时杀掉 node，不留孤儿进程
         .kill_on_drop(true);
-    // Windows: 隐藏 node.exe 子进程控制台窗口，避免打包版闪黑窗。
-    #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
+    // 独立进程组（Unix）/ 隐藏 node.exe 控制台窗口（Windows）。
+    // node agent 自己会拉起 shell、git、网络请求，取消时必须整组回收，
+    // 否则它们会继续写文件、烧 LLM 配额。
+    crate::process_guard::configure(&mut command);
     let mut child = command
         .spawn()
         .map_err(|e| AppError::from(format!("启动 Node resume agent 失败: {}", e)))?;
@@ -637,24 +632,6 @@ async fn load_project(project_id: &str) -> AppResult<Project> {
         .into_iter()
         .find(|project| project.id == project_id)
         .ok_or_else(|| AppError::from(format!("项目不存在: {}", project_id)))
-}
-
-/// 同步版：kill/taskkill 本身瞬间返回，且应用退出路径没有 async 运行时可用。
-fn kill_process_tree(pid: u32) {
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .output();
-    }
 }
 
 #[cfg(all(test, target_os = "windows"))]

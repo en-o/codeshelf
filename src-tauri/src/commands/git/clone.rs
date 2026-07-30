@@ -6,13 +6,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
 use super::GitCloneProgress;
-
-#[cfg(target_os = "windows")]
-use super::CREATE_NO_WINDOW;
 
 // ============== clone 任务状态机 ==============
 //
@@ -130,27 +124,6 @@ fn parse_clone_progress(line: &str) -> Option<GitCloneProgress> {
     }
 }
 
-fn kill_process_tree(pid: u32) {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn git_clone(
@@ -216,35 +189,22 @@ fn git_clone_blocking(
         },
     );
 
-    // Spawn clone process with --progress flag
-    #[cfg(target_os = "windows")]
-    let mut child = Command::new("git")
-        .args(["clone", "--progress", &url, &target_path_str])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            fail(
-                task_id,
-                &target_path,
-                crate::error::AppError::from(format!("启动 git clone 失败: {}", e)),
-            )
-        })?;
-
-    #[cfg(not(target_os = "windows"))]
-    let mut child = Command::new("git")
+    // Spawn clone process with --progress flag。
+    // 独立进程组：git 会拉起 ssh / git-remote-https 等子进程，
+    // 取消时只杀 git 本身的话，它们会继续联网下载。
+    let mut command = Command::new("git");
+    command
         .args(["clone", "--progress", &url, &target_path_str])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            fail(
-                task_id,
-                &target_path,
-                crate::error::AppError::from(format!("启动 git clone 失败: {}", e)),
-            )
-        })?;
+        .stderr(Stdio::piped());
+    crate::process_guard::configure_std(&mut command);
+    let mut child = command.spawn().map_err(|e| {
+        fail(
+            task_id,
+            &target_path,
+            crate::error::AppError::from(format!("启动 git clone 失败: {}", e)),
+        )
+    })?;
 
     // 登记 PID 以便取消。槽位若已不属于本任务，说明状态被外部动过，
     // 与其继续跑一个无法被取消的进程，不如立刻收掉。
@@ -364,7 +324,7 @@ pub async fn cancel_git_clone() -> AppResult<()> {
     };
 
     if let Some(pid) = pid {
-        kill_process_tree(pid);
+        crate::process_guard::kill_tree(pid);
     }
 
     Ok(())
