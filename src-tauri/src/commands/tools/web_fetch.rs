@@ -17,6 +17,11 @@ use crate::error::AppResult;
 use serde_json::Value;
 use std::time::Duration;
 
+/// 单次抓取的**下载**硬上限。与 `max_bytes`（输出上限）不同：
+/// 提取要在完整正文上做，所以下载上限更宽松，但必须存在 —— 否则一个
+/// 无限 chunked 响应就能把内存吃光。
+const MAX_DOWNLOAD_BYTES: usize = 10 * 1024 * 1024;
+
 pub(super) async fn tool_web_fetch(args: &Value) -> AppResult<String> {
     run_web_fetch(args).await
 }
@@ -64,6 +69,8 @@ async fn run_web_fetch(args: &Value) -> AppResult<String> {
 
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms))
+        // 连接阶段单独设上限：总超时可以放宽到 120s，但连不上的地址不该占满这段时间
+        .connect_timeout(Duration::from_millis(timeout_ms.min(10_000)))
         .user_agent("codeshelf/0.1 (+https://github.com/)");
     if let Some(p) = proxy {
         let pr = reqwest::Proxy::all(p)
@@ -96,10 +103,17 @@ async fn run_web_fetch(args: &Value) -> AppResult<String> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let bytes = resp
-        .bytes()
+    // 流式读取并在上限处停止。不能用 `resp.bytes()` ——
+    // 那会把完整 body 先收进内存，之后才按 max_bytes 截断；
+    // 没有 Content-Length 的 chunked 响应在到达截断那一行之前就已经吃满内存了。
+    //
+    // 注意这里的上限是**下载**上限，与 `max_bytes`（输出上限）是两回事：
+    // CSS selector / regex 提取需要在完整正文上做，所以下载上限必须更宽松，
+    // 但仍要有一个确定的天花板。
+    let (bytes, download_truncated) = crate::http_body::read_capped(resp, MAX_DOWNLOAD_BYTES)
         .await
-        .map_err(|e| crate::error::AppError::from(format!("读取响应失败: {}", e)))?;
+        .map_err(crate::error::AppError::from)?;
+    let bytes = bytes.as_slice();
     let total_len = bytes.len();
 
     let ct_lower = content_type.to_lowercase();
@@ -157,7 +171,12 @@ async fn run_web_fetch(args: &Value) -> AppResult<String> {
 
     // 3) 最后按 max_bytes 截断输出
     let (body_out, truncated) = truncate_on_char_boundary(&body, max_bytes);
-    let trailer = if truncated {
+    let trailer = if download_truncated {
+        format!(
+            "\n\n[响应超过下载上限 {} MB，已在读取过程中终止；以下内容不完整]",
+            MAX_DOWNLOAD_BYTES / 1024 / 1024
+        )
+    } else if truncated {
         format!("\n\n[已截断，输出上限 {} 字节]", max_bytes)
     } else {
         String::new()

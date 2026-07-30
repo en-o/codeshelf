@@ -610,13 +610,16 @@ async fn execute_api_endpoint_inner(
         .response_trim_bytes
         .map(|n| n as usize)
         .unwrap_or(DEFAULT_RESPONSE_TRIM_BYTES);
-    let bytes = resp
-        .bytes()
+    // 流式读取，读到 trim 上限就停。原来是 `resp.bytes()` 先全收进内存再截断，
+    // 对方发多少我们就吃多少 —— 无限 chunked 响应能直接把内存耗尽。
+    //
+    // 多读一个字节：用来区分「刚好等于上限」和「确实还有更多」。
+    let (bytes, hit_cap) = crate::http_body::read_capped(resp, trim.saturating_add(1))
         .await
-        .map_err(|e| crate::error::AppError::from(format!("读取响应失败: {}", e)))?;
+        .map_err(crate::error::AppError::from)?;
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let total_bytes = bytes.len();
-    let truncated = total_bytes > trim;
+    let truncated = hit_cap || total_bytes > trim;
     let body_str = trim_response(&bytes, trim);
 
     Ok(ApiExecutionResult {
@@ -661,20 +664,15 @@ pub async fn fetch_api_document_url(url: String) -> AppResult<String> {
         )));
     }
 
-    if let Some(len) = resp.content_length() {
-        if len > MAX_API_DOCUMENT_BYTES {
-            return Err("在线文档超过 10MB，已停止导入".into());
-        }
-    }
-
-    let bytes = resp
-        .bytes()
+    // read_capped 内部会先看 Content-Length 提前拒绝，再在读取过程中计量 ——
+    // Content-Length 可以缺失也可以撒谎，只有边读边算才是真正的边界。
+    let (bytes, truncated) = crate::http_body::read_capped(resp, MAX_API_DOCUMENT_BYTES as usize)
         .await
-        .map_err(|e| crate::error::AppError::from(format!("读取在线文档内容失败: {}", e)))?;
-    if bytes.len() as u64 > MAX_API_DOCUMENT_BYTES {
+        .map_err(crate::error::AppError::from)?;
+    if truncated {
         return Err("在线文档超过 10MB，已停止导入".into());
     }
 
-    String::from_utf8(bytes.to_vec())
+    String::from_utf8(bytes)
         .map_err(|e| crate::error::AppError::from(format!("在线文档不是 UTF-8 文本: {}", e)))
 }

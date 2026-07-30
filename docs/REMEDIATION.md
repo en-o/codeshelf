@@ -35,9 +35,10 @@
 2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
    已完成（AUD-007 部分完成）。
 3. ~~**数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051~~ —— 已完成。
-4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026、AUD-027~~ 已完成；其余按模块分批处理。
+4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026、AUD-027、AUD-029～AUD-031~~ 已完成；
+   其余按模块分批处理。
 
-> 进度：36 / 61 已整改（AUD-001～006、008～027、039、044～051），
+> 进度：39 / 61 已整改（AUD-001～006、008～027、029～031、039、044～051），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -67,6 +68,8 @@
 >   与清理前复核（`ensure_created_dir_unchanged`）。
 > - `src-tauri/src/commands/toolbox/ssh_hostkey.rs` —— SSH 主机密钥校验（正/反向隧道共用）。
 > - `src-tauri/src/commands/toolbox/mod.rs::listen_ip` —— 监听地址与展示地址。
+> - `src-tauri/src/http_body.rs::read_capped` —— HTTP 响应体的流式读取上限。
+>   任何把网络响应读进内存的新代码都应走它，不要再用 `resp.bytes()`。
 > - `src-tauri/src/process_guard.rs` —— 子进程独立进程组、进程树回收、
 >   输出上限与 timeout 钳制。**任何 spawn 外部命令的新代码都应走这里**，不要再各写一份。
 > - `src-node/resume-agent/src/storage/paths.ts` —— Node 侧的 `assertSafeId` / `safeJoin`。
@@ -779,7 +782,14 @@
 
 ### AUD-029 · P2 · 正确解析带 registry 端口的 Docker 镜像
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 前后端各用一处规则替换 `includes(":")` / `contains(':')`，判定对齐 Docker 镜像引用语法：
+  含 `@` 即带 digest；否则只看**最后一个 `/` 之后**的部分有没有 `:`。
+  registry 和端口一定在第一个 `/` 之前，这样切不受端口干扰，IPv6 形式
+  `[::1]:5000/team/app` 同理。
+- 验证：Rust 侧 3 条单测覆盖普通镜像、私有 registry 端口（含 IPv6）、tag、digest、
+  端口+tag、端口+digest 与首尾空白；前端用同样 10 个用例交叉核对，**前后端判定一致**。
+  修复前 `localhost:5000/team/app` 会被当成「已有 tag」，用户填的 tag 被静默忽略。
 - 风险：用 `includes(":")` 判断是否已有 tag，会把 `localhost:5000/team/app` 的端口冒号误判为 tag，
   从而忽略用户指定的 tag。
 - 涉及位置：
@@ -790,7 +800,20 @@
 
 ### AUD-030 · P2 · 网络响应限制必须在读取过程中生效
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 新增公共模块 `src-tauri/src/http_body.rs::read_capped`：**流式**读取并在上限处立即停止，
+  丢弃剩余流。三处 `resp.bytes()` 全部改走它（web_fetch、API endpoint 执行、在线文档导入）。
+- 关键点：Content-Length 预检挡不住问题 —— 那个头可以缺失也可以撒谎。
+  `read_capped` 保留了它用于**提前**拒绝明显超限的响应（省一次无谓下载），
+  但真正的边界是读取过程中的累计计量。
+- web_fetch 的下载上限（10MB）与输出上限 `max_bytes` 是**两回事**：
+  CSS selector / regex 提取要在完整正文上做，所以下载上限更宽松，但必须存在。
+  下载被截断时输出里会明说「内容不完整」。另给连接阶段单独设了超时上限（≤10s），
+  总超时可以放宽到 120s，但连不上的地址不该占满这段时间。
+- 验证：3 条单测起了**真实的本地 HTTP 服务器**。其中「无限 chunked 响应」用例
+  不带 Content-Length 一直发数据，断言读取恰好停在 64KB 上限且被标记为截断 ——
+  服务器侧写失败即证明我们确实提前断开了。另两条覆盖小响应完整返回、
+  Content-Length 声称超限时不下载 body。
 - 风险：WebFetch、API endpoint 和在线文档抓取先把完整 body 读入内存，之后才按 2MB/10MB 截断，
   无 Content-Length 的大响应仍可耗尽内存。
 - 涉及位置：
@@ -801,7 +824,18 @@
 
 ### AUD-031 · P2 · UTF-8 截断和 glob 不得按任意字节切片
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- `ctx.rs::truncate` 的 UTF-8 边界 panic 已在 AUD-049 一并修掉（同一条路径上的共享函数），
+  并留了多字节字符的单测。
+- `fs_ops.rs` 的手写匹配器**整个删掉**（-107 行 / +9 行），改用 `regex` crate。
+  那份 `SimpleRegex` 有两个真 bug：`for i in 0..=s.len()` + `&s[i..]` 按**字节**下标切片，
+  中文/emoji 文件名直接 panic；tokenize 时 `b as char` 把非 ASCII 字节按 Latin-1 解释，
+  中文 pattern 永远匹配不上。
+  当初写它的理由是注释里的「避免引入 regex crate」，但 `regex = "1"` 现在**已经是直接依赖**
+  （web_fetch 的规则提取在用），理由不成立了。
+- 验证：3 条单测覆盖中文 / emoji / 组合字符文件名的匹配与拒绝、基本 glob 语义
+  （`*` 不跨 `/`、`**` 跨目录、`?` 单字符）、以及正则元字符必须按字面量处理
+  （`a+b.txt` 不能匹配 `aab.txt`）。
 - 风险：字符串截断和 glob matcher 使用字节索引构造 `&s[..n]`/`&s[i..]`，切进中文或 emoji 时会 panic。
 - 涉及位置：
   - `src-tauri/src/commands/tools/ctx.rs`
