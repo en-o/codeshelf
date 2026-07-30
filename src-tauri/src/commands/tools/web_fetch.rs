@@ -139,7 +139,7 @@ async fn run_web_fetch(args: &Value) -> AppResult<String> {
             content_type, total_len
         )
     } else {
-        let raw = String::from_utf8_lossy(&bytes).to_string();
+        let raw = String::from_utf8_lossy(bytes).to_string();
         let is_json = ct_lower.contains("application/json") || ct_lower.contains("+json");
         let looks_html = ct_lower.contains("text/html")
             || ct_lower.contains("application/xhtml")

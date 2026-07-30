@@ -13,6 +13,7 @@ import {
 } from "@/services/workflows";
 import { WorkflowEditor } from "./WorkflowEditor";
 import { RunDetail } from "./RunDetail";
+import { errMsg } from "@/utils/errMsg";
 
 function statusBadge(w: Workflow) {
   const s = w.lastRun?.status;
@@ -35,7 +36,7 @@ export function WorkflowsPage() {
     try {
       setWorkflows(await listWorkflows());
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "加载失败");
+      showToast("error", errMsg(e, "加载失败"));
     } finally {
       setLoading(false);
     }
@@ -55,7 +56,7 @@ export function WorkflowsPage() {
       showToast("success", "运行完成");
       refresh();
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "运行失败");
+      showToast("error", errMsg(e, "运行失败"));
     }
   }
 
@@ -66,7 +67,7 @@ export function WorkflowsPage() {
       refresh();
       showToast("success", "已删除");
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "删除失败");
+      showToast("error", errMsg(e, "删除失败"));
     }
   }
 
@@ -75,7 +76,7 @@ export function WorkflowsPage() {
       await setWorkflowEnabled(w.id, !w.enabled);
       refresh();
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "操作失败");
+      showToast("error", errMsg(e, "操作失败"));
     }
   }
 

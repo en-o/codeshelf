@@ -1011,7 +1011,7 @@ fn parse_input_data(data: &str, format: DataFormat) -> AppResult<Vec<u8>> {
 
             let hex_str: String = cleaned.split_whitespace().collect();
 
-            if hex_str.len() % 2 != 0 {
+            if !hex_str.len().is_multiple_of(2) {
                 return Err(crate::error::AppError::from(
                     "十六进制字符串长度必须为偶数".to_string(),
                 ));

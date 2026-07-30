@@ -72,24 +72,6 @@ pub(super) fn truncate(s: String, max: usize) -> String {
     format!("{}\n… [已截断，共 {} 字节]", &s[..end], s.len())
 }
 
-#[cfg(test)]
-mod truncate_tests {
-    #[test]
-    fn does_not_split_multibyte_chars() {
-        // 「中」是 3 字节：max=4 落在第二个字符中间，旧实现会 panic
-        let s = "中文abc".to_string();
-        let out = super::truncate(s.clone(), 4);
-        assert!(out.starts_with("中"), "{out}");
-        assert!(out.contains("已截断"));
-        // emoji 是 4 字节，同样不能切开
-        let e = "🙂🙂🙂".to_string();
-        let out = super::truncate(e, 6);
-        assert!(out.starts_with("🙂"), "{out}");
-        // 不超限时原样返回
-        assert_eq!(super::truncate("abc".to_string(), 10), "abc");
-    }
-}
-
 /// 展开路径开头的 `~` / `~/` 为 $HOME（Windows 下为 %USERPROFILE%）。
 /// 其它情况原样返回。
 pub(super) fn expand_home(input: &str) -> String {
@@ -114,4 +96,22 @@ pub(super) fn expand_home(input: &str) -> String {
         }
     }
     input.to_string()
+}
+
+#[cfg(test)]
+mod truncate_tests {
+    #[test]
+    fn does_not_split_multibyte_chars() {
+        // 「中」是 3 字节：max=4 落在第二个字符中间，旧实现会 panic
+        let s = "中文abc".to_string();
+        let out = super::truncate(s.clone(), 4);
+        assert!(out.starts_with("中"), "{out}");
+        assert!(out.contains("已截断"));
+        // emoji 是 4 字节，同样不能切开
+        let e = "🙂🙂🙂".to_string();
+        let out = super::truncate(e, 6);
+        assert!(out.starts_with("🙂"), "{out}");
+        // 不超限时原样返回
+        assert_eq!(super::truncate("abc".to_string(), 10), "abc");
+    }
 }

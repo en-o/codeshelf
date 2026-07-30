@@ -537,7 +537,9 @@ mod tests {
     fn limits_are_sane() {
         // 中继是全内存的：单文件上限 × 并发上限 不能超过总缓存上限太多，
         // 否则限额形同虚设。这条断言就是防止有人只调其中一个常数。
-        assert!(MAX_FILE_SIZE <= MAX_TOTAL_CACHE);
-        assert!(MAX_FILE_SIZE * MAX_CONCURRENT_UPLOADS <= 4 * MAX_TOTAL_CACHE);
+        // 用 const 块做**编译期**断言：这几个都是常量，运行时断言 clippy 会指出
+        // 「断言结果恒定」。放在 const 里反而更强 —— 改坏了直接编译不过。
+        const _: () = assert!(MAX_FILE_SIZE <= MAX_TOTAL_CACHE);
+        const _: () = assert!(MAX_FILE_SIZE * MAX_CONCURRENT_UPLOADS <= 4 * MAX_TOTAL_CACHE);
     }
 }

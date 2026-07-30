@@ -35,10 +35,9 @@
 2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
    已完成（AUD-007 部分完成）。
 3. ~~**数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051~~ —— 已完成。
-4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026～AUD-038~~ 已完成；
-   剩 AUD-040～AUD-043、AUD-052～AUD-061。
+4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026～AUD-043~~ 已完成；剩 AUD-052～AUD-061。
 
-> 进度：47 / 61 已整改（AUD-001～006、008～039、044～051），
+> 进度：51 / 61 已整改（AUD-001～006、008～043、044～051），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -1029,7 +1028,15 @@
 
 ### AUD-040 · P2 · 收紧 WebView 文件系统能力
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（建议人工回归一次文件读写/目录选择）
+- 先枚举前端 `@tauri-apps/plugin-fs` **实际导入的全部符号**：只有
+  `exists` / `readDir` / `readTextFile` / `writeTextFile`。
+- 据此移除四个无人调用的破坏性权限：`fs:allow-mkdir`、`fs:allow-remove`、
+  `fs:allow-rename`、`fs:allow-copy-file`（37 → 33 条）。
+  `$HOME` 下敏感目录的 deny 规则保留为第二层防护。
+- 刻意**没动** `fs:allow-read` / `fs:allow-write`：报告点名的是删改移复制这类破坏性能力，
+  这两个是读写本身，收得太狠反而可能在运行时踩到没覆盖到的调用路径。
+- 验证：`cargo build --lib` 通过（build.rs 会解析 capabilities，schema 不合法会直接失败）。
 - 风险：WebView 获得 `$HOME/**` 下未使用的 remove/rename/copy/mkdir 权限，扩大前端被利用后的破坏范围。
 - 涉及位置：
   - `src-tauri/capabilities/default.json`
@@ -1038,7 +1045,11 @@
 
 ### AUD-041 · P3 · 限制日志保留总量
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- `RotationStrategy::KeepAll` → `KeepSome(5)`，配合既有的 `max_file_size(10MB)`，
+  日志目录总量上界固定在**约 50MB**。
+- 应用常驻托盘、一跑就是几周，KeepAll 下文件数量和总容量都没有上限。
+  保留 5 个 × 10MB 仍有足够的排查窗口（单文件通常能覆盖数天运行记录）。
 - 风险：日志使用 `RotationStrategy::KeepAll`，长期运行没有文件数量或总容量上限。
 - 涉及位置：
   - `src-tauri/src/app_setup.rs`
@@ -1047,7 +1058,20 @@
 
 ### AUD-042 · P3 · 清理存量 Clippy 告警并收紧门禁
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 存量 16 条全部处理完，`cargo clippy --all-targets -- -D warnings` **通过**。
+- 实际修复（不是加豁免）：
+  - `matches!` 替代冗余 match（scanner）、`is_multiple_of`（netcat）、
+    去掉多余引用（web_fetch）、测试模块挪到文件末尾（ctx.rs）；
+  - pairdrop 的常量断言改成 `const _: () = assert!(...)` —— **编译期**断言比运行时更强，
+    改坏了直接编译不过，同时也不再触发「断言结果恒定」；
+  - `ExternalAddEvent::Added` 装箱：它携带整个 Project，与 `Failed(String)` 体量差距很大，
+    不装箱的话队列里每个值都按最大变体分配。
+- 保留的两处豁免都写了理由：`too_many_arguments`（模块内部函数、单一调用点，
+  包 struct 只是换个地方写同样的字段）、`type_complexity`（8 处全是
+  `Lazy<Arc<Mutex<HashMap<..>>>>` 全局句柄和 sqlx 元组行类型，起别名只是把复杂度挪走）。
+- CI 的 clippy 步骤从 `--lib -- -A clippy::type_complexity` 收紧为
+  `--all-targets -- -D warnings`。
 - 风险：严格 Clippy 尚有存量告警，CI 长期使用豁免，新增同类问题不会形成有效质量门禁。
 - 涉及位置：
   - `.github/workflows/ci.yml`
@@ -1056,7 +1080,21 @@
 
 ### AUD-043 · P3 · 前端保留后端具体错误信息
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **根因就是 CLAUDE.md 硬约束 4**：这两个页面大量使用
+  `e instanceof Error ? e.message : "失败"`，而 Tauri invoke 抛出的是**纯字符串**，
+  永远走不到 `.message` 那一支 —— 后端拼出来的「端口 8080 已被占用」全被吞成通用文案。
+- 新增共享 `src/utils/errMsg.ts`（项目里原本只有 `useMcpGateway.ts` 里的一份局部实现，
+  提取出来供全局复用），覆盖纯字符串 / Error 实例 / 结构化对象三种形态。
+  批量改写 Workflows 与 ApiChat 共 4 个文件。
+- 另外 5 处 `catch { showToast("error", "删除失败") }` 完全丢弃原因，改为带上 `errMsg`。
+- 「打开会话失败」原本只是静默 `setActiveSession(null)` —— 用户看到的是会话内容凭空消失，
+  却不知道为什么。改为如实报错。
+- 其余 `/* ignore */` 的静默 catch 保持不变：都是清理路径或有明确 fallback 返回值，
+  符合「只有明确可忽略的取消/清理操作才能静默处理」。
+- 同时提供 `isUserCancel`，判据保守：只认明确的取消语义，拿不准一律当真错误报出来。
+- 验证：12 个用例覆盖各种错误形态与取消判定，全部通过；并与旧写法做了对比 ——
+  同一个后端字符串，旧写法输出「保存失败」，新写法输出「端口 8080 已被占用」。
 - 风险：部分前端 catch 使用通用文案或空 catch，丢弃 Tauri 返回的具体字符串错误，降低可诊断性。
 - 涉及位置：
   - `src/pages/Workflows/`

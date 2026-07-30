@@ -1,3 +1,9 @@
+// clippy::type_complexity —— 全局豁免，理由：
+// 命中的 8 处全部是 `Lazy<Arc<Mutex<HashMap<String, Arc<T>>>>>` 这类全局状态句柄，
+// 以及 sqlx `query_as` 的元组行类型。给它们起 type 别名只是把同样的复杂度挪到别处，
+// 反而多一层间接、读代码时还要跳转。这条豁免是**有意**的，不是懒得清。
+#![allow(clippy::type_complexity)]
+
 mod app_setup;
 mod commands;
 pub mod error;

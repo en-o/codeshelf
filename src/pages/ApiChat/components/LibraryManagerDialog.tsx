@@ -24,6 +24,7 @@ import {
 } from "./LibraryDialogs";
 import { exportApiLibrary, importApiLibrary } from "../utils/exportLibrary";
 import { importOpenApiDocument, importOpenApiDocumentFromUrl } from "../utils/importOpenApiDocument";
+import { errMsg } from "@/utils/errMsg";
 
 interface LibraryManagerDialogProps {
   open: boolean;
@@ -60,7 +61,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       setGroups(g);
       setEndpoints(e);
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "加载失败");
+      showToast("error", errMsg(err, "加载失败"));
     } finally {
       setLoading(false);
     }
@@ -182,7 +183,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       await reload();
       onChanged?.();
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "保存失败");
+      showToast("error", errMsg(err, "保存失败"));
     }
   }
 
@@ -194,7 +195,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       await reload();
       onChanged?.();
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "保存失败");
+      showToast("error", errMsg(err, "保存失败"));
     }
   }
 
@@ -215,7 +216,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       await reload();
       onChanged?.();
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "删除失败");
+      showToast("error", errMsg(err, "删除失败"));
     }
   }
 
@@ -254,7 +255,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
         showToast("success", `已导出 ${groups.length} 个分组 / ${endpoints.length} 个接口`);
       }
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "导出失败");
+      showToast("error", errMsg(err, "导出失败"));
     }
   }
 
@@ -269,7 +270,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       }
       openImportDraft("接口库备份", parsed.groups, parsed.endpoints);
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "导入失败");
+      showToast("error", errMsg(err, "导入失败"));
     }
   }
 
@@ -357,7 +358,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       if (!parsed) return;
       openImportDraft(parsed.title, parsed.groups, parsed.endpoints);
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "导入接口文档失败");
+      showToast("error", errMsg(err, "导入接口文档失败"));
     }
   }
 
@@ -377,7 +378,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       openImportDraft(parsed.title, parsed.groups, parsed.endpoints);
       setDocumentUrl("");
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "导入在线接口文档失败");
+      showToast("error", errMsg(err, "导入在线接口文档失败"));
       setLoading(false);
       setDocumentUrlDialogOpen(true);
     }

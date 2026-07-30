@@ -58,7 +58,7 @@ pub fn add_projects_by_paths(app: &AppHandle, paths: Vec<String>) {
         focus_main_window(&app);
         for path in paths {
             match commands::project::add_project_by_path(path.clone()).await {
-                Ok(result) => emit_or_buffer(&app, ExternalAddEvent::Added(result)),
+                Ok(result) => emit_or_buffer(&app, ExternalAddEvent::Added(Box::new(result))),
                 Err(e) => {
                     log::error!("外部添加项目失败 ({}): {}", path, e);
                     emit_or_buffer(&app, ExternalAddEvent::Failed(e.to_string()));
@@ -77,7 +77,9 @@ pub fn add_projects_by_paths(app: &AppHandle, paths: Vec<String>) {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "payload")]
 pub enum ExternalAddEvent {
-    Added(commands::project::AddProjectByPathResult),
+    // Box：Added 携带整个 Project，与 Failed(String) 体量差距很大。
+    // 不装箱的话每个 enum 值都按最大变体分配，队列里全是浪费。
+    Added(Box<commands::project::AddProjectByPathResult>),
     Failed(String),
 }
 
@@ -104,7 +106,7 @@ fn emit_or_buffer(app: &AppHandle, event: ExternalAddEvent) {
 fn emit_external_event(app: &AppHandle, event: &ExternalAddEvent) {
     match event {
         ExternalAddEvent::Added(result) => {
-            let _ = app.emit("project-added-externally", result);
+            let _ = app.emit("project-added-externally", result.as_ref());
         }
         ExternalAddEvent::Failed(msg) => {
             let _ = app.emit("project-add-failed", msg.clone());
@@ -260,8 +262,13 @@ fn init_logging(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     file_name: Some("app".into()),
                 },
             ))
-            .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
-            .max_file_size(10 * 1024 * 1024) // 10MB
+            // 保留最近 5 个日志文件，单文件 10MB —— 总量上界固定为约 50MB。
+            //
+            // 原来是 KeepAll：文件数量和总容量都没有上限，长期运行的机器上日志会
+            // 无限增长（应用常驻托盘，一跑就是几周）。
+            // KeepSome(5) 仍保留足够的排查窗口：单文件 10MB 通常能覆盖数天的运行记录。
+            .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+            .max_file_size(10 * 1024 * 1024) // 10MB/文件 × 5 = 上限约 50MB
             .build(),
     )?;
 

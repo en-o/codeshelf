@@ -4,6 +4,7 @@ import { showToast } from "@/components/ui";
 import { CronBuilder } from "@/components/cron";
 import { useAiProvidersStore } from "@/stores/aiProvidersStore";
 import { saveWorkflow, type Workflow, type WorkflowNode } from "@/services/workflows";
+import { errMsg } from "@/utils/errMsg";
 
 interface Props {
   open: boolean;
@@ -111,7 +112,7 @@ export function WorkflowEditor({ open, workflow, onClose, onSaved }: Props) {
       showToast("success", "已保存");
       onSaved();
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "保存失败");
+      showToast("error", errMsg(e, "保存失败"));
     } finally {
       setSaving(false);
     }

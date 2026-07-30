@@ -305,6 +305,9 @@ async fn apply_auth(
     }
 }
 
+// 8 个参数都是登录流程必需的独立输入，且这是模块内部函数、只有一处调用。
+// 包成 struct 只是把同样的字段换个地方写，不会让调用点更清晰。
+#[allow(clippy::too_many_arguments)]
 async fn ensure_session_login(
     cache_key: &str,
     session: &SessionClient,

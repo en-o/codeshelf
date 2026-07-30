@@ -110,10 +110,10 @@ async fn concurrent_scan(
 
             // 扫描端口
             let addr = SocketAddr::new(target, port);
-            let is_open = match timeout(timeout_duration, TcpStream::connect(addr)).await {
-                Ok(Ok(_)) => true,
-                _ => false,
-            };
+            let is_open = matches!(
+                timeout(timeout_duration, TcpStream::connect(addr)).await,
+                Ok(Ok(_))
+            );
 
             // 更新进度
             scanned.fetch_add(1, Ordering::SeqCst);

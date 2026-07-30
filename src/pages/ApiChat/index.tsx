@@ -31,6 +31,7 @@ import { ApiSessionSidebar } from "./components/ApiSessionSidebar";
 import { LibraryManagerDialog } from "./components/LibraryManagerDialog";
 import { EndpointPickerDialog } from "./components/EndpointPickerDialog";
 import { useApiChatOrchestration } from "./hooks/useApiChatOrchestration";
+import { errMsg } from "@/utils/errMsg";
 
 interface ModelOption {
   providerId: string;
@@ -149,8 +150,8 @@ export function ApiChatPage() {
         if (list.length > 0) {
           setActiveSessionId((prev) => prev ?? list[0].id);
         }
-      } catch {
-        showToast("error", "加载会话失败");
+      } catch (e) {
+        showToast("error", errMsg(e, "加载会话失败"));
       } finally {
         setListLoading(false);
       }
@@ -167,8 +168,11 @@ export function ApiChatPage() {
       try {
         const s = await getApiChatSession(activeSessionId);
         setActiveSession(s);
-      } catch {
+      } catch (e) {
+        // 会话读不出来是真故障（文件损坏 / 库打不开），不能只是静默清空 ——
+        // 用户看到的是"会话内容凭空消失"，却不知道为什么。
         setActiveSession(null);
+        showToast("error", "打开会话失败", errMsg(e, "无法读取该会话"));
       }
     }
     load();
@@ -230,7 +234,7 @@ export function ApiChatPage() {
       setInput("");
       setPickerOpen(null);
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "创建失败");
+      showToast("error", errMsg(err, "创建失败"));
     }
   }
 
@@ -243,7 +247,7 @@ export function ApiChatPage() {
       setPickerOpen(null);
       showToast("success", "已更新接口绑定");
     } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "更新失败");
+      showToast("error", errMsg(err, "更新失败"));
     }
   }
 
@@ -267,8 +271,8 @@ export function ApiChatPage() {
         setActiveSessionId(next);
         if (!next) setActiveSession(null);
       }
-    } catch {
-      showToast("error", "删除失败");
+    } catch (e) {
+      showToast("error", errMsg(e, "删除失败"));
     }
   }
 
@@ -279,8 +283,8 @@ export function ApiChatPage() {
       syncSummary(updated);
       if (activeSession?.id === updated.id) setActiveSession(updated);
       setRenameTarget(null);
-    } catch {
-      showToast("error", "重命名失败");
+    } catch (e) {
+      showToast("error", errMsg(e, "重命名失败"));
     }
   }
 
@@ -291,8 +295,8 @@ export function ApiChatPage() {
       const next: ApiChatSession = { ...full, pinned: !full.pinned };
       const saved = await saveApiChatSession(next);
       handleSession(saved);
-    } catch {
-      showToast("error", "操作失败");
+    } catch (e) {
+      showToast("error", errMsg(e, "操作失败"));
     }
   }
 
@@ -501,8 +505,8 @@ export function ApiChatPage() {
                   try {
                     const saved = await saveApiChatSession(next);
                     handleSession(saved);
-                  } catch {
-                    showToast("error", "删除失败");
+                  } catch (e) {
+                    showToast("error", errMsg(e, "删除失败"));
                   }
                 }}
               />

@@ -75,11 +75,13 @@ jobs:
             echo "::error::src/bindings.ts 与后端命令不一致。请在 src-tauri 下运行 'cargo test --lib export_bindings' 并提交结果。"
             exit 1
           fi
-      - name: cargo clippy
+      - name: cargo clippy（严格）
         working-directory: src-tauri
-        # 暂不加 -D warnings：现存约 10 条历史告警（多为「类型过于复杂」），
-        # 先保证新代码不引入 error 级问题，清完存量再收紧。
-        run: cargo clippy --lib -- -A clippy::type_complexity
+        # 存量告警已清完：能修的都修了（matches!、is_multiple_of、needless_borrow、
+        # 测试模块位置、常量断言改成编译期 const 断言、大 enum 变体装箱），
+        # 确需保留的两条在代码里做了带理由的局部 / crate 级 allow。
+        # 现在可以上 -D warnings，新引入的同类问题会直接挡在 CI 上。
+        run: cargo clippy --all-targets -- -D warnings
 
   msrv:
     name: 最低工具链验证 (Rust 1.88)
