@@ -10,6 +10,7 @@ import {
   runsDir,
   safeJoin,
 } from "./paths.js";
+import { readJsonOrBackup, writeFileAtomic, writeJsonAtomic } from "./atomicIo.js";
 import type {
   AgentEvent,
   AgentRunRecord,
@@ -19,17 +20,13 @@ import type {
   ResumeV2,
 } from "../types.js";
 
+/** 解析失败会把损坏文件改名备份，不静默丢数据。 */
 export async function readJson<T>(file: string): Promise<T | undefined> {
-  try {
-    return JSON.parse(await fs.readFile(file, "utf8")) as T;
-  } catch {
-    return undefined;
-  }
+  return readJsonOrBackup<T>(file);
 }
 
 async function writeJson(file: string, value: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(value, null, 2), "utf8");
+  await writeJsonAtomic(file, value);
 }
 
 export async function rotateRuns(dataDir: string, projectId: string): Promise<void> {
@@ -71,8 +68,7 @@ export async function writeArtifact(
   const safe = fileName.replace(/[^a-zA-Z0-9_.-]/g, "_");
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}-${safe}`;
   const file = safeJoin(artifactsDir(dataDir, projectId), id, "artifactId");
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, content, "utf8");
+  await writeFileAtomic(file, content);
   return { id, label, kind, chars: [...content].length };
 }
 
@@ -94,8 +90,8 @@ export async function saveFinalOutput(
 ): Promise<void> {
   const dir = projectDir(dataDir, projectId);
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(backgroundFile(dataDir, projectId), output.background, "utf8");
-  await fs.writeFile(path.join(dir, "resume.json"), JSON.stringify(resume, null, 2), "utf8");
+  await writeFileAtomic(backgroundFile(dataDir, projectId), output.background);
+  await writeJsonAtomic(path.join(dir, "resume.json"), resume);
 }
 
 export async function loadBackground(dataDir: string, projectId: string): Promise<string | null> {
@@ -107,9 +103,7 @@ export async function loadBackground(dataDir: string, projectId: string): Promis
 }
 
 export async function saveBackground(dataDir: string, projectId: string, content: string): Promise<void> {
-  const file = backgroundFile(dataDir, projectId);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, content, "utf8");
+  await writeFileAtomic(backgroundFile(dataDir, projectId), content);
 }
 
 export async function listBackgroundProjects(dataDir: string): Promise<string[]> {

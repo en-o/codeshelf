@@ -194,8 +194,16 @@ pub async fn get_resumes() -> AppResult<serde_json::Value> {
         return Ok(serde_json::json!([]));
     }
 
-    let data: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!([]));
-    Ok(data)
+    // 不能 `unwrap_or(json!([]))`：解析失败静默回空数组，下一次 save_resumes
+    // 就把空数组写回去，用户的简历数据永久没了。
+    // parse_json_or_backup 会先把损坏文件改名成 `<原名>.corrupt-<时间戳>` 再回默认值。
+    let data: serde_json::Value = crate::storage::parse_json_or_backup(&path, &content);
+    // Value::default() 是 Null，对调用方来说不是合法的"空列表"，这里归一化一下
+    Ok(if data.is_array() {
+        data
+    } else {
+        serde_json::json!([])
+    })
 }
 
 #[tauri::command]

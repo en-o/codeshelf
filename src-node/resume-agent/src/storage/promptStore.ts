@@ -1,7 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
 import { promptsFile } from "./paths.js";
+import { readJsonOrBackup, writeJsonAtomic } from "./atomicIo.js";
 import type { ResumeAgentPromptConfig } from "../types.js";
 
 export const PROMPT_VERSION = "resume-deep-agent-v10";
@@ -218,12 +216,10 @@ export function defaultPromptConfig(): ResumeAgentPromptConfig {
 }
 
 export async function loadPromptConfig(dataDir: string): Promise<ResumeAgentPromptConfig> {
-  try {
-    const raw = await fs.readFile(promptsFile(dataDir), "utf8");
-    return normalizePromptConfig(JSON.parse(raw) as Partial<ResumeAgentPromptConfig>);
-  } catch {
-    return defaultPromptConfig();
-  }
+  // 损坏时 readJsonOrBackup 会先把文件改名备份再返回 undefined —— 用户改过的
+  // prompt 不会被下一次 savePromptConfig 用默认值悄悄覆盖掉。
+  const raw = await readJsonOrBackup<Partial<ResumeAgentPromptConfig>>(promptsFile(dataDir));
+  return raw ? normalizePromptConfig(raw) : defaultPromptConfig();
 }
 
 export async function savePromptConfig(
@@ -231,9 +227,7 @@ export async function savePromptConfig(
   config: ResumeAgentPromptConfig,
 ): Promise<ResumeAgentPromptConfig> {
   const next = normalizePromptConfig(config);
-  const file = promptsFile(dataDir);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(next, null, 2), "utf8");
+  await writeJsonAtomic(promptsFile(dataDir), next);
   return next;
 }
 

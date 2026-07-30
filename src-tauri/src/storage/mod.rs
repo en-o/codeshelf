@@ -35,13 +35,33 @@ pub fn write_atomic<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> std
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".to_string());
-    let tmp = path.with_file_name(format!("{}.tmp", file_name));
-    {
+    // 临时名必须**每次唯一**。用固定的 `<name>.tmp` 时，两个并发保存会写同一个临时文件，
+    // 互相覆盖内容后各自 rename，结果可能是一份半新半旧的残缺文件 ——
+    // 原子写反而成了破坏源。pid + 单调计数器足以区分进程内外的并发。
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = path.with_file_name(format!(
+        "{}.tmp-{}-{}",
+        file_name,
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(contents.as_ref())?;
         f.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = write_result {
+        // 写失败别把临时文件留在数据目录里
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
-    std::fs::rename(&tmp, path)
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// 解析 JSON 数据文件；失败时把损坏文件改名备份（<原名>.corrupt-<时间戳>）并返回默认值。
@@ -103,6 +123,50 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().to_string_lossy().contains(".corrupt-")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 并发写同一文件不能互相破坏。用固定的 `<name>.tmp` 时，多个线程写同一个
+    /// 临时文件、内容交错后各自 rename，最终可能落下一份长度对不上的残缺文件。
+    #[test]
+    fn concurrent_writes_never_tear_the_file() {
+        let dir = std::env::temp_dir().join(format!("codeshelf-concurrent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("data.json");
+
+        // 长度差异很大的载荷，撕裂时长度对不上就能被发现
+        let payloads: Vec<String> = (0..12)
+            .map(|i| format!("{}:{}", i, "x".repeat((i + 1) * 5000)))
+            .collect();
+
+        std::thread::scope(|scope| {
+            for p in &payloads {
+                let path = path.clone();
+                scope.spawn(move || {
+                    write_atomic(&path, p.as_bytes()).expect("write_atomic");
+                });
+            }
+        });
+
+        // 读回来必须恰好等于其中某一个完整载荷
+        let got = std::fs::read_to_string(&path).expect("文件应可读");
+        assert!(
+            payloads.contains(&got),
+            "写入被撕裂：长度 {}，前缀 {:?}",
+            got.len(),
+            &got[..20.min(got.len())]
+        );
+
+        // 临时文件不能留在数据目录里
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "残留临时文件: {leftovers:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

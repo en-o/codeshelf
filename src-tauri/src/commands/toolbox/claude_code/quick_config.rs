@@ -146,11 +146,31 @@ pub async fn apply_quick_config(
     .await
     .ok();
 
-    let mut config: serde_json::Value = if let Some(content) = existing_content {
-        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
-    } else {
-        serde_json::json!({})
+    // 这是**用户自己的** Claude 配置文件（settings.json），里面有 API key、MCP server、
+    // 权限规则等。解析失败时绝不能 `unwrap_or(json!({}))` —— 那会用一个只含本次勾选项的
+    // 空对象覆盖回去，用户的全部配置当场消失。
+    //
+    // 也不走 parse_json_or_backup：那会在用户目录里改名留下 `.corrupt-*` 文件，
+    // 对别人的目录太越界。这里直接拒绝并说明原因，让用户自己去修那几行 JSON。
+    let mut config: serde_json::Value = match existing_content {
+        Some(content) if !content.trim().is_empty() => {
+            serde_json::from_str(&content).map_err(|e| {
+                crate::error::AppError::from(format!(
+                    "现有 Claude 配置不是合法 JSON（{}），已中止写入以免覆盖你的配置。\n\
+                     请先修正 {} 后重试。",
+                    e, config_path
+                ))
+            })?
+        }
+        _ => serde_json::json!({}),
     };
+    // 解析出来是合法 JSON 但不是对象（比如整个文件是个数组）时同样不能往里塞键
+    if !config.is_object() {
+        return Err(crate::error::AppError::from(format!(
+            "现有 Claude 配置的顶层不是 JSON 对象，已中止写入以免破坏它。请检查 {}",
+            config_path
+        )));
+    }
 
     // 获取所有快捷配置选项
     let all_options = get_quick_config_options().await?;
