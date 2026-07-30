@@ -32,12 +32,12 @@
 所有 P0/P1 都是发布前置条件，不应带着未验收的 P1 发版。建议按以下顺序推进：
 
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
-2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-048~~
-   已完成，AUD-007 部分完成；剩 AUD-049、AUD-050。
+2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
+   已完成（AUD-007 部分完成）。
 3. **数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
 
-> 进度：21 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044～048），
+> 进度：23 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044～050），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -54,6 +54,8 @@
 > - AUD-047：导入 Chat 会话默认创建新 ID 的独立会话，不再按文件里的原 ID 覆盖；
 >   要覆盖需在冲突弹窗里显式选「替换现有会话」。导出 JSON 新增 `schemaVersion` 字段
 >   （旧导出仍可导入）。
+> - AUD-050：项目详情页的默认远程改为「记住的选择 → upstream → origin → 首项」，
+>   不再是列表第一个；「同步全部分支」在全部失败时如实报错、部分失败时保留明细不自动关闭。
 >
 > 已建立的公共守卫，后续条目应直接复用而不是各写一份：
 > - `src-tauri/src/path_guard.rs` —— 受保护目录、可删除目录、外部 ID → 安全路径、
@@ -61,6 +63,8 @@
 >   与清理前复核（`ensure_created_dir_unchanged`）。
 > - `src-tauri/src/commands/toolbox/ssh_hostkey.rs` —— SSH 主机密钥校验（正/反向隧道共用）。
 > - `src-tauri/src/commands/toolbox/mod.rs::listen_ip` —— 监听地址与展示地址。
+> - `src-tauri/src/process_guard.rs` —— 子进程独立进程组、进程树回收、
+>   输出上限与 timeout 钳制。**任何 spawn 外部命令的新代码都应走这里**，不要再各写一份。
 > - `src-node/resume-agent/src/storage/paths.ts` —— Node 侧的 `assertSafeId` / `safeJoin`。
 >
 
@@ -1039,7 +1043,39 @@
 
 ### AUD-049 · P1 · Shell 和 Agent 子进程必须有输出、时间和进程树边界
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（Windows job object 未做，见末尾）
+- 新增公共模块 `src-tauri/src/process_guard.rs`。clone.rs 和 resume_node_agent.rs 原先
+  **各有一份** `kill_process_tree`，Unix 分支都是 `kill <pid>` —— 同一个 bug 抄了两遍。
+  现在收敛成一处，两边都改为调用它（本地副本已删除）。
+- 三条边界：
+  - **进程树**：`configure()` / `configure_std()` 给子进程 `process_group(0)`，
+    使 pgid == pid，`kill_tree` 就能对 `-pid` 发信号覆盖全部后代（先 TERM、300ms 后 KILL，
+    并保留单进程兜底）。我们 spawn 的是 `/bin/sh -c`、`git`、`node`，它们自己还会拉起
+    ssh / git-remote-https / 后台任务 —— 只杀前台进程等于取消只是看起来生效了。
+  - **输出**：`shell.rs` 改成边读边计量（`read_capped`），累计到 256KB 立刻杀进程树。
+    旧实现用 `Command::output()`，会把完整 stdout/stderr 先收进内存、最后才截断 50KB，
+    `yes` 在超时之前就 OOM 了。
+  - **时间**：`clamp_timeout_ms` 把工具参数里的 timeout 钳到 [1s, 10min]。
+    这个值由模型生成，无上限时 `timeout: 999999999` 能让进程挂到应用退出。
+- 顺带修了 `ctx.rs::truncate` 的 UTF-8 边界 panic：`&s[..max]` 会在多字节字符中间切断，
+  而命令输出和文件内容里中文、emoji 很常见。这是所有工具共用的函数，属于同一条路径上的根因。
+- 验证（`cargo test --lib` 36 通过，新增 6 条）：
+  - `kill_tree_reaps_grandchildren`：sh 拉起后台 sleep 并写出其 PID，杀进程组后对该 PID
+    做 signal-0 存活探测。**跑过反向对照** —— 注释掉 `configure()` 后用例确实失败。
+    这一步很关键：第一版用 `ps -g <pid>` 断言，进程组不存在时 ps 返回空，
+    把 `configure()` 注释掉照样通过，等于什么都没测，改成直接追踪孙子 PID 才成立。
+  - `unbounded_output_is_capped_and_killed`：`yes` 无限输出，断言返回体有确定上界、
+    包含截断说明、且远早于 timeout 返回（说明是被上限截停而非超时）。
+  - `timeout_kills_background_descendants`：超时后后台孙子进程确实已死。
+  - 另有 timeout 钳制上下界、truncate 多字节边界两条。
+  - **Windows 交叉编译已跑**（改动涉及多处 `#[cfg(windows)]`）：
+    `cargo check --lib --target x86_64-pc-windows-gnu` 通过。
+- **未做（需要单独决策）**：Windows 侧仍用 `taskkill /PID <pid> /T /F` 遍历进程树，
+  没有改成 job object。job object 才能保证「父进程被强杀时子进程一并终止」，
+  但需要引入 `windows` crate 并写 unsafe 绑定，且本机无法真机验证。
+  taskkill /T 是两处原有实现就在用的机制，覆盖常规场景；真正有 bug 的是 Unix 分支，已修。
+- **未做**：`src-node/resume-agent/src/fs/projectBackend.ts` 未改动。Node 侧的子进程
+  现在整体位于 node agent 的进程组内，杀组即可连带回收，不需要它自己再做一层。
 - 风险：Chat Bash 使用 `Command::output()` 先把完整 stdout/stderr 收入内存，最后才截断 50KB；
   `yes` 等命令可在超时前导致 OOM，且工具参数可提供没有上限的 timeout。macOS/Linux 的 clone 和
   resume agent 取消只 kill 直接 PID，Node、shell、ssh 等后代可能继续联网、写文件或消耗 LLM 配额。
@@ -1056,7 +1092,33 @@
 
 ### AUD-050 · P1 · Git 远程选择、upstream 统计和同步结果使用同一真相源
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **真相源统一**：`GitStatus` 新增 `upstreamRemote` / `upstreamBranch`。
+  ahead/behind 和待推拉列表本来就按 `@{upstream}` 算，但以前不告诉前端 upstream 是谁，
+  界面只能拿 `remotes[0]` 当默认操作目标 —— 统计和操作可以指向两个不同仓库。
+  - `get_upstream` 按**已配置的 remote 名做最长前缀匹配**，不是按第一个 `/` 切：
+    分支名带斜杠（`feature/deep/name`）时按斜杠切会切错，`origin` 也会抢先匹配掉 `origin-mirror`。
+- **列表顺序固定**：`get_remotes` 原来直接 `HashMap::into_values()`，顺序不稳定，
+  同一个仓库每次调用都可能换序。改为按名字排序。
+- **默认远程优先级**（`ProjectDetailPanel`）：显式记住的选择 → upstream → `origin` → 列表首项。
+  显式选择按项目持久化到 localStorage（纯 UI 偏好，不进 Project schema 以免动数据迁移；
+  项目里已有 `chat.sessionListCollapsed` 的先例）。切项目时清空，不会带着上个仓库的值。
+- **界面可核对**：`GitSidebar` 直接写出「领先/落后基准：origin/main」和
+  「推送/拉取目标：backup/main」两行，两者不是同一个远程时标黄并注明。
+  未设置 upstream 时也明说「领先/落后不可用」，不再显示成 0/0 让人误以为已同步。
+- **同步结果结构化**：`sync_to_remote` 的返回从拼接字符串换成
+  `SyncResult { targetRemote, succeeded, failed, branches: [{ branch, ok, isDefault, error }] }`。
+  - **0 个分支成功时返回 Err**。以前无条件返回 Ok，前端于是弹「同步成功」并关窗，
+    失败明细只是被拼进了那句提示里。
+  - 部分失败：前端留在弹窗内逐分支列出成功/失败与原因，**不自动关闭**，toast 用 warning。
+- 命令签名变更，已按硬约束 2 重新生成 `src/bindings.ts`（`cargo test --lib export_bindings`）。
+- 验证：
+  - `cargo test --lib` 37 通过。新增 `upstream_is_split_on_remote_name_not_first_slash`：
+    造真实仓库，同时配 `origin` 和 `origin-mirror` 两个 remote、分支名用 `feature/deep/name`，
+    断言解析出的是 `origin-mirror` 而非 `origin`，且分支名的斜杠完整保留。
+    同时断言未设 upstream 时干净返回 None。
+  - `tsc --noEmit`、`npm run build` 通过。
+  - **Windows 交叉编译通过**。
 - 风险：
   - remotes 经 HashMap `into_values()` 返回，顺序不稳定；详情页把第一个远程当“当前远程”，切项目时
     还可能保留上个仓库的值，而 ahead/behind 与待推拉提交始终基于 `@{upstream}`。

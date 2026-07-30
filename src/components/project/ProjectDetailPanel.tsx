@@ -31,6 +31,36 @@ import { useProjectsStore } from "@/stores/projectsStore";
 import { useAiProvidersStore } from "@/stores/aiProvidersStore";
 import { createChatSession, saveChatSession } from "@/services/chat";
 
+/**
+ * 用户显式选择的远程按项目持久化。
+ *
+ * 不进 Project schema：这是纯 UI 偏好，加字段要动数据迁移，
+ * 而项目里已经有 localStorage 存 UI 偏好的先例（chat.sessionListCollapsed）。
+ */
+const PREFERRED_REMOTE_KEY = "project.preferredRemote";
+
+function loadPreferredRemote(projectId: string): string | null {
+  try {
+    const raw = localStorage.getItem(PREFERRED_REMOTE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, string>;
+    return typeof map[projectId] === "string" ? map[projectId] : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePreferredRemote(projectId: string, remote: string) {
+  try {
+    const raw = localStorage.getItem(PREFERRED_REMOTE_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    map[projectId] = remote;
+    localStorage.setItem(PREFERRED_REMOTE_KEY, JSON.stringify(map));
+  } catch {
+    /* 隐私模式等场景写不了 localStorage，退化成不记忆即可 */
+  }
+}
+
 interface ProjectDetailPanelProps {
   project: Project;
   onClose: () => void;
@@ -142,12 +172,34 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
     loadProjectDetails(token);
   }, [project.path, historyLimit]);
 
-  // 当远程列表加载完成后，设置默认当前远程
+  // 默认远程的真相源，优先级从高到低：
+  //   1. 用户为**这个项目**显式选过的（持久化，重启和切项目都不会漂）
+  //   2. 当前分支的 upstream —— ahead/behind 和待推拉列表都是按它算的，
+  //      默认操作目标必须与统计目标一致
+  //   3. 名为 origin 的远程
+  //   4. 列表第一个（后端已按名字排序，不再是 HashMap 的随机序）
+  //
+  // 以前直接取 remotes[0]，而后端用 HashMap.into_values() 返回，顺序不稳定：
+  // 同时存在 origin / upstream / backup 时，默认推送目标每次都可能不一样。
   useEffect(() => {
-    if (remotes.length > 0 && !currentRemote) {
-      setCurrentRemote(remotes[0].name);
-    }
-  }, [remotes, currentRemote]);
+    if (remotes.length === 0 || currentRemote) return;
+    const names = remotes.map((r) => r.name);
+    const remembered = loadPreferredRemote(project.id);
+    const next =
+      (remembered && names.includes(remembered) && remembered) ||
+      (gitStatus?.upstreamRemote && names.includes(gitStatus.upstreamRemote)
+        ? gitStatus.upstreamRemote
+        : null) ||
+      (names.includes("origin") ? "origin" : null) ||
+      names[0];
+    setCurrentRemote(next);
+  }, [remotes, currentRemote, gitStatus?.upstreamRemote, project.id]);
+
+  /** 用户显式改选远程：记住这个项目的选择 */
+  function handleSelectRemote(name: string) {
+    setCurrentRemote(name);
+    savePreferredRemote(project.id, name);
+  }
 
   // 当切换远程仓库时，重新获取提交历史
   useEffect(() => {
@@ -509,7 +561,7 @@ export function ProjectDetailPanel({ project, onClose, onUpdate, onSwitchProject
             onAddRemote={() => setShowAddRemoteModal(true)}
             onOpenSyncModal={() => setShowSyncModal(true)}
             onSelectRemote={(remoteName) => {
-              setCurrentRemote(remoteName);
+              handleSelectRemote(remoteName);
               showToast("success", "切换成功", `已切换到远程仓库 ${remoteName}`);
             }}
             onRemoveRemote={handleRemoveRemote}

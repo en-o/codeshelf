@@ -6,6 +6,7 @@ import type {
   BranchInfo,
   RemoteInfo,
   GitRepo,
+  SyncResult,
 } from "@/types";
 
 export interface ConflictFileContent {
@@ -109,7 +110,7 @@ export async function syncToRemote(
   targetRemote: string,
   syncAllBranches: boolean,
   force: boolean = false
-): Promise<string> {
+): Promise<SyncResult> {
   return invoke("sync_to_remote", {
     path,
     sourceRemote,

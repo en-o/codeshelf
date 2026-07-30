@@ -6,7 +6,7 @@ use std::process::Command;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-use super::{run_git_command, RemoteInfo};
+use super::{run_git_command, RemoteInfo, SyncBranchResult, SyncResult};
 
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;
@@ -41,7 +41,13 @@ pub async fn get_remotes(path: String) -> AppResult<Vec<RemoteInfo>> {
         }
     }
 
-    Ok(remotes.into_values().collect())
+    // HashMap 的 into_values() 顺序不稳定，同一个仓库每次调用都可能换序 ——
+    // 界面拿「第一个」当默认远程时，默认推送目标就会随机漂移。按名字排序固定下来。
+    // （真正的默认目标由 upstream 决定，见 GitStatus::upstream_remote；
+    //  这里只保证列表本身可预期。）
+    let mut list: Vec<RemoteInfo> = remotes.into_values().collect();
+    list.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(list)
 }
 
 #[tauri::command]
@@ -126,7 +132,7 @@ pub async fn sync_to_remote(
     target_remote: String,
     sync_all_branches: bool,
     force: bool,
-) -> AppResult<String> {
+) -> AppResult<SyncResult> {
     // 整个流程是「fetch + 逐分支 push」，网络耗时可达分钟级；
     // 函数体全是同步代码，整体丢进阻塞线程池，避免占用 tokio worker。
     tokio::task::spawn_blocking(move || {
@@ -142,7 +148,7 @@ fn sync_to_remote_blocking(
     target_remote: String,
     sync_all_branches: bool,
     force: bool,
-) -> AppResult<String> {
+) -> AppResult<SyncResult> {
     // First, fetch all branches from source remote to ensure we have latest refs
     run_git_command(&path, &["fetch", &source_remote, "--prune"])?;
 
@@ -200,7 +206,7 @@ fn sync_to_remote_blocking(
 
         // Push each branch using remote tracking ref
         // Use: refs/remotes/origin/branch:refs/heads/branch
-        let mut results = Vec::new();
+        let mut results: Vec<SyncBranchResult> = Vec::new();
         for branch in &branches {
             let refspec = format!(
                 "refs/remotes/{}/{}:refs/heads/{}",
@@ -212,23 +218,41 @@ fn sync_to_remote_blocking(
             }
 
             let is_default = default_branch.as_ref() == Some(branch);
-            match run_git_command(&path, &args) {
-                Ok(_) => {
-                    if is_default {
-                        results.push(format!("✓ {} (默认分支)", branch));
-                    } else {
-                        results.push(format!("✓ {}", branch));
-                    }
-                }
-                Err(e) => results.push(format!("✗ {}: {}", branch, e)),
-            }
+            let (ok, error) = match run_git_command(&path, &args) {
+                Ok(_) => (true, None),
+                Err(e) => (false, Some(e.to_string())),
+            };
+            results.push(SyncBranchResult {
+                branch: branch.clone(),
+                ok,
+                is_default,
+                error,
+            });
         }
 
-        Ok(format!(
-            "同步完成 {} 个分支:\n{}",
-            branches.len(),
-            results.join("\n")
-        ))
+        let succeeded = results.iter().filter(|r| r.ok).count() as u32;
+        let failed = results.len() as u32 - succeeded;
+
+        // 一个都没成功 = 整体失败。以前这里无条件返回 Ok，
+        // 前端于是提示「同步成功」并关窗，失败明细只是被拼进了那句提示里。
+        if succeeded == 0 {
+            let detail = results
+                .iter()
+                .filter_map(|r| r.error.as_ref().map(|e| format!("{}: {}", r.branch, e)))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Err(crate::error::AppError::from(format!(
+                "同步失败，{} 个分支全部推送失败：\n{}",
+                failed, detail
+            )));
+        }
+
+        Ok(SyncResult {
+            target_remote,
+            succeeded,
+            failed,
+            branches: results,
+        })
     } else {
         // Sync only current branch
         let branch = run_git_command(&path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
@@ -239,9 +263,16 @@ fn sync_to_remote_blocking(
         }
 
         run_git_command(&path, &args)?;
-        Ok(format!(
-            "Successfully synced branch '{}' to '{}'",
-            branch, target_remote
-        ))
+        Ok(SyncResult {
+            target_remote,
+            succeeded: 1,
+            failed: 0,
+            branches: vec![SyncBranchResult {
+                branch,
+                ok: true,
+                is_default: false,
+                error: None,
+            }],
+        })
     }
 }

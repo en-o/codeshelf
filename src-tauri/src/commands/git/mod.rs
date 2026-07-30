@@ -37,6 +37,37 @@ pub struct GitStatus {
     pub conflicted: Vec<String>,
     pub ahead: u32,
     pub behind: u32,
+    /// `ahead`/`behind` 是相对 `@{upstream}` 算的。把 upstream 究竟是谁一起报出来，
+    /// 界面才能保证「统计的目标」和「push/pull 的目标」是同一个 —— 以前界面拿
+    /// remotes[0] 当默认远程，统计却来自 upstream，两者可以指向不同仓库。
+    /// 没有设置 upstream 时为 None，此时 ahead/behind 都是 0。
+    pub upstream_remote: Option<String>,
+    pub upstream_branch: Option<String>,
+}
+
+/// 单个分支的同步结果。
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBranchResult {
+    pub branch: String,
+    pub ok: bool,
+    pub is_default: bool,
+    /// 失败原因；成功时为 None
+    pub error: Option<String>,
+}
+
+/// 同步整体结果。
+///
+/// 以前返回的是一个把 `✗ branch: err` 拼进去的字符串，且**永远是 Ok** ——
+/// 全部分支推送失败时前端照样弹「同步成功」然后关窗。改成结构化结果，
+/// 让前端能区分全成功 / 部分失败，并且失败明细不会被折叠进一句提示里。
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResult {
+    pub target_remote: String,
+    pub succeeded: u32,
+    pub failed: u32,
+    pub branches: Vec<SyncBranchResult>,
 }
 
 #[derive(Debug, Serialize, Deserialize, specta::Type)]

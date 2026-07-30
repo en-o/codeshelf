@@ -39,6 +39,29 @@ export interface GitStatus {
   conflicted: string[];
   ahead: number;
   behind: number;
+  /**
+   * ahead/behind 是相对 `@{upstream}` 算的，这里说明 upstream 究竟是谁。
+   * 界面必须用它作为默认的 push/pull 目标，否则「统计的目标」和「操作的目标」
+   * 可以指向不同仓库。未设置 upstream 时为 null，此时 ahead/behind 均为 0。
+   */
+  upstreamRemote: string | null;
+  upstreamBranch: string | null;
+}
+
+/** 单个分支的同步结果 */
+export interface SyncBranchResult {
+  branch: string;
+  ok: boolean;
+  isDefault: boolean;
+  error: string | null;
+}
+
+/** 同步整体结果：区分全成功与部分失败，0 成功时后端直接返回错误 */
+export interface SyncResult {
+  targetRemote: string;
+  succeeded: number;
+  failed: number;
+  branches: SyncBranchResult[];
 }
 
 export interface CommitInfo {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, Database, Plus, AlertCircle } from "lucide-react";
-import type { RemoteInfo } from "@/types";
+import type { RemoteInfo, SyncResult } from "@/types";
 import { syncToRemote } from "@/services/git";
 import { AddRemoteModal } from "./AddRemoteModal";
 import { showToast } from "@/components/ui";
@@ -26,6 +26,8 @@ export function SyncRemoteModal({
   const [pendingSelectRemote, setPendingSelectRemote] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 部分失败时把逐分支明细留在弹窗里，不 toast 一句「同步成功」就关掉
+  const [result, setResult] = useState<SyncResult | null>(null);
 
   const otherRemotes = remotes.filter((r) => r.name !== sourceRemote);
 
@@ -60,7 +62,7 @@ export function SyncRemoteModal({
       setSyncing(true);
       setError(null);
 
-      const result = await syncToRemote(
+      const res = await syncToRemote(
         projectPath,
         sourceRemote,
         selectedRemote,
@@ -68,12 +70,28 @@ export function SyncRemoteModal({
         false
       );
 
-      // 用 Toast 显示成功信息
-      showToast("success", "同步成功", result);
-      onSuccess();
+      onSuccess(); // 无论是否部分失败，成功的那部分都已推上去，列表要刷新
+
+      if (res.failed > 0) {
+        // 部分失败：留在弹窗里展示明细，不自动关闭
+        setResult(res);
+        showToast(
+          "warning",
+          "部分分支同步失败",
+          `${res.succeeded} 个成功，${res.failed} 个失败`,
+        );
+        return;
+      }
+
+      showToast(
+        "success",
+        "同步成功",
+        `${res.succeeded} 个分支已同步到 ${res.targetRemote}`,
+      );
       onClose();
     } catch (err) {
-      setError("同步失败：" + err);
+      // 后端在「0 个分支成功」时返回 Err，会走到这里
+      setError("同步失败：" + (typeof err === "string" ? err : String(err)));
     } finally {
       setSyncing(false);
     }
@@ -242,7 +260,30 @@ export function SyncRemoteModal({
           {error && (
             <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
               <AlertCircle size={16} className="text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="text-xs text-red-700">{error}</div>
+              <div className="text-xs text-red-700 whitespace-pre-wrap">{error}</div>
+            </div>
+          )}
+
+          {/* 部分失败明细：逐分支列出，失败原因原样展示，不折叠成一句提示 */}
+          {result && result.failed > 0 && (
+            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="text-xs font-semibold text-amber-800 mb-2">
+                同步到 {result.targetRemote}：{result.succeeded} 个成功，{result.failed} 个失败
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {result.branches.map((b) => (
+                  <div key={b.branch} className="text-xs font-mono flex items-start gap-2">
+                    <span className={b.ok ? "text-green-600" : "text-red-600"}>
+                      {b.ok ? "✓" : "✗"}
+                    </span>
+                    <span className="text-gray-700 flex-shrink-0">
+                      {b.branch}
+                      {b.isDefault && <span className="text-gray-400">（默认分支）</span>}
+                    </span>
+                    {b.error && <span className="text-red-600 break-all">{b.error}</span>}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

@@ -40,6 +40,17 @@ export function GitSidebar({
       ? "已同步"
       : `${changeCount} 个修改`;
 
+  // ahead/behind 与待推拉列表都是相对 `@{upstream}` 算的，而 pull/push 打向 currentRemote。
+  // 两者不一致时必须说出来 —— 否则用户看着「领先 3」点推送，实际推去了另一个仓库。
+  const upstreamLabel =
+    gitStatus?.upstreamRemote && gitStatus?.upstreamBranch
+      ? `${gitStatus.upstreamRemote}/${gitStatus.upstreamBranch}`
+      : null;
+  const remoteMismatch =
+    Boolean(gitStatus?.upstreamRemote) &&
+    Boolean(currentRemote) &&
+    gitStatus?.upstreamRemote !== currentRemote;
+
   return (
     <div className="sidebar-scroll-area">
       <div className="sidebar-section">
@@ -58,6 +69,22 @@ export function GitSidebar({
           <div className="branch-meta">
             <div className={`branch-indicator ${gitStatus?.isClean ? "" : "branch-indicator-warning"}`}></div>
             <span className="branch-changes">{branchState}</span>
+          </div>
+          {/* 统计目标 vs 操作目标：显式写出来，可核对 */}
+          <div className="mt-1 text-[11px] leading-relaxed">
+            {upstreamLabel ? (
+              <div className="text-gray-500">
+                领先/落后基准：<span className="font-mono">{upstreamLabel}</span>
+              </div>
+            ) : (
+              <div className="text-gray-400">当前分支未设置 upstream，领先/落后不可用</div>
+            )}
+            {currentRemote && (
+              <div className={remoteMismatch ? "text-amber-600" : "text-gray-500"}>
+                推送/拉取目标：<span className="font-mono">{currentRemote}/{gitStatus?.branch}</span>
+                {remoteMismatch && "（与上方基准不是同一个远程）"}
+              </div>
+            )}
           </div>
           {gitStatus && !gitStatus.isClean && (
             <div className="git-worktree-summary">

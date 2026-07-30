@@ -143,7 +143,7 @@ async cancelGitClone() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async syncToRemote(path: string, sourceRemote: string, targetRemote: string, syncAllBranches: boolean, force: boolean) : Promise<Result<string, string>> {
+async syncToRemote(path: string, sourceRemote: string, targetRemote: string, syncAllBranches: boolean, force: boolean) : Promise<Result<SyncResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("sync_to_remote", { path, sourceRemote, targetRemote, syncAllBranches, force }) };
 } catch (e) {
@@ -3245,7 +3245,14 @@ export type ForwardStats = { ruleId: string; connections: number; bytesIn: numbe
 export type GenerateResumeFragmentRequest = { requestId: string; provider: AiProviderConfig; jobDirection: NodeJobDirection; jdKeywords: string[]; tone: NodeTone; knowledgeDocs: KnowledgeInput[]; fragment: JsonValue }
 export type GenerateResumeFromKnowledgeRequest = { requestId: string; provider: AiProviderConfig; jobDirection: NodeJobDirection; jdKeywords: string[]; tone: NodeTone; knowledgeDocs: KnowledgeInput[]; promptConfig?: JsonValue | null }
 export type GitRepo = { path: string; name: string }
-export type GitStatus = { branch: string; is_clean: boolean; staged: string[]; unstaged: string[]; untracked: string[]; conflicted: string[]; ahead: number; behind: number }
+export type GitStatus = { branch: string; is_clean: boolean; staged: string[]; unstaged: string[]; untracked: string[]; conflicted: string[]; ahead: number; behind: number; 
+/**
+ * `ahead`/`behind` 是相对 `@{upstream}` 算的。把 upstream 究竟是谁一起报出来，
+ * 界面才能保证「统计的目标」和「push/pull 的目标」是同一个 —— 以前界面拿
+ * remotes[0] 当默认远程，统计却来自 upstream，两者可以指向不同仓库。
+ * 没有设置 upstream 时为 None，此时 ahead/behind 都是 0。
+ */
+upstream_remote: string | null; upstream_branch: string | null }
 export type GlobalShortcutBinding = { id: string; keys: string }
 /**
  * HTTP 请求配置
@@ -3646,6 +3653,22 @@ restoreError: string | null; dataDir: string; logsDir: string;
  * 可用备份时间戳，新到旧
  */
 backups: string[] }
+/**
+ * 单个分支的同步结果。
+ */
+export type SyncBranchResult = { branch: string; ok: boolean; isDefault: boolean; 
+/**
+ * 失败原因；成功时为 None
+ */
+error: string | null }
+/**
+ * 同步整体结果。
+ * 
+ * 以前返回的是一个把 `✗ branch: err` 拼进去的字符串，且**永远是 Ok** ——
+ * 全部分支推送失败时前端照样弹「同步成功」然后关窗。改成结构化结果，
+ * 让前端能区分全成功 / 部分失败，并且失败明细不会被折叠进一句提示里。
+ */
+export type SyncResult = { targetRemote: string; succeeded: number; failed: number; branches: SyncBranchResult[] }
 /**
  * 系统统计信息
  */
