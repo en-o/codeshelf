@@ -34,10 +34,10 @@
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
 2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
    已完成（AUD-007 部分完成）。
-3. **数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051。
+3. **数据、升级与发布 P1**：~~AUD-010~~ 已完成；剩 AUD-021～AUD-025、AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
 
-> 进度：23 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044～050），
+> 进度：24 / 61 已整改（AUD-001～006、008～011、016～020、039、044～050），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -66,6 +66,9 @@
 > - `src-tauri/src/process_guard.rs` —— 子进程独立进程组、进程树回收、
 >   输出上限与 timeout 钳制。**任何 spawn 外部命令的新代码都应走这里**，不要再各写一份。
 > - `src-node/resume-agent/src/storage/paths.ts` —— Node 侧的 `assertSafeId` / `safeJoin`。
+> - `src-node/resume-agent/src/storage/atomicIo.ts` —— Node 侧的原子写与损坏备份，
+>   与 Rust 的 `write_atomic` / `parse_json_or_backup` 语义一致。sidecar 里任何
+>   JSON 数据读写都应走它，不要再直接 `fs.writeFile` + `JSON.parse` catch。
 >
 
 ---
@@ -351,7 +354,31 @@
 
 ### AUD-010 · P1 · 所有 JSON 数据遵守原子写和损坏备份
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **根因在共享函数里**：`storage::write_atomic` 用的是固定临时名 `<name>.tmp`。
+  两个并发保存写同一个临时文件、内容交错后各自 rename，落下的可能是一份长度对不上的
+  残缺文件 —— 原子写反而成了破坏源。改成 `<name>.tmp-<pid>-<自增序号>`，
+  并在写失败 / rename 失败时清掉临时文件，不把垃圾留在数据目录。
+- `resume.rs`：`serde_json::from_str(..).unwrap_or(json!([]))` 换成 `parse_json_or_backup`。
+  这正是 CLAUDE.md 硬约束 1 点名的写法 —— 解析失败静默回空数组，下一次 `save_resumes`
+  就把空数组写回去，简历数据永久没了。（`Value::default()` 是 Null，额外归一化成 `[]`。）
+- `quick_config.rs::apply_quick_config`：**没有**用 parse_json_or_backup。
+  这里读的是**用户自己的** Claude `settings.json`（含 API key、MCP server、权限规则），
+  两种处理都不合适 —— `unwrap_or(json!({}))` 会用只含本次勾选项的空对象覆盖掉全部配置；
+  在用户目录里改名留 `.corrupt-*` 又太越界。改成**直接拒绝并说明原因**，
+  让用户自己去修那几行 JSON。顺带挡住"合法 JSON 但顶层不是对象"的情况。
+- **Node sidecar** 新增 `src-node/resume-agent/src/storage/atomicIo.ts`，
+  语义与 Rust 侧对齐：`writeFileAtomic` / `writeJsonAtomic`（tmp → fsync → rename，
+  临时名带 pid + 序号）和 `readJsonOrBackup`（损坏改名为 `.corrupt-<时间戳>` 后回 undefined）。
+  `runStore.ts` 的 readJson / writeJson / writeArtifact / saveFinalOutput / saveBackground
+  与 `promptStore.ts` 的 load/savePromptConfig 全部改走它。
+- 验证（`cargo test --lib` 38 + sidecar 10，均通过）：
+  - 两侧各加了并发写用例：12 个长度差异很大的载荷并发写同一文件，
+    断言读回来恰好等于**其中某一个完整载荷**（长度对不上即为撕裂），且不留临时文件。
+  - **两侧都跑了反向对照**：把临时名改回固定的 `<name>.tmp`，Rust 侧多线程直接 panic
+    在 rename 竞争上，Node 侧 `not ok 9`。确认用例测的是真东西。
+  - 损坏备份用例断言原路径已让开、备份内容一字未改（可人工恢复），
+    并且「文件不存在」「内容为空」这两种正常初始状态**不会**产生备份。
 - 风险：`resumes.json` 和 Claude 快捷配置解析失败后静默回退为空，下一次保存会覆盖原数据；
   Node sidecar 的 run/prompt/background 数据仍直接写文件。
 - 涉及位置：
