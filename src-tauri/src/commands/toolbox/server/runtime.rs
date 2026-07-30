@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::{
     body::Body,
     extract::{Path, State},
-    http::{header, HeaderMap, Method, Request, StatusCode},
+    http::{header, HeaderMap, Request, StatusCode},
     response::IntoResponse,
     routing::any,
     Router,
@@ -225,6 +225,22 @@ pub(super) async fn run_server(
 }
 
 /// API 代理处理器 - 使用 TCP 级别转发
+/// 代理请求的读取上限与超时。裸 `read_to_end` 没有任何边界：
+/// 目标服务器发多少就吃多少，一个大响应或慢连接就能拖垮整个静态服务进程。
+const PROXY_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+const PROXY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const PROXY_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// 反向代理。
+///
+/// 这里原本是约 170 行手写的 HTTP/1.1 客户端（裸 `TcpStream` + 自己拼请求、
+/// 自己解析响应头、自己解 chunked）。它有几个真问题：
+///   - 配置里写 `https://` 也会被剥掉 scheme 后走**明文** TCP，HTTPS 目标根本用不了；
+///   - `read_to_end` 无上限、无读超时，大响应或慢连接直接把服务拖垮；
+///   - 手写的 header/chunked 解析在边缘情况上与规范有出入。
+///
+/// 换成 reqwest（已是直接依赖，带 rustls）：协议正确、超时和大小边界齐全，
+/// 顺带删掉了 `decode_chunked` 那一整套手写解码。
 async fn proxy_handler(
     State(state): State<ProxyState>,
     Path(path): Path<String>,
@@ -234,7 +250,6 @@ async fn proxy_handler(
     let uri = req.uri().clone();
     let headers = req.headers().clone();
 
-    // 构建目标 URL
     let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
     let target_path = if path.is_empty() {
         if query.is_empty() {
@@ -246,227 +261,103 @@ async fn proxy_handler(
         format!("/{}{}", path, query)
     };
 
-    // 解析目标地址 (格式: http://host:port 或 http://host:port/path)
+    // 目标可以是 http:// 或 https://；没写 scheme 时按 http 处理（兼容既有配置）
     let target = state.target.trim_end_matches('/');
-    let target_without_scheme = target
-        .strip_prefix("http://")
-        .or_else(|| target.strip_prefix("https://"))
-        .unwrap_or(target);
-
-    // 分离 host:port 和 path
-    let (host_port, base_path) = match target_without_scheme.find('/') {
-        Some(pos) => (&target_without_scheme[..pos], &target_without_scheme[pos..]),
-        None => (target_without_scheme, ""),
+    let target_url = if target.starts_with("http://") || target.starts_with("https://") {
+        format!("{}{}", target, target_path)
+    } else {
+        format!("http://{}{}", target, target_path)
     };
 
-    let target_addr = host_port.to_string();
-    let full_path = format!("{}{}", base_path, target_path);
+    log::info!("代理请求: {} {} -> {}", method, uri, target_url);
 
-    log::info!(
-        "代理请求: {} {} -> {}{}",
-        method,
-        uri,
-        target_addr,
-        full_path
-    );
-
-    // 读取请求体
-    let body_bytes = match axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await {
+    let body_bytes = match axum::body::to_bytes(req.into_body(), PROXY_MAX_BODY_BYTES).await {
         Ok(bytes) => bytes,
         Err(e) => {
             return (StatusCode::BAD_REQUEST, format!("读取请求体失败: {}", e)).into_response();
         }
     };
 
-    // 连接到目标服务器
-    let mut stream = match tokio::net::TcpStream::connect(&target_addr).await {
-        Ok(s) => s,
+    let client = match reqwest::Client::builder()
+        .timeout(PROXY_TIMEOUT)
+        .connect_timeout(PROXY_CONNECT_TIMEOUT)
+        // 代理要如实转发上游的重定向响应，不能自己跟过去
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(c) => c,
         Err(e) => {
-            log::error!("连接目标服务器失败: {} -> {}", target_addr, e);
             return (
-                StatusCode::BAD_GATEWAY,
-                format!("连接目标服务器失败: {}", e),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("创建代理客户端失败: {}", e),
             )
                 .into_response();
         }
     };
 
-    // 构建原始 HTTP 请求
-    let mut raw_request = format!("{} {} HTTP/1.1\r\n", method, full_path);
-    raw_request.push_str(&format!("Host: {}\r\n", target_addr));
-
-    // 复制请求头（跳过 host、content-length 和 hop-by-hop 头）
+    let mut outbound = client.request(method.clone(), &target_url);
     for (name, value) in headers.iter() {
         let name_str = name.as_str().to_lowercase();
+        // host 交给 reqwest 按目标地址重设；content-length 由 body 决定
         if name_str != "host" && name_str != "content-length" && !is_hop_by_hop_header(&name_str) {
-            if let Ok(v) = value.to_str() {
-                raw_request.push_str(&format!("{}: {}\r\n", name, v));
-            }
+            outbound = outbound.header(name, value);
         }
     }
-
-    // 设置 Content-Length（POST/PUT/PATCH 必须有）
-    if !body_bytes.is_empty()
-        || method == Method::POST
-        || method == Method::PUT
-        || method == Method::PATCH
-    {
-        raw_request.push_str(&format!("Content-Length: {}\r\n", body_bytes.len()));
-    }
-
-    raw_request.push_str("Connection: close\r\n");
-    raw_request.push_str("\r\n");
-
-    log::info!("原始请求行: {} {} HTTP/1.1", method, full_path);
-
-    // 发送请求头
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    if let Err(e) = stream.write_all(raw_request.as_bytes()).await {
-        return (StatusCode::BAD_GATEWAY, format!("发送请求失败: {}", e)).into_response();
-    }
-
-    // 发送请求体
     if !body_bytes.is_empty() {
-        if let Err(e) = stream.write_all(&body_bytes).await {
-            return (StatusCode::BAD_GATEWAY, format!("发送请求体失败: {}", e)).into_response();
+        outbound = outbound.body(body_bytes.to_vec());
+    }
+
+    let resp = match outbound.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("代理请求失败: {} -> {}", target_url, e);
+            return (StatusCode::BAD_GATEWAY, format!("代理请求失败: {}", e)).into_response();
+        }
+    };
+
+    let status = resp.status();
+    let mut response_headers = HeaderMap::new();
+    for (name, value) in resp.headers().iter() {
+        if !is_hop_by_hop_header(name.as_str()) {
+            response_headers.insert(name.clone(), value.clone());
         }
     }
 
-    // 读取响应
-    let mut response_bytes = Vec::new();
-    if let Err(e) = stream.read_to_end(&mut response_bytes).await {
-        return (StatusCode::BAD_GATEWAY, format!("读取响应失败: {}", e)).into_response();
+    // 流式读取并在上限处停止（reqwest 已经替我们解好了 chunked）
+    let (body, truncated) = match crate::http_body::read_capped(resp, PROXY_MAX_BODY_BYTES).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("读取代理响应失败: {}", e)).into_response();
+        }
+    };
+    if truncated {
+        log::warn!(
+            "代理响应超过 {} MB 上限，已截断: {}",
+            PROXY_MAX_BODY_BYTES / 1024 / 1024,
+            target_url
+        );
     }
-
-    // 解析响应
-    let response_str = String::from_utf8_lossy(&response_bytes);
-    let header_end = response_str.find("\r\n\r\n").unwrap_or(response_str.len());
-    let header_part = &response_str[..header_end];
-    let body_start = if header_end + 4 <= response_bytes.len() {
-        header_end + 4
-    } else {
-        response_bytes.len()
-    };
-
-    // 解析状态码
-    let status_line = header_part
-        .lines()
-        .next()
-        .unwrap_or("HTTP/1.1 502 Bad Gateway");
-    let status_code: u16 = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(502);
-
-    let status = StatusCode::from_u16(status_code).unwrap_or(StatusCode::BAD_GATEWAY);
-
-    // 检查是否是 chunked 编码
-    let is_chunked = header_part
-        .to_lowercase()
-        .contains("transfer-encoding: chunked");
-
-    // 获取响应体
-    let body_data = &response_bytes[body_start..];
-    let body = if is_chunked {
-        // 解码 chunked 数据
-        decode_chunked(body_data)
-    } else {
-        body_data.to_vec()
-    };
 
     if !status.is_success() {
         log::warn!(
             "代理响应: {} -> {} | body: {}",
-            target_addr,
+            target_url,
             status,
-            String::from_utf8_lossy(&body)
-                .chars()
-                .take(200)
-                .collect::<String>()
+            String::from_utf8_lossy(&body).chars().take(200).collect::<String>()
         );
     }
 
-    // 解析响应头
-    let mut response_headers = HeaderMap::new();
-    for line in header_part.lines().skip(1) {
-        if let Some(pos) = line.find(':') {
-            let name = line[..pos].trim();
-            let value = line[pos + 1..].trim();
-            if !is_hop_by_hop_header(name) {
-                if let (Ok(n), Ok(v)) = (
-                    header::HeaderName::from_bytes(name.as_bytes()),
-                    header::HeaderValue::from_str(value),
-                ) {
-                    response_headers.insert(n, v);
-                }
-            }
-        }
-    }
-
-    // 添加 CORS 头
     response_headers.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         header::HeaderValue::from_static("*"),
     );
-
-    // 移除 transfer-encoding 头（因为我们已经解码了 chunked）
-    response_headers.remove("transfer-encoding");
+    // 长度已由实际 body 决定；chunked 也已经解开，这两个头必须去掉，否则与实际不符
+    response_headers.remove(header::CONTENT_LENGTH);
+    response_headers.remove(header::TRANSFER_ENCODING);
 
     (status, response_headers, body).into_response()
 }
 
-/// 解码 chunked 传输编码
-fn decode_chunked(data: &[u8]) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut pos = 0;
-    let data_str = String::from_utf8_lossy(data);
-
-    loop {
-        // 找到 chunk 大小行的结尾
-        let line_end = match data_str[pos..].find("\r\n") {
-            Some(p) => pos + p,
-            None => break,
-        };
-
-        // 解析 chunk 大小（十六进制）
-        let size_str = data_str[pos..line_end].trim();
-        // chunk 大小可能带有扩展，如 "1a; ext=value"，只取第一部分
-        let size_hex = size_str.split(';').next().unwrap_or("0").trim();
-        let chunk_size = match usize::from_str_radix(size_hex, 16) {
-            Ok(s) => s,
-            Err(_) => break,
-        };
-
-        // chunk 大小为 0 表示结束
-        if chunk_size == 0 {
-            break;
-        }
-
-        // 数据开始位置
-        let chunk_start = line_end + 2;
-        let chunk_end = chunk_start + chunk_size;
-
-        if chunk_end > data.len() {
-            // 数据不完整，返回已解码的部分
-            break;
-        }
-
-        // 复制 chunk 数据
-        result.extend_from_slice(&data[chunk_start..chunk_end]);
-
-        // 移动到下一个 chunk（跳过 \r\n）
-        pos = chunk_end + 2;
-        if pos >= data.len() {
-            break;
-        }
-    }
-
-    result
-}
-
-/// 转换 HTTP 方法
-/// 检查是否是 hop-by-hop 头
 fn is_hop_by_hop_header(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),

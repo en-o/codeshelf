@@ -16,17 +16,33 @@ concurrency:
 
 jobs:
   frontend:
-    name: 前端类型检查
+    name: 前端与 sidecar 构建
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          # 固定主版本，与 BUILD.md 声明一致。用 lts/* 的话工具链会随 runner 漂移，
+          # 出问题时本地复现不出来。
+          node-version: '20.19.0'
           cache: npm
       - run: npm ci
-      - name: tsc --noEmit
+
+      - name: tsc --noEmit（前端）
         run: npx tsc --noEmit
+
+      # 下面三步覆盖发布链上真正会跑的东西。
+      # 原来 CI 只检查根 src 的 TypeScript，sidecar 的 TS 错误、esbuild 打包失败、
+      # Vite 构建失败都要等到 release 才暴露 —— PR 可以全绿地合进来。
+      - name: tsc --noEmit（Node sidecar）
+        run: npx tsc --noEmit -p src-node/resume-agent/tsconfig.json
+
+      - name: sidecar 单测
+        run: npm run resume-agent:test
+
+      - name: 完整构建（esbuild 打包 + Vite build）
+        # 与 tauri 的 beforeBuildCommand 是同一条命令
+        run: npm run build
 
   rust:
     name: Rust 检查与测试
@@ -49,11 +65,49 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --lib
+
+      # cargo test 会重新生成 src/bindings.ts。生成结果与仓库里的不一致，
+      # 说明改了 Tauri 命令签名却没提交新的 bindings —— 前端会与后端脱节
+      # （CLAUDE.md 硬约束 2）。没有这一步的话 job 照样是绿的。
+      - name: 检查 bindings.ts 是否漂移
+        run: |
+          if ! git diff --exit-code -- src/bindings.ts; then
+            echo "::error::src/bindings.ts 与后端命令不一致。请在 src-tauri 下运行 'cargo test --lib export_bindings' 并提交结果。"
+            exit 1
+          fi
       - name: cargo clippy
         working-directory: src-tauri
         # 暂不加 -D warnings：现存约 10 条历史告警（多为「类型过于复杂」），
         # 先保证新代码不引入 error 级问题，清完存量再收紧。
         run: cargo clippy --lib -- -A clippy::type_complexity
+
+  msrv:
+    name: 最低工具链验证 (Rust 1.88)
+    runs-on: ubuntu-22.04
+    # 其余 job 都用浮动的 `stable`，会随 runner 升级 —— 真实 MSRV 涨了也发现不了，
+    # 直到按 BUILD.md 装了最低版本的用户来报「编译不过」。
+    # 这里钉死到 Cargo.toml 声明的 rust-version，让声明与现实保持一致。
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: msrv
+      - name: 校验 Cargo.toml 里的 rust-version 与本 job 一致
+        run: |
+          DECLARED=$(grep -m1 '^rust-version' src-tauri/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$DECLARED" != "1.88" ]; then
+            echo "::error::Cargo.toml 声明 rust-version=$DECLARED，但本 job 固定在 1.88。两者必须同步修改。"
+            exit 1
+          fi
+      - name: cargo check（最低版本）
+        working-directory: src-tauri
+        run: cargo check --lib
 
   windows-cross:
     name: Windows 交叉编译检查

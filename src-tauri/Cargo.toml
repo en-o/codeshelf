@@ -6,7 +6,9 @@ authors = ["tan"]
 license = " Apache License 2.0"
 repository = "https://github.com/en-o/codeshelf"
 edition = "2021"
-rust-version = "1.77.2"
+# 依赖里 cookie_store / time 都声明了 rust-version = 1.88.0，
+# 之前这里写 1.77.2 是**假的**：按文档装 1.77 的干净环境根本编译不过。
+rust-version = "1.88"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -54,7 +56,6 @@ regex = "1"
 kuchikiki = "=0.8.8-speedreader"
 urlencoding = "2.1"
 axum = { version = "0.7", features = ["ws", "multipart"] }
-tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "compression-gzip", "fs", "trace"] }
 sysinfo = "0.30"
 socket2 = "0.5"

@@ -449,20 +449,26 @@ pub async fn pause_download(task_id: String) -> AppResult<()> {
 pub async fn resume_download(task_id: String) -> AppResult<()> {
     ensure_tasks_loaded().await;
 
-    // 获取任务信息
+    // **原子认领**：检查「是否 paused」和「置为 downloading」必须在同一把锁里。
+    //
+    // 原来是读完就放锁再判断，两个并发的 resume 会双双看到 "paused"，
+    // 于是 spawn 出两个下载任务**写同一个文件** —— 文件内容互相交错，
+    // 进度和大小也全乱。
     let task = {
-        let tasks = DOWNLOAD_TASKS.lock().await;
-        tasks.get(&task_id).cloned()
+        let mut tasks = DOWNLOAD_TASKS.lock().await;
+        let t = tasks
+            .get_mut(&task_id)
+            .ok_or_else(|| crate::error::AppError::from(format!("任务不存在: {}", task_id)))?;
+        if t.status != "paused" {
+            return Err(crate::error::AppError::from(format!(
+                "任务当前状态为 {}，无法恢复（只有已暂停的任务可以恢复）",
+                t.status
+            )));
+        }
+        t.status = "downloading".to_string();
+        t.updated_at = current_time();
+        t.clone()
     };
-
-    let task =
-        task.ok_or_else(|| crate::error::AppError::from(format!("任务不存在: {}", task_id)))?;
-
-    if task.status != "paused" {
-        return Err(crate::error::AppError::from(
-            "任务未暂停，无法恢复".to_string(),
-        ));
-    }
 
     // 重置取消标志
     {

@@ -9,7 +9,7 @@
 
 CodeShelf（代码书架）—— 本地项目管理 · AI 助手 · 开发者工具箱，三合一的跨平台桌面应用。
 技术栈：**Tauri 2（Rust）+ React 19 + TypeScript + Vite 7 + TailwindCSS v4**，数据存 SQLite（sqlx）+ JSON 文件。
-Rust edition 2021，最低 1.77.2。前端与 Rust 通过 **tauri-specta** 生成的类型安全绑定通信。
+Rust edition 2021，最低 1.88（依赖 cookie_store / time 的实际要求）。前端与 Rust 通过 **tauri-specta** 生成的类型安全绑定通信。
 
 ## 硬约束
 

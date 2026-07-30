@@ -174,9 +174,16 @@ pub async fn start_server(server_id: String) -> AppResult<String> {
     // 创建控制器
     let controller = Arc::new(ServerController::new());
 
-    // 保存控制器
+    // **原子认领**：检查与写入必须在同一把锁里完成。
+    //
+    // 上面那个 `config.status` 检查读完就把 SERVERS 锁放了，两个并发的 start_server
+    // 会双双通过；随后第二个 insert 把第一个的 controller 顶掉 ——
+    // 第一个 listener 就此失去 stop 句柄，永远关不掉，端口也一直占着。
     {
         let mut controllers = SERVER_CONTROLLERS.lock().await;
+        if controllers.contains_key(&server_id) {
+            return Err(crate::error::AppError::from("服务已在运行中".to_string()));
+        }
         controllers.insert(server_id.clone(), controller.clone());
     }
 

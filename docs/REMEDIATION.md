@@ -35,10 +35,10 @@
 2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
    已完成（AUD-007 部分完成）。
 3. ~~**数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051~~ —— 已完成。
-4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026～AUD-031、AUD-033、AUD-034~~ 已完成；
-   剩 AUD-032、AUD-035～AUD-038、AUD-040～AUD-043、AUD-052～AUD-061。
+4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026～AUD-038~~ 已完成；
+   剩 AUD-040～AUD-043、AUD-052～AUD-061。
 
-> 进度：42 / 61 已整改（AUD-001～006、008～031、033、034、039、044～051），
+> 进度：47 / 61 已整改（AUD-001～006、008～039、044～051），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -856,7 +856,20 @@
 
 ### AUD-032 · P2 · 静态服务、下载器和并发写入收敛生命周期
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **代理换成 reqwest**（-178 行 / +69 行）。原来是约 170 行手写的 HTTP/1.1 客户端
+  （裸 `TcpStream` + 自己拼请求 + 自己解析响应头 + 自己解 chunked），三个问题一次解决：
+  - 配置写 `https://` 会被剥掉 scheme 后走**明文** TCP —— HTTPS 目标根本用不了；
+  - `read_to_end` 无上限无超时，大响应或慢连接直接拖垮服务；
+  - 手写的 header / chunked 解析在边缘情况上与规范有出入。
+  现在有 32MB 上限（走 `http_body::read_capped`）、60s 总超时、10s 连接超时，
+  并显式 `redirect::Policy::none()`（代理要如实转发上游重定向，不能自己跟过去）。
+  顺带删掉了整个 `decode_chunked`。
+- **服务原子认领**：`start_server` 的「已在运行」检查读完就放锁，两个并发调用会双双通过，
+  第二个 `insert` 把第一个的 controller 顶掉 —— 那个 listener 就此失去 stop 句柄，
+  永远关不掉、端口一直占着。改成在 `SERVER_CONTROLLERS` 锁内完成检查+写入。
+- **下载原子认领**：`resume_download` 同样是读完放锁再判断，两个并发 resume 会
+  spawn 出两个任务**写同一个文件**。改成在锁内检查 `paused` 并同时置为 `downloading`。
 - 风险：
   - 静态服务接受 `https://` target，却用裸 TCP 发送 HTTP。
   - 代理响应无读取超时和大小上限。
@@ -914,7 +927,12 @@
 
 ### AUD-035 · P2 · CI 覆盖真实发布构建链
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- CI 的 frontend job 从「只跑 `tsc --noEmit`」扩成覆盖整条发布链：
+  前端 tsc → **sidecar tsc** → **sidecar 单测** → **`npm run build`**
+  （与 tauri 的 `beforeBuildCommand` 是同一条命令，含 esbuild 打包和 Vite build）。
+- 验证：故意在 sidecar 里写一行类型错误，`tsc -p src-node/resume-agent/tsconfig.json`
+  确实报错退出；恢复后通过。修复前这类错误要到 release 才暴露，PR 可以全绿合入。
 - 风险：普通 CI 只检查根 `src` 的 TypeScript，不检查 Node sidecar、esbuild 打包和 Vite build；
   PR 可以全绿，到 release 才失败。
 - 涉及位置：
@@ -927,7 +945,11 @@
 
 ### AUD-036 · P2 · 生成 bindings 后检查仓库漂移
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- rust job 在 `cargo test` 之后加 `git diff --exit-code -- src/bindings.ts`，
+  有 diff 就明确报错并给出修复命令。`cargo test` 本身会重写 bindings，
+  没有这一步的话「改了命令签名但没提交 bindings」照样是绿的（硬约束 2 形同虚设）。
+- 本仓库当前无漂移，检查通过。
 - 风险：Rust 测试会重写 `src/bindings.ts`，但 CI 没有检查 diff；忘记提交新 bindings 时 job 仍成功。
 - 涉及位置：
   - `.github/workflows/ci.yml`
@@ -938,7 +960,16 @@
 
 ### AUD-037 · P2 · 让声明的 Node/Rust 版本与 lockfile 一致
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **实测真实 MSRV**：用 `cargo metadata` 扫全部依赖的 `rust-version`，最高是
+  **1.88.0**（`cookie_store`、`time`）。而 Cargo.toml 声明的是 1.77.2 —— 按文档装
+  1.77 的干净环境根本编译不过。已改为 `rust-version = "1.88"`。
+- Node 版本按 Vite 7 的实际要求写明 `^20.19.0 || >=22.12.0`，不再是含糊的 `>= 20.x`。
+- `BUILD.md`、`CLAUDE.md` 同步更新。
+- CI 新增 `msrv` job **固定** `dtolnay/rust-toolchain@1.88`：其余 job 都用浮动 `stable`，
+  真实 MSRV 涨了也发现不了，要等按文档装最低版本的用户来报「编译不过」。
+  该 job 还会校验 Cargo.toml 的 rust-version 与自己固定的版本一致，防止只改一处。
+- CI 的 Node 也从 `lts/*` 固定到 `20.19.0`，避免工具链随 runner 漂移。
 - 风险：文档和 Cargo manifest 声称 Rust 1.77、Node 20.x；当前依赖实际至少需要 Rust 1.88，
   Vite 的 Node 范围为 `^20.19.0 || >=22.12.0`。浮动 stable/LTS CI 掩盖了版本漂移。
 - 涉及位置：
@@ -952,7 +983,18 @@
 
 ### AUD-038 · P2 · 声明直接依赖并统一依赖来源
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **`esbuild` 显式声明**（`^0.27.2`）：`scripts/prepare-resume-agent-sidecar.mjs`
+  直接 `import { build } from "esbuild"`，之前只靠 Vite 的传递依赖被 npm 提升到顶层。
+  Vite 换个打包器或调整依赖，简历生成的构建就会莫名其妙地断掉。
+- **registry 统一**：lockfile 里 49 处 `registry.npmmirror.com` 改写为 `registry.npmjs.org`
+  （原本 352 : 49 混用），并新增 `.npmrc` 把策略显式写下来。现在 369 条全部来自同一 registry。
+- **删除确认未使用的依赖**：`sharp`、`autoprefixer`（Tailwind v4 走 Vite 插件，
+  项目里没有 PostCSS 配置）、Rust 的 `tower 0.4`（无任何 `tower::` 直接引用，
+  `tower-http` 会自带）。删除前逐个全仓 grep 确认过引用。
+- 验证（按验收标准「删除依赖前用构建和运行验证」）：删掉 `node_modules` 后
+  **全新 `npm ci`** → `tsc` → sidecar tsc → sidecar 单测 10 通过 → `npm run build` 成功；
+  Rust 侧 `cargo check` + `cargo test --lib` 49 通过 + Windows 交叉编译通过。
 - 风险：sidecar 脚本直接 import `esbuild`，但只依赖 Vite 偶然提升的传递依赖；lockfile 同时使用
   npmjs 和 npmmirror，影响可复现性。另有未使用的 `sharp`、`autoprefixer`、`tower 0.4` 等候选依赖。
 - 涉及位置：
