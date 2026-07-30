@@ -22,6 +22,12 @@ export interface RunKnowledgeAgentOptions {
   jdKeywords?: string[];
   tone?: Tone;
   promptConfig?: ResumeAgentPromptConfig;
+  /**
+   * 是否允许 Agent 执行只读命令（git log 等白名单命令，不经过 shell）。
+   * 默认 false —— 仓库内容里的提示注入不该顺手拿到命令执行能力。
+   * 调用方必须按次由用户明确勾选后才传 true。
+   */
+  allowReadOnlyCommands?: boolean;
   onRun?: (run: AgentRunRecord) => void;
   signal?: AbortSignal;
 }
@@ -62,7 +68,8 @@ export async function runKnowledgeAgent(
         jdKeywords: opts.jdKeywords ?? [],
         tone: opts.tone ?? "professional",
         promptConfig: opts.promptConfig ?? null,
-        toolPermissionMode: "full_agent",
+        // 默认只读；命令执行必须由用户按次授权
+        toolPermissionMode: opts.allowReadOnlyCommands ? "full_agent" : "read_only",
       },
     });
     return result;

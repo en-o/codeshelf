@@ -31,12 +31,18 @@
 所有 P0/P1 都是发布前置条件，不应带着未验收的 P1 发版。建议按以下顺序推进：
 
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
-2. **安全边界与错误对象操作**：AUD-002～AUD-009、AUD-016～AUD-020、AUD-045～AUD-050。
+2. **安全边界与错误对象操作**：~~AUD-002～AUD-005~~ 已完成；剩 AUD-006～AUD-009、AUD-016～AUD-020、AUD-045～AUD-050。
 3. **数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
 
-> 进度：3 / 61 已整改（AUD-001、AUD-011、AUD-044）。AUD-061 依赖 Apple Developer ID 与
-> Windows Authenticode 证书，需要项目所有者先完成证书采购与 CI secrets 配置，代码侧无法单独关闭。
+> 进度：8 / 61 已整改（AUD-001、002、003、004、005、011、039、044）。
+> AUD-039 是本轮顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
+> AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
+> CI secrets 配置，代码侧无法单独关闭。
+>
+> 已建立的两处公共守卫，后续条目应直接复用而不是各写一份：
+> - `src-tauri/src/path_guard.rs` —— 受保护目录、可删除目录、外部 ID → 安全路径。
+> - `src-node/resume-agent/src/storage/paths.ts` —— Node 侧的 `assertSafeId` / `safeJoin`。
 
 ---
 
@@ -72,13 +78,30 @@
 
 ### AUD-002 · P1 · 简历 Agent 不得默认获得无限制 Shell
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待人工回归）
 - 风险：简历分析固定使用 `full_agent`，真实 Shell 仅受字符串黑名单保护。仓库内容中的提示注入
   可以诱导模型读取项目外文件、联网传输或执行破坏性命令。
 - 涉及位置：
   - `src/services/resume/agents/knowledgeAgent.ts`
+  - `src/pages/Toolbox/ResumeGenerator/KnowledgePanel.tsx`
   - `src-node/resume-agent/src/fs/projectBackend.ts`
+  - `src-node/resume-agent/src/fs/projectBackend.test.ts`（新增）
   - `src-node/resume-agent/src/agent/runAgent.ts`
+- 实现说明：
+  - **不再有 shell**：`execute` 改成 `spawn(argv, { shell: false })`。`parseCommand` 先拒绝任何
+    shell 元字符（`; & | $ \` ( ) < > * ? ~ \\ ' " 换行 制表`），再按空白切 argv，
+    argv[0] 必须命中白名单（`git` / `wc` / `cloc`），`git` 还要再限一层只读子命令
+    （log/shortlog/status/show/diff/ls-files/rev-list/rev-parse/describe/branch/tag/blame/count-objects）。
+    黑名单挡不住未知写法，白名单可以 —— 命令替换、编码、别名、解释器脚本一律无从下手。
+  - 敏感规则同时约束命令执行：argv 里每个非 `-` 开头的参数都过 `resolveReadable`，
+    命中 ignore/敏感规则直接拒绝。
+  - 默认 `read_only`：前端不再硬编码 `full_agent`。`KnowledgePanel` 增加一个**默认关闭、
+    跑完自动复位**的勾选框，勾了才升到 `full_agent` —— 授权按次生效，不持久化。
+  - system prompt 同步改写，不再告诉模型「execute 运行 PowerShell」。
+  - 测试：`npm run resume-agent:test`（node:test，无第三方框架）钉住 5 组用例，
+    含所有元字符绕过写法与 `git push/clean/reset/config` 的拒绝。
+  - ponytail: `parseCommand` 不支持引号，带空格的路径参数用不了。要支持就得写真解析器，
+    而元字符全禁的前提下引号本身没意义；真需要时改成工具直接收 argv 数组。
 - 整改目标：
   - 默认使用 `read_only`。
   - Shell 能力必须由用户按次明确授权，并由后端执行结构化白名单或真正的进程/文件系统沙箱。
@@ -90,7 +113,20 @@
 
 ### AUD-003 · P1 · 文件型实体 ID 必须阻止路径穿越
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待人工回归）
+- 实现说明：
+  - Rust 侧 `path_guard::{safe_file_id, safe_data_path}`：只放行 `[A-Za-z0-9._-]`、长度 ≤128，
+    显式排除 `.` / `..` / 以 `.` 开头（不会盖掉 `.pending_restore` 这类点文件），
+    再对拼出的路径做 canonical containment。`generate_id()` 的产物（纳秒时间戳 hex）天然合法，
+    历史 ID 无需迁移。
+  - 接入点：`workflows.rs::workflow_path`、`tools/ctx.rs::session_tasks_path`、
+    `api_chat/mod.rs::session_path`（改为返回 `Result`，三处调用方一并传播）。
+    `storage_admin.rs` 与 `migrations/mod.rs` 的时间戳已在 AUD-044 收口。
+  - Node 侧 `storage/paths.ts::{assertSafeId, safeJoin}`：原来的 `sanitizeId` 只做替换，
+    `.` 不在被替换字符里，`..` 会原样留下。新函数直接拒绝而不是改名（非法 id 一定是上游出了问题，
+    不该被悄悄写成另一个文件）。接入 `runStore.ts` 的 artifact 读写。
+  - 测试：`path_guard::tests::{file_id_blocks_traversal_variants, safe_data_path_stays_in_dir}`
+    覆盖 `../x`、绝对路径、混合分隔符、URL 编码变体、NUL、超长。
 - 风险：Workflow、API Chat 会话、Chat task、简历 artifact 和恢复备份 timestamp 将外部标识
   直接拼入文件路径，`../`、绝对路径或平台分隔符可造成数据目录外读写/删除。
 - 涉及位置：
@@ -110,7 +146,15 @@
 
 ### AUD-004 · P1 · Chat 文件工具必须服从会话工作目录
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待人工回归）
+- 实现说明：
+  - `file_ops.rs` 的三个工具改为接收 `&ToolCtx`，所有路径（src / dst / path）统一走
+    `expand_home` → `require_under_cwd` —— 与 Read/Write/Edit **完全同一个边界函数**，
+    `~`、项目外绝对路径、`..`、symlink 逃逸都在 canonicalize 后被拒。
+  - 删除那份 26 项的危险路径字符串列表：它挡不住 `/tmp/../etc`、展开后的 HOME 和 symlink，
+    而且完全没看会话已经加载好的 `allowedCwd`。删目录时再叠一层 `path_guard::ensure_deletable_dir`，
+    防止 allowedCwd 本身被设成 HOME。
+  - `schema.rs` 的工具描述同步写明「必须在会话工作目录内」，模型不会再去试项目外路径。
 - 风险：CopyFile、MoveFile、DeleteFile 没有使用已经加载的 `ToolCtx.allowedCwd`，模型工具可在会话
   工作目录外覆盖、移动或递归删除文件；现有危险路径字符串列表不能可靠保护 HOME 和 symlink。
 - 涉及位置：
@@ -124,7 +168,24 @@
 
 ### AUD-005 · P1 · 移除跨平台 Shell 字符串注入
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待人工回归，Windows 已交叉编译验证）
+- 实现说明：
+  - **WSL 写配置**（`config_io.rs`）：`bash -c "cat > '<path>'"` 完全没转义路径 →
+    改为 `wsl -d <distro> -- tee <linux_path>`，路径以 argv 传递，不再经过任何 shell。
+  - **macOS 启动**（`launch.rs`）：原来是 `cd "<dir>" && <cli>` 只转义了 `\` 和 `"`，
+    双引号里 `$(...)`、反引号、`$VAR` 照样展开，再套一层 AppleScript 双引号。
+    改为统一走 `write_launch_script`：目录只以 POSIX 单引号字符串出现在临时脚本里一次
+    （`sh_quote` 用 `'\''` 收尾重开，单引号内没有任何展开），
+    AppleScript 里只出现 app 自己生成的 `codeshelf-launch-<nanos>.sh` 路径。
+    iTerm / Terminal.app / Ghostty(.app) 三条分支现在共用这一个 helper。
+  - **open_url**（`system.rs`）：新增 `validate_openable_url` —— scheme 只允许
+    `http:// / https:// / mailto:`（挡掉 `file:`、`javascript:`、`ms-msdt:` 这类能被系统
+    handler 变成本地读取或代码执行的），并拒绝控制字符与 `" ' & | ^ < > \``
+    （Windows 走 `cmd /c start`，cmd.exe 会对参数二次解析）。
+  - 未改动的分支已确认转义正确：WSL 启动与 Linux 分支用的是 `'\''`，PowerShell 用的是 `''`。
+    `cli` 本身早已被 `resolve_cli` 白名单收敛为 `claude` / `codex`。
+  - 测试：`system::url_tests::only_web_schemes_and_clean_chars_pass`。
+  - Windows 专有代码按硬约束 3 通过 `cargo check --lib --target x86_64-pc-windows-gnu`（Docker）。
 - 风险：WSL 配置路径、macOS 启动工作目录和 Windows `open_url` 会被拼入 Shell 字符串；
   引号、`$()`、`;`、`&` 等可转化为额外命令。
 - 涉及位置：
@@ -581,7 +642,16 @@
 
 ### AUD-039 · P2 · 补齐敏感文件和构建产物忽略规则
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 实现说明：
+  - `.gitignore` 里那 13 行逐文件枚举的 sidecar dist 路径换成 `/src-node/resume-agent/dist/`——
+    枚举法下每新增一个源文件，它编译出的 `.js` 就漏出来变成待提交项（本轮加
+    `projectBackend.test.ts` 时立刻复现）。
+  - 补 `/src-tauri/target-win/`（交叉编译产物）与 `.env` / `.env.*`，并用 `!.env.example` 放行示例。
+  - `.dockerignore` 已含 `src-tauri/target-win`，无需改动；
+    `defaultSensitiveFilePatterns.json` 已含 `.env` / `.env.*` / `*.key` / `*.pem` 等，无需改动。
+  - 验证：`git check-ignore -v` 对 `.env`、`.env.local`、`src-tauri/target-win`、
+    任意新增 sidecar dist 文件均命中；`.env.example` 仍可被 `git add` 收录。
 - 风险：`.env/.env.*`、`src-tauri/target-win/` 和新增 sidecar dist 文件没有统一忽略，可能误提交秘密或产物。
 - 涉及位置：
   - `.gitignore`

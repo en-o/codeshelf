@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn session_tasks_path(session_id: &str) -> AppResult<PathBuf> {
     let dir = crate::commands::chat::resolve_chat_history_dir_pub()?;
-    Ok(dir.join(format!("{}.tasks.json", session_id)))
+    // session_id 来自前端，直接拼文件名等于把 `../` 交给文件系统
+    crate::path_guard::safe_data_path(&dir, session_id, ".tasks.json")
 }
 
 /// 当前工具上下文

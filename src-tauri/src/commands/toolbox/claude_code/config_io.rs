@@ -138,15 +138,11 @@ pub async fn write_claude_config_file(
                         .args(["-d", &distro, "--", "mkdir", "-p", parent_dir])
                         .output();
                 }
+                // 用 tee 把目标路径作为 argv 参数传进去，不再拼 `bash -c "cat > '<path>'"`：
+                // 路径里的 `'`、`$()`、`;` 在那种写法下会变成额外命令。
                 let output = new_command("wsl")
-                    .args([
-                        "-d",
-                        &distro,
-                        "--",
-                        "bash",
-                        "-c",
-                        &format!("cat > '{}'", linux_path),
-                    ])
+                    .args(["-d", &distro, "--", "tee", &linux_path])
+                    .stdout(std::process::Stdio::null())
                     .stdin(std::process::Stdio::piped())
                     .spawn()
                     .and_then(|mut child| {

@@ -8,6 +8,7 @@ import {
   runDir,
   runFile,
   runsDir,
+  safeJoin,
 } from "./paths.js";
 import type {
   AgentEvent,
@@ -69,7 +70,7 @@ export async function writeArtifact(
 ): Promise<ArtifactRef> {
   const safe = fileName.replace(/[^a-zA-Z0-9_.-]/g, "_");
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}-${safe}`;
-  const file = path.join(artifactsDir(dataDir, projectId), id);
+  const file = safeJoin(artifactsDir(dataDir, projectId), id, "artifactId");
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, content, "utf8");
   return { id, label, kind, chars: [...content].length };
@@ -80,7 +81,8 @@ export async function readArtifact(
   projectId: string,
   artifactId: string,
 ): Promise<ArtifactContent> {
-  const file = path.join(artifactsDir(dataDir, projectId), artifactId);
+  // artifactId 来自前端点击，`../../../etc/passwd` 不能变成读取目标
+  const file = safeJoin(artifactsDir(dataDir, projectId), artifactId, "artifactId");
   return { artifactId, content: await fs.readFile(file, "utf8") };
 }
 

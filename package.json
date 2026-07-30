@@ -9,6 +9,7 @@
     "build": "npm run resume-agent:build && npm run resume-agent:prepare-sidecar && tsc && vite build",
     "resume-agent:build": "tsc -p src-node/resume-agent/tsconfig.json",
     "resume-agent:prepare-sidecar": "node scripts/prepare-resume-agent-sidecar.mjs",
+    "resume-agent:test": "npm run resume-agent:build && node --test src-node/resume-agent/dist/**/*.test.js",
     "preview": "vite preview",
     "tauri": "tauri",
     "verify:release": "bash scripts/verify-release.sh",

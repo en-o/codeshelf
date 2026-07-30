@@ -226,12 +226,12 @@ pub fn all_tools() -> Vec<ToolSchema> {
         },
         ToolSchema {
             name: "CopyFile".into(),
-            description: "复制文件或目录（目录递归）。若目标已存在，默认拒绝；overwrite=true 才覆盖。".into(),
+            description: "复制文件或目录（目录递归）。源和目标都必须在会话工作目录内。若目标已存在，默认拒绝；overwrite=true 才覆盖。".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "src": {"type": "string", "description": "源路径（绝对）"},
-                    "dst": {"type": "string", "description": "目标路径（绝对）"},
+                    "src": {"type": "string", "description": "源路径（绝对，须在会话工作目录内）"},
+                    "dst": {"type": "string", "description": "目标路径（绝对，须在会话工作目录内）"},
                     "overwrite": {"type": "boolean", "description": "默认 false"}
                 },
                 "required": ["src", "dst"]
@@ -240,7 +240,7 @@ pub fn all_tools() -> Vec<ToolSchema> {
         },
         ToolSchema {
             name: "MoveFile".into(),
-            description: "移动/重命名文件或目录。同盘用 rename，跨盘自动 copy+delete。".into(),
+            description: "移动/重命名文件或目录。源和目标都必须在会话工作目录内。同盘用 rename，跨盘自动 copy+delete。".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -254,7 +254,7 @@ pub fn all_tools() -> Vec<ToolSchema> {
         },
         ToolSchema {
             name: "DeleteFile".into(),
-            description: "⚠️ 危险：删除文件或目录（目录需 recursive=true）。无法恢复，调用前务必与用户确认。".into(),
+            description: "⚠️ 危险：删除会话工作目录内的文件或目录（目录需 recursive=true）。无法恢复，调用前务必与用户确认。".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

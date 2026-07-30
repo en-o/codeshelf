@@ -1,13 +1,28 @@
-//! CopyFile / MoveFile / DeleteFile —— 任意路径下的文件/目录复制移动删除。
-//! 跨平台拒绝删除根/系统目录。
+//! CopyFile / MoveFile / DeleteFile —— 会话工作目录内的文件/目录复制移动删除。
+//!
+//! 边界与 Read/Write/Edit 完全一致：所有路径都过 `require_under_cwd`
+//! （canonicalize 后比对 allowedCwd，`~`、项目外绝对路径、`..`、symlink 逃逸都会被拒）。
+//! 删除再叠一层 `path_guard`，防止 allowedCwd 本身被设成 HOME 之类的受保护目录。
+//!
+//! 以前这里用的是「危险路径字符串列表」：`/tmp/../etc`、`~` 展开后的 HOME、
+//! 指向系统目录的 symlink 全都能绕过，而且完全没看会话已经加载好的 allowedCwd。
 
 use crate::error::AppResult;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::ctx::expand_home;
+use super::ctx::{expand_home, require_under_cwd, ToolCtx};
+
+/// 取出参数里的路径，展开 `~`，再收敛到会话工作目录内。
+fn arg_path(ctx: &ToolCtx, args: &Value, key: &str) -> AppResult<PathBuf> {
+    let raw = args
+        .get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| crate::error::AppError::from(format!("缺少 {}", key)))?;
+    require_under_cwd(ctx, Path::new(&expand_home(raw)))
+}
 
 fn copy_recursively(src: &Path, dst: &Path) -> std::io::Result<()> {
     if src.is_dir() {
@@ -26,140 +41,79 @@ fn copy_recursively(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-pub(super) fn tool_copy_file(args: &Value) -> AppResult<String> {
-    let src = args.get("src").and_then(|v| v.as_str()).ok_or("缺少 src")?;
-    let dst = args.get("dst").and_then(|v| v.as_str()).ok_or("缺少 dst")?;
-    let src = expand_home(src);
-    let dst = expand_home(dst);
-    let overwrite = args
-        .get("overwrite")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let src_p = Path::new(&src);
-    let dst_p = Path::new(&dst);
-    if !src_p.exists() {
-        return Err(crate::error::AppError::from(format!("源不存在：{}", src)));
+/// 覆盖前清掉目标。目标同样已经过 `require_under_cwd`。
+fn remove_existing(dst: &Path) -> AppResult<()> {
+    if !dst.exists() {
+        return Ok(());
     }
-    if dst_p.exists() && !overwrite {
-        return Err(crate::error::AppError::from(format!(
-            "目标已存在（传 overwrite=true 覆盖）：{}",
-            dst
-        )));
+    if dst.is_dir() {
+        fs::remove_dir_all(dst).map_err(|e| crate::error::AppError::from(e.to_string()))
+    } else {
+        fs::remove_file(dst).map_err(|e| crate::error::AppError::from(e.to_string()))
     }
-    if dst_p.exists() && overwrite {
-        if dst_p.is_dir() {
-            fs::remove_dir_all(dst_p).map_err(|e| crate::error::AppError::from(e.to_string()))?;
-        } else {
-            fs::remove_file(dst_p).map_err(|e| crate::error::AppError::from(e.to_string()))?;
-        }
-    }
-    copy_recursively(src_p, dst_p)
-        .map_err(|e| crate::error::AppError::from(format!("复制失败: {}", e)))?;
-    Ok(format!("已复制 {} → {}", src, dst))
 }
 
-pub(super) fn tool_move_file(args: &Value) -> AppResult<String> {
-    let src = args.get("src").and_then(|v| v.as_str()).ok_or("缺少 src")?;
-    let dst = args.get("dst").and_then(|v| v.as_str()).ok_or("缺少 dst")?;
-    let src = expand_home(src);
-    let dst = expand_home(dst);
+fn resolve_pair(ctx: &ToolCtx, args: &Value) -> AppResult<(PathBuf, PathBuf, bool)> {
+    let src = arg_path(ctx, args, "src")?;
+    let dst = arg_path(ctx, args, "dst")?;
     let overwrite = args
         .get("overwrite")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let src_p = Path::new(&src);
-    let dst_p = Path::new(&dst);
-    if !src_p.exists() {
-        return Err(crate::error::AppError::from(format!("源不存在：{}", src)));
-    }
-    if dst_p.exists() && !overwrite {
+    if !src.exists() {
         return Err(crate::error::AppError::from(format!(
-            "目标已存在（传 overwrite=true 覆盖）：{}",
-            dst
+            "源不存在：{}",
+            src.display()
         )));
     }
-    if dst_p.exists() && overwrite {
-        if dst_p.is_dir() {
-            fs::remove_dir_all(dst_p).map_err(|e| crate::error::AppError::from(e.to_string()))?;
-        } else {
-            fs::remove_file(dst_p).map_err(|e| crate::error::AppError::from(e.to_string()))?;
-        }
+    if dst.exists() && !overwrite {
+        return Err(crate::error::AppError::from(format!(
+            "目标已存在（传 overwrite=true 覆盖）：{}",
+            dst.display()
+        )));
     }
-    match fs::rename(src_p, dst_p) {
-        Ok(_) => Ok(format!("已移动 {} → {}", src, dst)),
+    Ok((src, dst, overwrite))
+}
+
+pub(super) fn tool_copy_file(ctx: &ToolCtx, args: &Value) -> AppResult<String> {
+    let (src, dst, _) = resolve_pair(ctx, args)?;
+    remove_existing(&dst)?;
+    copy_recursively(&src, &dst)
+        .map_err(|e| crate::error::AppError::from(format!("复制失败: {}", e)))?;
+    Ok(format!("已复制 {} → {}", src.display(), dst.display()))
+}
+
+pub(super) fn tool_move_file(ctx: &ToolCtx, args: &Value) -> AppResult<String> {
+    let (src, dst, _) = resolve_pair(ctx, args)?;
+    remove_existing(&dst)?;
+    match fs::rename(&src, &dst) {
+        Ok(_) => Ok(format!("已移动 {} → {}", src.display(), dst.display())),
         Err(_) => {
             // 跨盘：fallback copy + delete
-            copy_recursively(src_p, dst_p)
+            copy_recursively(&src, &dst)
                 .map_err(|e| crate::error::AppError::from(format!("跨盘复制失败: {}", e)))?;
-            if src_p.is_dir() {
-                fs::remove_dir_all(src_p)
+            if src.is_dir() {
+                fs::remove_dir_all(&src)
                     .map_err(|e| crate::error::AppError::from(format!("删除源失败: {}", e)))?;
             } else {
-                fs::remove_file(src_p)
+                fs::remove_file(&src)
                     .map_err(|e| crate::error::AppError::from(format!("删除源失败: {}", e)))?;
             }
-            Ok(format!("已跨盘移动 {} → {}", src, dst))
+            Ok(format!("已跨盘移动 {} → {}", src.display(), dst.display()))
         }
     }
 }
 
-pub(super) fn tool_delete_file(args: &Value) -> AppResult<String> {
-    let path = args
-        .get("path")
-        .and_then(|v| v.as_str())
-        .ok_or("缺少 path")?;
-    let path = expand_home(path);
+pub(super) fn tool_delete_file(ctx: &ToolCtx, args: &Value) -> AppResult<String> {
+    let p = arg_path(ctx, args, "path")?;
     let recursive = args
         .get("recursive")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let p = Path::new(&path);
     if !p.exists() {
         return Err(crate::error::AppError::from(format!(
             "路径不存在：{}",
-            path
-        )));
-    }
-
-    // 跨平台受保护路径（大小写不敏感比较）
-    let norm = path.trim_end_matches(&['/', '\\'][..]).to_lowercase();
-    let dangerous: &[&str] = &[
-        // unix
-        "/",
-        "/users",
-        "/home",
-        "/etc",
-        "/usr",
-        "/var",
-        "/bin",
-        "/sbin",
-        "/system",
-        "/library",
-        "/opt",
-        "/private",
-        "/tmp",
-        // windows
-        "c:",
-        "c:\\",
-        "c:\\windows",
-        "c:\\program files",
-        "c:\\program files (x86)",
-        "c:\\users",
-        "c:\\programdata",
-        "d:",
-        "d:\\",
-    ];
-    if dangerous.iter().any(|d| norm == *d) {
-        return Err(crate::error::AppError::from(format!(
-            "拒绝删除受保护路径：{}",
-            path
-        )));
-    }
-    // 再拒绝 drive root（Windows 任意盘根）
-    if cfg!(windows) && norm.len() <= 3 && norm.ends_with(":\\") {
-        return Err(crate::error::AppError::from(format!(
-            "拒绝删除盘根：{}",
-            path
+            p.display()
         )));
     }
 
@@ -167,10 +121,12 @@ pub(super) fn tool_delete_file(args: &Value) -> AppResult<String> {
         if !recursive {
             return Err("删除目录需要 recursive=true".into());
         }
-        fs::remove_dir_all(p)
+        // 第二层：allowedCwd 万一被设成 HOME/系统目录，这里仍然拦得住
+        let target = crate::path_guard::ensure_deletable_dir(&p)?;
+        fs::remove_dir_all(&target)
             .map_err(|e| crate::error::AppError::from(format!("删除失败: {}", e)))?;
     } else {
-        fs::remove_file(p).map_err(|e| crate::error::AppError::from(format!("删除失败: {}", e)))?;
+        fs::remove_file(&p).map_err(|e| crate::error::AppError::from(format!("删除失败: {}", e)))?;
     }
-    Ok(format!("已删除：{}", path))
+    Ok(format!("已删除：{}", p.display()))
 }

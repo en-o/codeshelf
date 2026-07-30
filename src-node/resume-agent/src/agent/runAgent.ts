@@ -961,7 +961,8 @@ function buildSystemPrompt(request: RunAgentRequest, backgroundPrompt: string): 
     `- 当前 toolPermissionMode=${request.toolPermissionMode ?? "read_only"}`,
     "- 优先使用 ls/glob/grep/read_file/batch_read_files 调查项目。",
     "- 需要读取多个文件时，优先一次调用 batch_read_files，不要连续逐个调用 read_file。",
-    "- execute 只用于只读命令、构建脚本识别或 Git 统计；Windows 环境下 execute 运行 PowerShell，不要使用 cmd.exe 的 dir /s /b 等语法。",
+    "- execute 只在 toolPermissionMode=full_agent 时可用，且**不经过 shell**：只能跑 git（log/shortlog/status/show/diff/ls-files/rev-list/rev-parse/describe/branch/tag/blame/count-objects）、wc、cloc；",
+    "  管道、重定向、`&&`、`$()`、引号一律被拒绝，一次只能跑一条命令。需要组合结果时分多次调用。",
     "- 不调用 write_file/edit_file 修改项目文件。",
     "- 证据覆盖技术栈、核心模块、入口和关键实现后，调用 finalize_all。",
   ].join("\n");

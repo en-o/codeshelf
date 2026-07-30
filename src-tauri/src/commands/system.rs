@@ -358,10 +358,14 @@ pub async fn open_in_terminal(
 #[tauri::command]
 #[specta::specta]
 pub async fn open_url(url: String) -> AppResult<()> {
+    let url = validate_openable_url(&url)?;
+
     #[cfg(target_os = "windows")]
     {
+        // cmd.exe 会对参数二次解析，`&`、`^`、`|` 能变成额外命令 ——
+        // validate_openable_url 已经把这些字符挡在门外。
         Command::new("cmd")
-            .args(["/c", "start", "", &url])
+            .args(["/c", "start", "", url])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| crate::error::AppError::from(e.to_string()))?;
@@ -370,7 +374,7 @@ pub async fn open_url(url: String) -> AppResult<()> {
     #[cfg(target_os = "macos")]
     {
         Command::new("open")
-            .arg(&url)
+            .arg(url)
             .spawn()
             .map_err(|e| crate::error::AppError::from(e.to_string()))?;
     }
@@ -378,12 +382,74 @@ pub async fn open_url(url: String) -> AppResult<()> {
     #[cfg(target_os = "linux")]
     {
         Command::new("xdg-open")
-            .arg(&url)
+            .arg(url)
             .spawn()
             .map_err(|e| crate::error::AppError::from(e.to_string()))?;
     }
 
     Ok(())
+}
+
+/// 只允许把 URL 交给系统浏览器的这几种 scheme。
+///
+/// `file:`、`javascript:`、`vbscript:`、`ms-msdt:` 之类都能被系统 handler 变成
+/// 本地文件读取或代码执行，而入口（工具调用、页面链接、导入数据）并不总是可信。
+/// 同时拒绝控制字符和 shell 元字符 —— Windows 走的是 `cmd /c start`，
+/// cmd.exe 会对参数再解析一次。
+fn validate_openable_url(url: &str) -> AppResult<&str> {
+    const ALLOWED_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
+
+    let trimmed = url.trim();
+    if trimmed.is_empty() || trimmed.len() > 4096 {
+        return Err(crate::error::AppError::from("URL 为空或过长".to_string()));
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if !ALLOWED_SCHEMES.iter().any(|s| lower.starts_with(s)) {
+        return Err(crate::error::AppError::from(format!(
+            "拒绝打开该 URL：只允许 {}",
+            ALLOWED_SCHEMES.join(" / ")
+        )));
+    }
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '"' | '\'' | '&' | '|' | '^' | '<' | '>' | '`'))
+    {
+        return Err(crate::error::AppError::from(
+            "URL 含有不允许的字符".to_string(),
+        ));
+    }
+    Ok(trimmed)
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::validate_openable_url;
+
+    #[test]
+    fn only_web_schemes_and_clean_chars_pass() {
+        for ok in [
+            "https://example.com/a?b=1#c",
+            "http://127.0.0.1:8080/",
+            "mailto:a@b.com",
+            "  https://example.com  ",
+        ] {
+            assert!(validate_openable_url(ok).is_ok(), "应放行: {ok}");
+        }
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ms-msdt:/id",
+            "vbscript:x",
+            "https://example.com/a&calc",
+            "https://example.com/\"x",
+            "https://example.com/a|b",
+            "https://exa\nmple.com",
+            "",
+            "   ",
+        ] {
+            assert!(validate_openable_url(bad).is_err(), "应拒绝: {bad:?}");
+        }
+    }
 }
 
 #[derive(serde::Serialize, specta::Type)]

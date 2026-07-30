@@ -58,6 +58,9 @@ export function KnowledgePanel({ selectedProjects, provider, promptConfigVersion
   const [artifactContent, setArtifactContent] = useState<Record<string, string>>({});
   const [activeArtifact, setActiveArtifact] = useState<{ artifact: ArtifactRef; content: string } | null>(null);
   const [artifactLoadingId, setArtifactLoadingId] = useState<string | null>(null);
+  // 命令执行授权：默认关闭，且每次生成后自动复位 —— 授权是按次的，不做持久化。
+  // 仓库内容里的提示注入不该顺手拿到命令执行能力。
+  const [allowCommands, setAllowCommands] = useState(false);
 
   const activeProject = selectedProjects.find((item) => item.id === activeProjectId) ?? selectedProjects[0] ?? null;
   const activeDoc = activeProject ? knowledgeDocs[activeProject.id] : undefined;
@@ -119,6 +122,7 @@ export function KnowledgePanel({ selectedProjects, provider, promptConfigVersion
         projectId: project.id,
         provider,
         promptConfig: promptConfig ?? undefined,
+        allowReadOnlyCommands: allowCommands,
         onRun: (run) => setKnowledgeRunSnapshot(project.id, run),
       });
       const doc: ProjectKnowledge = {
@@ -138,6 +142,9 @@ export function KnowledgePanel({ selectedProjects, provider, promptConfigVersion
       finishKnowledgeRun(project.id, msg);
       await refreshRuns(project.id);
       showToast("error", `${project.name} 生成失败: ${msg}`);
+    } finally {
+      // 授权按次生效，跑完就收回
+      setAllowCommands(false);
     }
   }
 
@@ -251,6 +258,19 @@ export function KnowledgePanel({ selectedProjects, provider, promptConfigVersion
               onDelete={() => activeProject && handleDelete(activeProject.id)}
               onRefresh={() => activeProject && refreshRuns(activeProject.id)}
             />
+
+            <label className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={allowCommands}
+                disabled={running}
+                onChange={(e) => setAllowCommands(e.target.checked)}
+              />
+              <span>
+                允许本次运行执行只读命令（<code>git log</code> 等白名单命令，不经过 shell）。
+                默认关闭；勾选仅对下一次生成生效。
+              </span>
+            </label>
 
             <div className="min-h-0 flex-1 overflow-auto p-4">
               {activeView === "background" && (

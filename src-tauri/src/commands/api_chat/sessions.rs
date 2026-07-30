@@ -52,7 +52,7 @@ pub async fn list_api_chat_sessions() -> AppResult<Vec<ApiChatSessionSummary>> {
 #[specta::specta]
 pub async fn get_api_chat_session(session_id: String) -> AppResult<ApiChatSession> {
     let dir = sessions_dir()?;
-    let path = session_path(&dir, &session_id);
+    let path = session_path(&dir, &session_id)?;
     if !path.exists() {
         return Err("会话不存在".into());
     }
@@ -109,7 +109,7 @@ pub async fn save_api_chat_session(mut session: ApiChatSession) -> AppResult<Api
     fs::create_dir_all(&dir)
         .map_err(|e| crate::error::AppError::from(format!("创建会话目录失败: {}", e)))?;
     session.updated_at = current_iso_time();
-    let path = session_path(&dir, &session.id);
+    let path = session_path(&dir, &session.id)?;
     let content = serde_json::to_string_pretty(&session)
         .map_err(|e| crate::error::AppError::from(format!("序列化会话失败: {}", e)))?;
     crate::storage::write_atomic(&path, content)
@@ -132,7 +132,7 @@ pub async fn rename_api_chat_session(
 #[specta::specta]
 pub async fn delete_api_chat_session(session_id: String) -> AppResult<()> {
     let dir = sessions_dir()?;
-    let path = session_path(&dir, &session_id);
+    let path = session_path(&dir, &session_id)?;
     if path.exists() {
         fs::remove_file(&path)
             .map_err(|e| crate::error::AppError::from(format!("删除会话失败: {}", e)))?;

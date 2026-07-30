@@ -223,18 +223,37 @@ export class ResumeProjectBackend implements SandboxBackendProtocolV2 {
     });
   }
 
+  /**
+   * 执行命令。**不经过 shell**：命令被切成 argv，argv[0] 必须在只读白名单里，
+   * 出现任何 shell 元字符直接拒绝。
+   *
+   * 以前这里是「真 shell + 字符串黑名单」：仓库内容里的提示注入能用命令替换、
+   * 编码、别名、解释器脚本绕开黑名单，读项目外的文件或联网外传。黑名单挡不住
+   * 未知写法，白名单能。
+   */
   async execute(command: string): Promise<ExecuteResponse> {
     return this.ctx.timedToolEvent({
       toolName: "execute",
-      args: { command, cwd: this.projectRoot },
+      args: { command, cwd: this.projectRoot, mode: this.mode },
       run: async () => {
         if (this.mode !== "full_agent") {
-          return { output: "execute blocked: toolPermissionMode is not full_agent", exitCode: 126, truncated: false };
+          return blocked("execute blocked: 未获得命令执行授权（toolPermissionMode != full_agent）");
         }
-        if (isDangerousCommand(command)) {
-          return { output: "execute blocked: dangerous command pattern", exitCode: 126, truncated: false };
+        const parsed = parseCommand(command);
+        if (!parsed.ok) return blocked(`execute blocked: ${parsed.error}`);
+
+        // 敏感文件规则必须同时约束命令执行，不能只管文件工具：
+        // 任何指向被忽略/敏感路径的参数都拒绝。
+        for (const arg of parsed.argv.slice(1)) {
+          if (arg.startsWith("-")) continue;
+          const checked = await this.resolveReadable(arg);
+          // 解析不出来的（子命令、ref 名、格式串）不当路径处理；解析得出来但被规则挡住的拒绝
+          if (!checked.ok && checked.error === "blocked_by_ignore_or_sensitive_rules") {
+            return blocked(`execute blocked: 参数命中敏感/忽略规则 (${arg})`);
+          }
         }
-        return runShell(command, this.projectRoot);
+
+        return runArgv(parsed.argv, this.projectRoot);
       },
     });
   }
@@ -394,37 +413,78 @@ function isNotFound(err: unknown): boolean {
   return Boolean(err && typeof err === "object" && "code" in err && (err as { code?: unknown }).code === "ENOENT");
 }
 
-function isDangerousCommand(command: string): boolean {
-  const lower = command.toLowerCase();
-  return [
-    "rm -rf",
-    "git reset --hard",
-    "git clean",
-    "remove-item -recurse",
-    "del /s",
-    "reg delete",
-    "format ",
-  ].some((pattern) => lower.includes(pattern));
+function blocked(output: string): ExecuteResponse {
+  return { output, exitCode: 126, truncated: false };
 }
 
-function runShell(command: string, cwd: string): Promise<ExecuteResponse> {
+/**
+ * 允许执行的命令。只有「读取仓库元数据」这一类 —— 简历 Agent 需要的就是
+ * 提交统计和文件清单，没有任何理由跑构建、包管理器或解释器。
+ *
+ * git 还要再限一层子命令：`git config`/`git push`/`git clean` 都不在其中。
+ */
+const ALLOWED_COMMANDS: Record<string, readonly string[] | null> = {
+  // null = 不限子命令
+  git: [
+    "log",
+    "shortlog",
+    "status",
+    "show",
+    "diff",
+    "ls-files",
+    "rev-list",
+    "rev-parse",
+    "describe",
+    "branch",
+    "tag",
+    "blame",
+    "count-objects",
+  ],
+  wc: null,
+  cloc: null,
+};
+
+/** shell 元字符：出现任何一个都直接拒绝，不试图转义。 */
+const SHELL_METACHARS = /[;&|<>$`(){}\[\]!*?~\\'"\n\r\t]/;
+
+/**
+ * 把命令行切成 argv。
+ *
+ * ponytail: 只按空白切分，不支持引号 —— 带空格的路径参数用不了。
+ * 支持引号就得写一个真解析器，而元字符全禁的前提下引号本身也没意义。
+ * 如果之后真需要空格路径，改成结构化 argv 入参（工具直接收数组）而不是加解析器。
+ */
+export function parseCommand(command: string): { ok: true; argv: string[] } | { ok: false; error: string } {
+  const trimmed = command.trim();
+  if (!trimmed) return { ok: false, error: "空命令" };
+  if (SHELL_METACHARS.test(trimmed)) {
+    return { ok: false, error: "命令包含 shell 元字符，已拒绝（命令不经过 shell 执行）" };
+  }
+
+  const argv = trimmed.split(/\s+/);
+  const bin = argv[0];
+  if (!(bin in ALLOWED_COMMANDS)) {
+    return {
+      ok: false,
+      error: `${bin} 不在只读命令白名单内（允许: ${Object.keys(ALLOWED_COMMANDS).join(", ")}）`,
+    };
+  }
+
+  const subcommands = ALLOWED_COMMANDS[bin];
+  if (subcommands) {
+    const sub = argv.find((a, i) => i > 0 && !a.startsWith("-"));
+    if (!sub || !subcommands.includes(sub)) {
+      return { ok: false, error: `${bin} ${sub ?? ""} 不在允许的子命令内（允许: ${subcommands.join(", ")}）` };
+    }
+  }
+
+  return { ok: true, argv };
+}
+
+function runArgv(argv: string[], cwd: string): Promise<ExecuteResponse> {
   return new Promise((resolve) => {
-    const child = process.platform === "win32"
-      ? spawn("powershell.exe", [
-          "-NoLogo",
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-Command",
-          [
-            "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)",
-            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-            "$OutputEncoding = [Console]::OutputEncoding",
-            command,
-          ].join("; "),
-        ], { cwd, windowsHide: true })
-      : spawn(command, { cwd, shell: true, windowsHide: true });
+    // shell: false —— 引号、$()、;、&& 都不会被解释，argv 原样传给进程
+    const child = spawn(argv[0], argv.slice(1), { cwd, shell: false, windowsHide: true });
     const chunks: Buffer[] = [];
     let outputBytes = 0;
     let truncated = false;
@@ -451,6 +511,11 @@ function runShell(command: string, cwd: string): Promise<ExecuteResponse> {
       truncated = true;
       append(Buffer.from("\n[process killed after timeout]", "utf8"));
     }, 120_000);
+    // shell: false 时可执行文件不存在会 emit error；不接住会以未捕获异常打挂 sidecar
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      resolve(blocked(`execute failed: ${err instanceof Error ? err.message : String(err)}`));
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       let output = decodeProcessOutput(Buffer.concat(chunks));

@@ -14,6 +14,52 @@ use super::get_extra_path_dirs;
 #[cfg(target_os = "macos")]
 use super::get_augmented_path;
 
+/// POSIX 单引号包裹：内部的 `'` 用 `'\''` 收尾再重开。
+/// 单引号内 `$`、反引号、`;` 都不解释，这是 shell 里唯一无歧义的引用方式。
+#[cfg(target_os = "macos")]
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// AppleScript 字符串转义：只有 `\` 和 `"` 需要处理。
+#[cfg(target_os = "macos")]
+fn applescript_quote(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// 把「设置 PATH → cd → 运行 CLI」写成一个临时可执行脚本，返回脚本路径。
+///
+/// 为什么不直接拼命令串：macOS 这几条路径最终都要经过 AppleScript 的双引号字符串
+/// 再进 shell 的双引号字符串。双引号里 `$(...)`、反引号、`$VAR` 仍会展开，
+/// 带这些字符的合法目录名（或被诱导写入的路径）会变成额外命令。
+/// 脚本里目录只以单引号字符串出现一次，外面传的只有 app 自己生成的临时文件名。
+#[cfg(target_os = "macos")]
+fn write_launch_script(
+    dir: &str,
+    path_export: &str,
+    cli: &str,
+) -> AppResult<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script = format!(
+        "#!/bin/sh\n{}cd -- {} || exit 1\nexec {}\n",
+        path_export,
+        sh_quote(dir),
+        cli
+    );
+    let uniq = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let script_path = std::env::temp_dir().join(format!("codeshelf-launch-{}.sh", uniq));
+    std::fs::write(&script_path, script)
+        .and_then(|_| {
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+        })
+        .map_err(|e| crate::error::AppError::from(format!("准备启动脚本失败: {}", e)))?;
+    Ok(script_path)
+}
+
 /// 将 Windows 路径转换为 WSL 路径
 /// 例如: C:\work\blog → /mnt/c/work/blog
 /// 如果路径已经是 Linux 格式 (/home/...) 则不转换
@@ -345,13 +391,16 @@ pub async fn launch_claude_in_terminal(
     #[cfg(target_os = "macos")]
     {
         let extra_dirs = get_extra_path_dirs();
-        let escaped_dir = dir.replace("\\", "\\\\").replace("\"", "\\\"");
-        let path_prefix = if extra_dirs.is_empty() {
+        let path_export = if extra_dirs.is_empty() {
             String::new()
         } else {
-            format!("export PATH=\"{}:$PATH\" && ", extra_dirs.join(":"))
+            format!("export PATH={}:\"$PATH\"\n", sh_quote(&extra_dirs.join(":")))
         };
-        let script_cmd = format!("cd \"{}\" && {}{}", escaped_dir, path_prefix, cli);
+
+        // 目录只以「脚本文件里的单引号字符串」出现一次，不再拼进双引号 shell 串
+        // 或 AppleScript 串 —— 那两处 `$(...)`、反引号都会被执行。
+        let launch_script = write_launch_script(&dir, &path_export, cli)?;
+        let script_arg = launch_script.to_string_lossy().to_string();
 
         match term_type.as_str() {
             "iterm" => {
@@ -363,7 +412,7 @@ pub async fn launch_claude_in_terminal(
                             write text "{}"
                         end tell
                     end tell"#,
-                    script_cmd.replace("\"", "\\\"")
+                    applescript_quote(&script_arg)
                 );
                 Command::new("osascript")
                     .args(["-e", &apple_script])
@@ -381,27 +430,11 @@ pub async fn launch_claude_in_terminal(
                         //   2) --norc 下不加载 .zshrc → nvm 的 PATH 缺失 → 连 CLI 的 `env node` 都找不到。
                         // 解法:写一个临时可执行脚本(对 -e 而言是「单个干净参数」，不触发上面两个坑)，
                         // 脚本里注入完整 PATH(含 nvm/homebrew) + cd + 运行 CLI。
-                        use std::os::unix::fs::PermissionsExt;
-                        let script = format!(
-                            "#!/bin/sh\nexport PATH=\"{}\"\ncd \"{}\" && exec {}\n",
-                            full_path, escaped_dir, cli
-                        );
-                        let uniq = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_nanos())
-                            .unwrap_or(0);
-                        let script_path = std::env::temp_dir()
-                            .join(format!("codeshelf-launch-{}.sh", uniq));
-                        std::fs::write(&script_path, script)
-                            .and_then(|_| {
-                                std::fs::set_permissions(
-                                    &script_path,
-                                    std::fs::Permissions::from_mode(0o755),
-                                )
-                            })
-                            .map_err(|e| {
-                                crate::error::AppError::from(format!("准备启动脚本失败: {}", e))
-                            })?;
+                        let script_path = write_launch_script(
+                            &dir,
+                            &format!("export PATH={}\n", sh_quote(&full_path)),
+                            cli,
+                        )?;
                         Command::new("open")
                             .args([
                                 "-na",
@@ -438,7 +471,7 @@ pub async fn launch_claude_in_terminal(
                         activate
                         do script "{}"
                     end tell"#,
-                    script_cmd.replace("\"", "\\\"")
+                    applescript_quote(&script_arg)
                 );
                 Command::new("osascript")
                     .args(["-e", &apple_script])

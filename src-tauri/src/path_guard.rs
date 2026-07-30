@@ -140,6 +140,58 @@ pub fn ensure_deletable_dir(path: &Path) -> AppResult<PathBuf> {
     Ok(canonical)
 }
 
+/// 校验一个会被拼进文件名的外部标识（workflow id、会话 id、artifact id、时间戳……）。
+///
+/// 只放行 `[A-Za-z0-9._-]`，并显式排除 `.` / `..` 与以 `.` 开头的名字。
+/// 这样 `../x`、绝对路径、`a/b`、`a\b`、URL 编码变体（`%2e%2e` 里的 `%` 就被挡了）
+/// 都拿不到「跳出目录」的能力，也不会盖掉 `.pending_restore` 这类点文件。
+///
+/// 现有 ID 由 `generate_id()` 产生（纳秒时间戳的十六进制），天然合法。
+pub fn safe_file_id(id: &str) -> AppResult<&str> {
+    if id.is_empty() || id.len() > 128 {
+        return Err(AppError::from(format!("非法标识（长度）: {:?}", id)));
+    }
+    if id == "." || id == ".." || id.starts_with('.') {
+        return Err(AppError::from(format!("非法标识: {:?}", id)));
+    }
+    if !id
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_')
+    {
+        return Err(AppError::from(format!(
+            "非法标识（只允许字母、数字、`.`、`-`、`_`）: {:?}",
+            id
+        )));
+    }
+    Ok(id)
+}
+
+/// 用外部标识拼一个数据目录内的文件路径，并验证结果确实落在 `dir` 内。
+///
+/// `safe_file_id` 已经挡住了穿越，这里的 containment 是第二道：
+/// `dir` 本身若是 symlink 或将来校验被放宽，也不会写到目录外。
+pub fn safe_data_path(dir: &Path, id: &str, suffix: &str) -> AppResult<PathBuf> {
+    let id = safe_file_id(id)?;
+    let candidate = dir.join(format!("{}{}", id, suffix));
+
+    // dir 可能还不存在（首次写入），存在时按 canonical 比较
+    if let Ok(dir_canon) = dir.canonicalize() {
+        let parent_ok = candidate
+            .parent()
+            .and_then(|p| p.canonicalize().ok())
+            .map(|p| p == dir_canon)
+            .unwrap_or(false);
+        if !parent_ok {
+            return Err(AppError::from(format!(
+                "路径越界：{} 不在 {} 下",
+                candidate.display(),
+                dir.display()
+            )));
+        }
+    }
+    Ok(candidate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +244,44 @@ mod tests {
         assert!(ensure_safe_project_path(&dir).is_ok());
 
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn file_id_blocks_traversal_variants() {
+        // generate_id() 的产物与常见历史 ID 必须继续可用
+        for ok in ["1a2b3c4d5e6f", "session-2024_01", "run.1", "abcDEF123"] {
+            assert!(safe_file_id(ok).is_ok(), "应放行: {ok}");
+        }
+        for bad in [
+            "../x",
+            "..",
+            ".",
+            ".pending_restore",
+            "a/b",
+            "a\\b",
+            "/etc/passwd",
+            "C:\\Windows\\x",
+            "%2e%2e%2fx",
+            "a\0b",
+            "a b",
+            "",
+            &"x".repeat(129),
+        ] {
+            assert!(safe_file_id(bad).is_err(), "应拒绝: {bad:?}");
+        }
+    }
+
+    #[test]
+    fn safe_data_path_stays_in_dir() {
+        let dir = std::env::temp_dir().join(format!("codeshelf-id-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let p = safe_data_path(&dir, "abc123", ".json").unwrap();
+        assert_eq!(p, dir.join("abc123.json"));
+        assert!(safe_data_path(&dir, "../escape", ".json").is_err());
+        assert!(safe_data_path(&dir, "sub/escape", ".json").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

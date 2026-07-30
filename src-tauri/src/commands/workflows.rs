@@ -72,7 +72,8 @@ fn workflows_dir() -> AppResult<PathBuf> {
 }
 
 fn workflow_path(id: &str) -> AppResult<PathBuf> {
-    Ok(workflows_dir()?.join(format!("{}.json", id)))
+    // id 来自前端/导入数据，直接拼文件名等于把 `../` 交给文件系统
+    crate::path_guard::safe_data_path(&workflows_dir()?, id, ".json")
 }
 
 pub fn list_workflows_sync() -> AppResult<Vec<Workflow>> {

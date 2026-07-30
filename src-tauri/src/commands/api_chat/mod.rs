@@ -102,6 +102,8 @@ pub(super) fn write_endpoints(endpoints: &[ApiEndpoint]) -> AppResult<()> {
         .map_err(|e| crate::error::AppError::from(format!("保存 endpoints 失败: {}", e)))
 }
 
-pub(super) fn session_path(dir: &Path, id: &str) -> PathBuf {
-    dir.join(format!("{}.json", id))
+/// 会话 id 来自前端，直接拼文件名等于把 `../` 交给文件系统。
+/// 返回 Result：调用方必须处理非法 id，不能静默落到目录外。
+pub(super) fn session_path(dir: &Path, id: &str) -> AppResult<PathBuf> {
+    crate::path_guard::safe_data_path(dir, id, ".json")
 }
