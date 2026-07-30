@@ -53,9 +53,16 @@ export function getDefaultOptionKey(providers: AiProviderConfig[]): string | nul
   return `${defaultProvider.id}:${defaultModel.id}`;
 }
 
+/** 生成本地唯一 ID（会话或消息通用）。crypto.randomUUID 不可用时退回时间戳+随机串。 */
+export function newId(): string {
+  return typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function makeMessage(role: ChatMessage["role"], content: string, extra?: Partial<ChatMessage>): ChatMessage {
   return {
-    id: typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: newId(),
     role,
     content,
     createdAt: new Date().toISOString(),

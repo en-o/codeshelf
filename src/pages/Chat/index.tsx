@@ -42,6 +42,7 @@ import {
   formatMentionPath,
   getDefaultOptionKey,
   makeMessage,
+  newId,
 } from "./utils/chatHelpers";
 
 export function ChatPage() {
@@ -353,10 +354,76 @@ export function ChatPage() {
     try {
       const parsed = await importSessionFromJson();
       if (!parsed) return;
-      const saved = await saveChatSession(parsed);
-      syncSummary(saved);
-      setActiveSessionId(saved.id);
-      showToast("success", "导入成功");
+
+      // 导出文件里带着原会话 ID，而 saveChatSession 是按 ID upsert（后端会先删干净
+      // 现有 messages/tools 再写入）。导出后继续聊天、再导入这个旧文件，
+      // 新增的消息会被无声抹掉还提示「导入成功」。
+      // 所以：**默认一律分配新 ID**，同一个文件导入两次得到两个独立会话。
+      const existing = sessions.find((s) => s.id === parsed.id);
+      let replace = false;
+
+      if (existing) {
+        replace = await confirmDialog({
+          title: "检测到同 ID 会话",
+          variant: "danger",
+          confirmLabel: "替换现有会话",
+          cancelLabel: "新建副本",
+          description: (
+            <div className="space-y-2 text-sm">
+              <p>导入文件与现有会话使用同一个 ID，请选择处理方式：</p>
+              <div className="grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                <span />
+                <span className="font-semibold">现有</span>
+                <span className="font-semibold">导入文件</span>
+                <span className="text-gray-500">标题</span>
+                <span className="truncate">{existing.title}</span>
+                <span className="truncate">{parsed.title}</span>
+                <span className="text-gray-500">消息数</span>
+                <span>{existing.messageCount}</span>
+                <span>{parsed.messages.length}</span>
+                <span className="text-gray-500">更新时间</span>
+                <span>{existing.updatedAt}</span>
+                <span>{parsed.updatedAt ?? "—"}</span>
+              </div>
+            </div>
+          ),
+        });
+      }
+
+      if (replace) {
+        const confirmed = await confirmDialog({
+          title: "确认替换？",
+          variant: "danger",
+          confirmLabel: "确认替换",
+          cancelLabel: "取消导入",
+          description: `现有的 ${existing?.messageCount ?? 0} 条消息将被导入文件的 ${parsed.messages.length} 条覆盖。`,
+          notice: "替换前会自动把现有会话另存为一条独立会话，可随时翻回。",
+        });
+        // 取消 = 什么都没写，数据库与导入前完全一致
+        if (!confirmed) return;
+
+        // 覆盖前先原样另存一份。不引入新的备份文件格式 ——
+        // 复用 saveChatSession 存成普通会话就够了，用户在侧栏直接能看到。
+        const current = await getChatSession(parsed.id);
+        const backup = await saveChatSession({
+          ...current,
+          id: newId(),
+          title: `${current.title}（替换前备份）`,
+          pinned: false,
+        });
+        syncSummary(backup);
+
+        const saved = await saveChatSession(parsed);
+        syncSummary(saved);
+        setActiveSessionId(saved.id);
+        showToast("success", "已替换", `原会话已备份为「${backup.title}」`);
+        return;
+      }
+
+      const copy = await saveChatSession({ ...parsed, id: newId() });
+      syncSummary(copy);
+      setActiveSessionId(copy.id);
+      showToast("success", "导入成功", existing ? "已作为独立会话导入，未改动现有会话" : undefined);
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "导入失败");
     }
