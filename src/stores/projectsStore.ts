@@ -26,12 +26,12 @@ interface ProjectsState {
   categories: string[];
   setCategories: (categories: string[]) => void;
   addCategory: (category: string) => void;
-  removeCategory: (category: string) => void;
+  removeCategory: (category: string) => Promise<void>;
 
   labels: string[];
   setLabels: (labels: string[]) => void;
   addLabel: (label: string) => void;
-  removeLabel: (label: string) => void;
+  removeLabel: (label: string) => Promise<void>;
 
   markProjectDirty: (projectPath: string) => void;
 }
@@ -111,17 +111,27 @@ export const useProjectsStore = create<ProjectsState>()((set, get) => ({
       invoke("save_categories", { categories: updated }).catch(console.error);
     }
   },
-  removeCategory: (category) => {
+  removeCategory: async (category) => {
     const state = get();
-    const updated = state.categories.filter((c) => c !== category);
+    // 走后端 remove_category：它会先清掉**所有项目的引用**再更新词表。
+    // 以前这里只 save_categories，项目引用留在库里，重启后词表又从项目聚合出来，
+    // 被删的分类当场复活。
+    const prev = { categories: state.categories, projects: state.projects };
     set({
-      categories: updated,
+      categories: state.categories.filter((c) => c !== category),
       projects: state.projects.map((p) => ({
         ...p,
         tags: p.tags.filter((t) => t !== category),
       })),
     });
-    invoke("save_categories", { categories: updated }).catch(console.error);
+    try {
+      const updated = await invoke<string[]>("remove_category", { category });
+      set({ categories: updated });
+    } catch (err) {
+      console.error("删除分类失败:", err);
+      set(prev); // 落库失败就回滚，别让界面显示一个其实还在的删除
+      throw err;
+    }
   },
 
   labels: DEFAULT_LABELS,
@@ -134,17 +144,24 @@ export const useProjectsStore = create<ProjectsState>()((set, get) => ({
       invoke("save_labels", { labels: updated }).catch(console.error);
     }
   },
-  removeLabel: (label) => {
+  removeLabel: async (label) => {
     const state = get();
-    const updated = state.labels.filter((l) => l !== label);
+    const prev = { labels: state.labels, projects: state.projects };
     set({
-      labels: updated,
+      labels: state.labels.filter((l) => l !== label),
       projects: state.projects.map((p) => ({
         ...p,
         labels: p.labels?.filter((l) => l !== label),
       })),
     });
-    invoke("save_labels", { labels: updated }).catch(console.error);
+    try {
+      const updated = await invoke<string[]>("remove_label", { label });
+      set({ labels: updated });
+    } catch (err) {
+      console.error("删除标签失败:", err);
+      set(prev);
+      throw err;
+    }
   },
 
   markProjectDirty: (projectPath) => {

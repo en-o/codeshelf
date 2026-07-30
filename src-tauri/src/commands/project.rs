@@ -808,6 +808,19 @@ pub async fn set_project_claude_env(
         .ok_or_else(|| crate::error::AppError::from("项目不存在".to_string()))
 }
 
+/// 删掉关系表里某个词的全部引用（删分类/标签时用）。
+///
+/// 表名和列名是**内部常量**，不来自外部输入。
+pub(crate) async fn delete_taxonomy_term(table: &str, column: &str, value: &str) -> AppResult<()> {
+    let sql = format!("DELETE FROM {} WHERE {} = ?", table, column);
+    sqlx::query(&sql)
+        .bind(value)
+        .execute(pool())
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("清理项目引用失败: {}", e)))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

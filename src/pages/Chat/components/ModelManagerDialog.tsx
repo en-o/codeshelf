@@ -23,6 +23,23 @@ export function ModelManagerDialog({
   saveAiProviders,
   initialProviderId,
 }: ModelManagerDialogProps) {
+
+  /**
+   * saveAiProviders 现在会在写盘失败时回滚并抛出（见 aiProvidersStore）。
+   * 这些都是 onChange 里的 async 回调，不接住就是一个静默的 unhandled rejection，
+   * 界面上勾选框看着变了、其实没存下来。
+   */
+  async function persist(next: AiProviderConfig[]) {
+    try {
+      await saveAiProviders(next);
+    } catch (e) {
+      showToast(
+        "error",
+        "保存失败",
+        typeof e === "string" && e ? e : e instanceof Error ? e.message : "配置未写入磁盘，请重试",
+      );
+    }
+  }
   const [qmProviderId, setQmProviderId] = useState<string>(initialProviderId);
   const [qmModelId, setQmModelId] = useState("");
 
@@ -67,7 +84,7 @@ export function ModelManagerDialog({
                           ...pp,
                           models: pp.models.map((mm) => mm.id === m.id ? { ...mm, enabled: e.target.checked } : mm),
                         } : pp);
-                        await saveAiProviders(next);
+                        await persist(next);
                       }}
                     />
                     <span className="font-mono flex-1 truncate">{m.model}</span>
@@ -84,7 +101,7 @@ export function ModelManagerDialog({
                             ...pp,
                             models: pp.models.map((mm) => mm.id === m.id ? { ...mm, vision: e.target.checked } : mm),
                           } : pp);
-                          await saveAiProviders(next);
+                          await persist(next);
                         }}
                       />
                       视觉
@@ -98,7 +115,7 @@ export function ModelManagerDialog({
                           ...pp,
                           models: pp.models.filter((mm) => mm.id !== m.id),
                         } : pp);
-                        await saveAiProviders(next);
+                        await persist(next);
                       }}
                     >×</button>
                   </div>
@@ -143,7 +160,7 @@ export function ModelManagerDialog({
                     stream: true,
                   }],
                 } : pp);
-                await saveAiProviders(next);
+                await persist(next);
                 setQmModelId("");
                 showToast("success", "已添加");
               }}

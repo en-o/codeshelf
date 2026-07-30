@@ -568,7 +568,7 @@ export const AiProviderSettings = forwardRef<AiProviderSettingsHandle, AiProvide
   }
 
   // 保存供应商配置（新增或编辑）
-  function handleSaveProvider() {
+  async function handleSaveProvider() {
     if (submittingRef.current) return;
     submittingRef.current = true;
 
@@ -585,9 +585,22 @@ export const AiProviderSettings = forwardRef<AiProviderSettingsHandle, AiProvide
         showToast("warning", "请至少添加一个模型");
         return;
       }
-      if (!form.models.some((m) => m.model.trim())) {
-        showToast("warning", "模型名称不能为空");
+      // 逐项校验，不是「至少一个非空」—— 后者会放行 [{model:"gpt-4"},{model:"  "}]，
+      // 那个空模型会被存下来，之后在下拉里出现一个选不动的空项。
+      const emptyIdx = form.models.findIndex((m) => !m.model.trim());
+      if (emptyIdx >= 0) {
+        showToast("warning", `第 ${emptyIdx + 1} 个模型的名称不能为空`);
         return;
+      }
+      // 同名模型同样有害：下拉里两个一样的条目，选中哪个取决于顺序
+      const seen = new Set<string>();
+      for (const m of form.models) {
+        const key = m.model.trim();
+        if (seen.has(key)) {
+          showToast("warning", `模型名称重复：${key}`);
+          return;
+        }
+        seen.add(key);
       }
 
       let apiKey = form.apiKey;
@@ -621,35 +634,57 @@ export const AiProviderSettings = forwardRef<AiProviderSettingsHandle, AiProvide
         }));
       }
 
-      saveAiProviders(nextProviders);
+      // 必须 await：以前是即发即忘 + store 内部吞异常，
+      // 于是磁盘写失败时照样提示「保存成功」并清空表单，用户的 API key 就此丢失。
+      await saveAiProviders(nextProviders);
       showToast("success", "保存成功");
-      resetForm();
+      resetForm(); // 只有确实写成功了才关闭表单
     } catch (e) {
-      throw e;
+      // Tauri 的错误是纯字符串，不是 Error 实例（CLAUDE.md 硬约束 4）
+      showToast(
+        "error",
+        "保存失败",
+        typeof e === "string" && e ? e : e instanceof Error ? e.message : "配置未写入磁盘，请重试",
+      );
+      // 刻意不 resetForm：把用户填的内容留在表单里，方便直接重试
     } finally {
       submittingRef.current = false;
     }
   }
 
+  /**
+   * 保存并如实反馈结果。
+   *
+   * 这三个 handler 原本都是即发即忘：store 内部吞掉异常，界面无条件报成功。
+   * 现在 store 会回滚并抛出，这里统一处理 —— 修一处不够，它们是同一个错误模式。
+   */
+  async function persistProviders(next: AiProviderConfig[], successMessage?: string) {
+    try {
+      await saveAiProviders(next);
+      if (successMessage) showToast("success", successMessage);
+    } catch (e) {
+      showToast(
+        "error",
+        "保存失败",
+        typeof e === "string" && e ? e : e instanceof Error ? e.message : "配置未写入磁盘，请重试",
+      );
+    }
+  }
+
   function handleRemoveProvider(id: string) {
-    const nextProviders = providers.filter((p) => p.id !== id);
-    saveAiProviders(nextProviders);
-    showToast("success", "已删除供应商");
+    void persistProviders(providers.filter((p) => p.id !== id), "已删除供应商");
   }
 
   function handleToggleProvider(id: string) {
-    const nextProviders = providers.map((p) =>
-      p.id === id ? { ...p, enabled: !p.enabled } : p
+    void persistProviders(
+      providers.map((p) => (p.id === id ? { ...p, enabled: !p.enabled } : p)),
     );
-    saveAiProviders(nextProviders);
   }
 
   function handleSetDefaultProvider(id: string) {
-    const nextProviders = providers.map((p) => ({
-      ...p,
-      isDefaultProvider: p.id === id,
-    }));
-    saveAiProviders(nextProviders);
+    void persistProviders(
+      providers.map((p) => ({ ...p, isDefaultProvider: p.id === id })),
+    );
   }
 
   function updateModel(id: string, updates: Partial<AiModelConfig>) {

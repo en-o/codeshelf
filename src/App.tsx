@@ -82,21 +82,36 @@ interface NotificationBackend {
 async function initializeApp() {
   const setInitialized = useUiStore.getState().setInitialized;
 
+  // 各数据域**独立**成败。原来十二项共用一个 `Promise.all`：任何一项失败
+  // （比如某个可选配置文件损坏）都会让其余全部成功的结果被一起丢弃，
+  // 然后以空 store 标记初始化完成 —— 用户看到的就是「数据全没了」。
+  const failed: string[] = [];
+  async function load<T>(label: string, fallback: T, fn: () => Promise<T>): Promise<T> {
+    try {
+      const v = await fn();
+      return v ?? fallback;
+    } catch (err) {
+      console.error(`加载${label}失败:`, err);
+      failed.push(label);
+      return fallback;
+    }
+  }
+
   try {
-    // 并行加载所有数据
+    // 并行加载，但逐项容错
     const [settings, labels, categories, editors, terminal, projects, uiState, notifications, appShortcuts, aiProviders, sensitiveFilePatterns, savedResumes] = await Promise.all([
-      invoke<AppSettings>("get_app_settings"),
-      invoke<string[]>("get_labels"),
-      invoke<string[]>("get_categories"),
-      invoke<EditorConfig[]>("get_editors"),
-      invoke<TerminalConfigBackend>("get_terminal_config"),
-      invoke<Project[]>("get_projects"),
-      invoke<UiState>("get_ui_state"),
-      invoke<NotificationBackend[]>("get_notifications"),
-      invoke<AppShortcutBinding[]>("get_app_shortcuts"),
-      invoke<AiProviderConfig[]>("get_ai_providers"),
-      invoke<string[]>("get_sensitive_file_patterns"),
-      invoke<unknown[]>("get_resumes"),
+      load("应用设置", {} as AppSettings, () => invoke<AppSettings>("get_app_settings")),
+      load("标签", [] as string[], () => invoke<string[]>("get_labels")),
+      load("分类", [] as string[], () => invoke<string[]>("get_categories")),
+      load("编辑器配置", [] as EditorConfig[], () => invoke<EditorConfig[]>("get_editors")),
+      load("终端配置", {} as TerminalConfigBackend, () => invoke<TerminalConfigBackend>("get_terminal_config")),
+      load("项目列表", [] as Project[], () => invoke<Project[]>("get_projects")),
+      load("界面状态", {} as UiState, () => invoke<UiState>("get_ui_state")),
+      load("通知", [] as NotificationBackend[], () => invoke<NotificationBackend[]>("get_notifications")),
+      load("快捷键", [] as AppShortcutBinding[], () => invoke<AppShortcutBinding[]>("get_app_shortcuts")),
+      load("AI 供应商", [] as AiProviderConfig[], () => invoke<AiProviderConfig[]>("get_ai_providers")),
+      load("敏感文件规则", [] as string[], () => invoke<string[]>("get_sensitive_file_patterns")),
+      load("简历数据", [] as unknown[], () => invoke<unknown[]>("get_resumes")),
     ]);
 
     // 转换终端配置格式
@@ -144,9 +159,21 @@ async function initializeApp() {
     useAiProvidersStore.setState({ aiProviders: normalizedAiProviders });
     useResumeStore.getState().setSavedResumes(savedResumes || []);
     useUiStore.setState({ initialized: true });
+
+    // 有域加载失败时必须说出来。静默用默认值启动，用户会以为数据真的没了，
+    // 进而做出「重新添加项目」这类会覆盖掉原数据的动作。
+    if (failed.length > 0) {
+      showToast(
+        "warning",
+        "部分数据加载失败",
+        `${failed.join("、")}已暂用默认值。请勿在此状态下修改这些设置，否则可能覆盖原数据；重启应用可重试。`,
+      );
+    }
   } catch (err) {
+    // load() 已经吞掉了各域的错误，走到这里说明是后续赋值逻辑本身出了问题
     console.error("初始化应用失败:", err);
-    setInitialized(true); // 即使失败也标记为已初始化，使用默认值
+    setInitialized(true);
+    showToast("error", "初始化失败", err instanceof Error ? err.message : String(err));
   }
 }
 

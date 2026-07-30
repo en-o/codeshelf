@@ -66,6 +66,13 @@ pub async fn add_label(label: String) -> AppResult<Vec<String>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_label(label: String) -> AppResult<Vec<String>> {
+    // 先清项目引用，再更新词表。只改词表是不够的：项目上的引用还在库里，
+    // 重启后项目重新加载、词表又从项目聚合出来，被删的标签当场复活。
+    //
+    // 顺序也重要：先清引用再存词表。反过来的话中途失败会留下
+    // 「词表已删、项目仍带着它」的状态，下次启动照样复活。
+    crate::commands::project::delete_taxonomy_term("project_labels", "label", &label).await?;
+
     let mut labels = get_labels().await?;
     labels.retain(|l| l != &label);
     save_labels(labels.clone()).await?;
@@ -124,6 +131,9 @@ pub async fn add_category(category: String) -> AppResult<Vec<String>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_category(category: String) -> AppResult<Vec<String>> {
+    // 同 remove_label：先清项目引用再更新词表，否则删掉的分类会在重启后复活。
+    crate::commands::project::delete_taxonomy_term("project_tags", "tag", &category).await?;
+
     let mut categories = get_categories().await?;
     categories.retain(|c| c != &category);
     save_categories(categories.clone()).await?;

@@ -34,10 +34,10 @@
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
 2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
    已完成（AUD-007 部分完成）。
-3. **数据、升级与发布 P1**：~~AUD-010、AUD-021～AUD-025~~ 已完成；剩 AUD-051。
-4. **P2/P3 整理**：其余条目按模块分批处理。
+3. ~~**数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051~~ —— 已完成。
+4. **P2/P3 整理**：~~AUD-012～AUD-015~~ 已完成；其余按模块分批处理。
 
-> 进度：29 / 61 已整改（AUD-001～006、008～011、016～025、039、044～050），
+> 进度：34 / 61 已整改（AUD-001～006、008～025、039、044～051），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -422,7 +422,13 @@
 
 ### AUD-012 · P2 · 合并 debounce 窗口内的设置补丁
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- `_persistence.ts` 的普通 debounce 换成 `debounceMerge`：窗口内多次调用**累积**成一个
+  patch，而不是后一次覆盖前一次。每个 setter 只传自己那一个字段，原来 300ms 内
+  先改主题再折叠侧栏，发出去的只有 `{ sidebar_collapsed }`。
+- 验证：把合并逻辑单独跑起来 —— 连续发 theme / view_mode / sidebar_collapsed /
+  show_dock_icon 四个字段，实际只发出 **1 次**且四个字段全在；
+  同一字段连发两次取最新值，且不带上一批的残留。
 - 风险：所有设置字段共用一个 timer，各 setter 只传单字段 partial。300ms 内连续修改不同字段时，
   后一次会取消前一次，界面当次正确但重启后部分设置回退。
 - 涉及位置：
@@ -433,7 +439,12 @@
 
 ### AUD-013 · P2 · 初始化加载按数据域隔离失败
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 十二项初始化读取各自容错：新增 `load(label, fallback, fn)` 包装，单项失败只影响
+  该域并记下名字，其余成功结果照常写入 store。原来共用一个 `Promise.all`，
+  任一项失败会丢弃全部成功结果，然后以空 store 标记初始化完成。
+- 失败时弹 warning 列出**具体哪些域**用了默认值，并提示「不要在此状态下修改这些设置」——
+  静默用默认值启动，用户会以为数据真没了，进而做出「重新添加项目」这类会覆盖原数据的动作。
 - 风险：十二项初始化读取共用一个 `Promise.all`。任一项失败会丢弃其他成功结果，并直接以空/default store
   标记初始化完成，容易制造“数据全没了”的假象。
 - 涉及位置：
@@ -443,7 +454,15 @@
 
 ### AUD-014 · P2 · 删除分类/标签时持久化项目引用
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **没有新增命令**：一开始我加了 `delete_category_everywhere` / `delete_label_everywhere`，
+  随后发现后端**早就有** `remove_category` / `remove_label`，只是它们同样只改词表
+  不清项目引用。于是撤掉新命令，直接修既有的两个 —— 其它调用方一并受益，
+  `src/bindings.ts` 也回到零 diff。
+- 两个命令现在先删 `project_tags` / `project_labels` 里的全部引用，**再**更新词表。
+  顺序有讲究：反过来的话中途失败会留下「词表已删、项目仍带着它」的状态，
+  下次启动词表从项目重新聚合，删掉的条目照样复活。
+- 前端 store 改为 `await` 后端并在失败时**回滚**乐观更新，不再 `catch(console.error)` 了事。
 - 风险：删除分类或标签只更新前端内存和词表，没有写回项目引用；重启后项目值重新聚合，已删除项会复活。
 - 涉及位置：
   - `src/stores/projectsStore.ts`
@@ -454,7 +473,16 @@
 
 ### AUD-015 · P2 · 保存失败不得提示成功
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- `aiProvidersStore.saveAiProviders` 不再吞异常：失败时回滚乐观更新并向上抛。
+- `handleSaveProvider` 改成 `await` 并接住错误：失败时显示后端原文、**不 resetForm**，
+  用户填的内容留在表单里可直接重试。错误按硬约束 4 处理（Tauri 错误是纯字符串）。
+- **修了报告没点到的三处同类问题**：`handleRemoveProvider` / `handleToggleProvider` /
+  `handleSetDefaultProvider` 也是即发即忘，抽出 `persistProviders` 统一处理；
+  `ModelManagerDialog` 里 4 个 `onChange` 的 `await saveAiProviders` 在 store 改为抛错后
+  会变成静默的 unhandled rejection，加了 `persist()` 接住。
+- 模型校验从「至少一个非空」改为**逐项**校验并报出第几个；顺带挡住重名模型
+  （下拉里两个一样的条目，选中哪个取决于顺序）。
 - 风险：AI 供应商 store 乐观更新后吞掉后端异常，页面固定提示成功并关闭表单；重启后配置消失。
   模型数组还只要求“至少一个非空”，可保存部分空 model ID。
 - 涉及位置：
@@ -1225,7 +1253,21 @@
 
 ### AUD-051 · P1 · Release 对同版本并发和失败重跑必须幂等
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待一次真实发布验证）
+- **串行化**：新增 `concurrency: { group: release-${{ github.ref }}, cancel-in-progress: false }`。
+  刻意**不**取消进行中的任务 —— 发布跑到一半被取消会留下一个只有部分平台产物的 Draft，
+  比排队等待更糟。
+- **重跑幂等**：便携版 ZIP 名固定（`CodeShelf-Portable-vX-x64.zip`），上一次传过之后
+  同名上传会 422 失败，逼人工去删 asset。改成上传前先 `listReleaseAssets` 删掉同名旧
+  asset 再传，rerun 直接跑完。
+- **发布门禁**：`summarize-release` 增加完整性检查，缺任一平台产物、`.sig` 签名或
+  `latest.json` 就 `core.setFailed`，Summary 里直接给出缺失清单。
+  只看「构建 job 全绿」不够 —— 上传本身可能失败，或某个矩阵被跳过。
+  同一步还会核对 `release.target_commitish` 与构建 SHA 一致（AUD-024 的自动化版本）。
+- 验证：用 Tauri 2 的**真实产物命名**跑了匹配器（msi / setup.exe / Portable zip /
+  aarch64 与 x64 的 dmg 和 app.tar.gz / AppImage / deb / .sig / latest.json）——
+  完整时零缺失；分别抽掉 latest.json、便携包、Linux、mac arm64、签名后都能准确报出缺哪一项。
+  YAML 解析通过。
 - 风险：workflow 没有 concurrency；同版本任务会复用同一 Draft、tag 和附件。Windows 便携 ZIP 名固定，
   部分矩阵已上传后重跑会因同名 asset 再上传而失败；两个任务还可能竞争正文和附件，在其中一次发布后
   继续修改同 tag 资产，造成 tag、构建提交和二进制来源混杂。

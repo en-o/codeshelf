@@ -12,6 +12,15 @@ on:
         required: true
         type: string
 
+# 按分支/版本串行化：同一个版本同时被触发两次时，第二个排队等第一个跑完，
+# 而不是两个任务同时往同一个 Draft 上传附件、互相覆盖正文。
+#
+# 刻意 **不** cancel-in-progress：发布任务跑到一半被取消会留下一个只有部分平台产物的
+# Draft，比排队等待更糟。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # 先创建草稿 Release，避免并发竞争
   create-release:
@@ -238,8 +247,25 @@ jobs:
             const zipFile = '${{ steps.portable.outputs.PORTABLE_ZIP }}';
             const releaseId = ${{ needs.create-release.outputs.release_id }};
 
-            console.log(`Uploading ${zipFile} to release ${releaseId}`);
+            // 重跑幂等：ZIP 名固定（CodeShelf-Portable-vX-x64.zip），
+            // 上一次已经传过时同名上传会 422 失败，逼人工去删 asset。
+            // 先删掉同名旧 asset 再传 —— rerun 能直接跑完。
+            const { data: existing } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 100
+            });
+            for (const asset of existing.filter(a => a.name === zipFile)) {
+              console.log(`Deleting stale asset ${asset.name} (${asset.id})`);
+              await github.rest.repos.deleteReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: asset.id
+              });
+            }
 
+            console.log(`Uploading ${zipFile} to release ${releaseId}`);
             const { data } = await github.rest.repos.uploadReleaseAsset({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -275,7 +301,21 @@ jobs:
               release_id: releaseId
             });
 
+            const names = release.assets.map(a => a.name);
             const assets = release.assets.map(a => `- ${a.name} (${(a.size/1024/1024).toFixed(1)} MiB)`).join('\n');
+
+            // 完整性检查：缺任一平台产物、签名或 latest.json 都不该被发布。
+            // 只看「构建 job 全绿」不够 —— 上传本身可能失败，或某个矩阵被跳过。
+            const required = [
+              { label: 'Windows 安装包 (.msi/.exe)', test: n => /\.(msi|exe)$/i.test(n) },
+              { label: 'Windows 便携包 (.zip)', test: n => /Portable.*\.zip$/i.test(n) },
+              { label: 'macOS aarch64 (.dmg/.app.tar.gz)', test: n => /aarch64.*\.(dmg|tar\.gz)$/i.test(n) },
+              { label: 'macOS x86_64 (.dmg/.app.tar.gz)', test: n => /x64|x86_64/i.test(n) && /\.(dmg|tar\.gz)$/i.test(n) },
+              { label: 'Linux (.AppImage/.deb)', test: n => /\.(AppImage|deb)$/i.test(n) },
+              { label: '更新签名 (.sig)', test: n => n.endsWith('.sig') },
+              { label: '更新清单 latest.json', test: n => n === 'latest.json' },
+            ];
+            const missing = required.filter(r => !names.some(r.test)).map(r => r.label);
             const body = [
               `### Draft Release 已就绪：${release.tag_name}`,
               '',
@@ -286,6 +326,11 @@ jobs:
               '**产物：**',
               assets || '（无）',
               '',
+              '',
+              missing.length
+                ? `> **产物不完整，不要发布。** 缺少：\n>\n${missing.map(m => `> - ${m}`).join('\n')}`
+                : '所有预期产物齐全。',
+              '',
               `确认无误后到 [Release 页面](${release.html_url}) 点 **Publish release**。`,
               '在此之前用户不会收到自动更新。',
             ].join('\n');
@@ -295,4 +340,17 @@ jobs:
 
             if (!release.draft) {
               core.warning('Release 已经是发布状态 —— 按当前策略它本应停在 Draft 等待人工确认。');
+            }
+
+            // 产物不齐直接让这一步失败：Summary 里出现红叉，人不会误以为「全绿=可发布」
+            if (missing.length) {
+              core.setFailed(`Release 产物不完整，缺少：${missing.join('、')}。请勿发布，修复后 rerun。`);
+            }
+
+            // 构建 commit 与 Release 绑定 commit 必须一致（AUD-024 的自动核对）
+            const buildSha = '${{ needs.create-release.outputs.build_sha }}';
+            if (release.target_commitish !== buildSha) {
+              core.setFailed(
+                `tag 绑定的 commit (${release.target_commitish}) 与构建 commit (${buildSha}) 不一致，请勿发布。`
+              );
             }
