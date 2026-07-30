@@ -98,6 +98,26 @@ function getEndpoint(history: PairDropHistory, key: string): EndpointHistory {
   return history.endpoints[key] || { peers: {}, conversations: {} };
 }
 
+/**
+ * 只写回**自己这个 endpoint** 的那一段，而不是整份 history。
+ *
+ * 本地端和远端各有一个 hook 实例，各自在挂载时读了一份 history 到 state，
+ * 又各自把**整份**写回同一个 localStorage key —— 后写的那个会把先写的
+ * 另一端数据整个抹掉（聊天记录、已选设备都没了）。
+ *
+ * 改成「落盘前重新读一次，只替换 endpoints[自己的 key]」：
+ * 两端互不覆盖，也不需要引入共享 store。
+ */
+function persistEndpoint(key: string, endpoint: EndpointHistory) {
+  try {
+    const current = loadHistory(); // 重新读，拿到另一端可能刚写入的内容
+    current.endpoints[key] = endpoint;
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(current));
+  } catch (error) {
+    console.warn("保存跨设备传输历史失败", error);
+  }
+}
+
 export function usePairDropClient({
   host = "127.0.0.1",
   port,
@@ -133,11 +153,7 @@ export function usePairDropClient({
       window.clearTimeout(persistTimerRef.current);
     }
     persistTimerRef.current = window.setTimeout(() => {
-      try {
-        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
-      } catch (error) {
-        console.warn("保存跨设备传输历史失败", error);
-      }
+      persistEndpoint(endpointKeyRef.current, getEndpoint(history, endpointKeyRef.current));
       persistTimerRef.current = null;
     }, 120);
   }, [history]);
@@ -147,14 +163,11 @@ export function usePairDropClient({
       if (persistTimerRef.current) {
         window.clearTimeout(persistTimerRef.current);
       }
-      try {
-        localStorage.setItem(
-          HISTORY_STORAGE_KEY,
-          JSON.stringify(historyRef.current)
-        );
-      } catch (error) {
-        console.warn("保存跨设备传输历史失败", error);
-      }
+      // 卸载时把最后一次改动落盘（debounce 可能还没触发）
+      persistEndpoint(
+        endpointKeyRef.current,
+        getEndpoint(historyRef.current, endpointKeyRef.current)
+      );
     },
     []
   );
@@ -179,9 +192,16 @@ export function usePairDropClient({
     return true;
   }, []);
 
+  /**
+   * 更新某个 endpoint 的历史。
+   *
+   * `forKey` 用于把一次长耗时操作（文件上传）**绑定**到它开始时的 endpoint：
+   * 不传就用当前 endpoint。上传中途用户切了房间的话，进度回调和最终结果
+   * 会落到新房间的会话里 —— 文件串房、进度条挂在错误的对话上。
+   */
   const updateEndpoint = useCallback(
-    (updater: (current: EndpointHistory) => EndpointHistory) => {
-      const key = endpointKeyRef.current;
+    (updater: (current: EndpointHistory) => EndpointHistory, forKey?: string) => {
+      const key = forKey ?? endpointKeyRef.current;
       setHistory((prev) => ({
         ...prev,
         endpoints: {
@@ -194,7 +214,7 @@ export function usePairDropClient({
   );
 
   const appendMessage = useCallback(
-    (peerId: string, message: ConversationMessage) => {
+    (peerId: string, message: ConversationMessage, forKey?: string) => {
       updateEndpoint((current) => {
         const messages = [
           ...(current.conversations[peerId] || []),
@@ -207,7 +227,7 @@ export function usePairDropClient({
             [peerId]: messages,
           },
         };
-      });
+      }, forKey);
       if (selectedRef.current !== peerId) {
         setUnread((prev) => {
           const next = new Map(prev);
@@ -396,6 +416,10 @@ export function usePairDropClient({
   const sendFile = useCallback(
     async (to: string, file: File) => {
       if (!apiBase) return;
+      // 一次上传从开始到结束绑定同一个 endpoint 和同一个 apiBase。
+      // 大文件上传可能持续很久，期间用户完全可能切到另一个房间。
+      const boundKey = endpointKeyRef.current;
+      const boundApiBase = apiBase;
       const localId = `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       appendMessage(to, {
         kind: "file",
@@ -407,7 +431,7 @@ export function usePairDropClient({
         mime: file.type || null,
         ts: Date.now(),
         uploadProgress: 0,
-      });
+      }, boundKey);
 
       try {
         const form = new FormData();
@@ -416,7 +440,7 @@ export function usePairDropClient({
         form.append("from", selfId || "");
         form.append("file", file, file.name);
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", `${apiBase}/api/upload`, true);
+        xhr.open("POST", `${boundApiBase}/api/upload`, true);
         if (selfId) xhr.setRequestHeader("x-peer-id", selfId);
         xhr.upload.onprogress = (e) => {
           if (!e.lengthComputable) return;
@@ -435,7 +459,7 @@ export function usePairDropClient({
                 ),
               },
             };
-          });
+          }, boundKey);
         };
         const result = await new Promise<{ token: string }>((resolve, reject) => {
           xhr.onload = () => {
@@ -479,7 +503,7 @@ export function usePairDropClient({
               ),
             },
           };
-        });
+        }, boundKey);
       } catch (err) {
         console.error("send file failed", err);
         updateEndpoint((current) => {
@@ -494,7 +518,7 @@ export function usePairDropClient({
               ),
             },
           };
-        });
+        }, boundKey);
         throw err;
       }
     },

@@ -406,6 +406,14 @@ async reloadProjects() : Promise<Result<Project[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * 前端注册完监听后调用：标记就绪并取走冷启动期间积压的事件。
+ * 
+ * 取队列和置位在同一把锁里，保证不会出现「取完之后、置位之前」产生的事件被丢掉。
+ */
+async takePendingExternalProjects() : Promise<ExternalAddEvent[]> {
+    return await TAURI_INVOKE("take_pending_external_projects");
+},
 async setProjectEditor(id: string, editorId: string | null) : Promise<Result<Project, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_project_editor", { id, editorId }) };
@@ -3214,6 +3222,15 @@ export type EditorInput = { name: string; path: string; icon: string | null; is_
  * 环境类型
  */
 export type EnvType = "host" | "wsl"
+/**
+ * 「外部添加项目」的结果事件。
+ * 
+ * 冷启动时后端在 setup 阶段就可能把项目加完并发事件，而前端 React 的
+ * `listen()` 还没注册 —— 事件直接掉地上，用户点了右键菜单却什么都没发生。
+ * 
+ * 所以：前端就绪之前**只入队不发事件**，就绪时由前端一次性取走。
+ */
+export type ExternalAddEvent = { kind: "added"; payload: AddProjectByPathResult } | { kind: "failed"; payload: string }
 /**
  * 转发规则
  */

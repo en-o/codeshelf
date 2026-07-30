@@ -58,16 +58,72 @@ pub fn add_projects_by_paths(app: &AppHandle, paths: Vec<String>) {
         focus_main_window(&app);
         for path in paths {
             match commands::project::add_project_by_path(path.clone()).await {
-                Ok(result) => {
-                    let _ = app.emit("project-added-externally", &result);
-                }
+                Ok(result) => emit_or_buffer(&app, ExternalAddEvent::Added(result)),
                 Err(e) => {
                     log::error!("外部添加项目失败 ({}): {}", path, e);
-                    let _ = app.emit("project-add-failed", e.to_string());
+                    emit_or_buffer(&app, ExternalAddEvent::Failed(e.to_string()));
                 }
             }
         }
     });
+}
+
+/// 「外部添加项目」的结果事件。
+///
+/// 冷启动时后端在 setup 阶段就可能把项目加完并发事件，而前端 React 的
+/// `listen()` 还没注册 —— 事件直接掉地上，用户点了右键菜单却什么都没发生。
+///
+/// 所以：前端就绪之前**只入队不发事件**，就绪时由前端一次性取走。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "payload")]
+pub enum ExternalAddEvent {
+    Added(commands::project::AddProjectByPathResult),
+    Failed(String),
+}
+
+static PENDING_EXTERNAL: std::sync::Mutex<Vec<ExternalAddEvent>> = std::sync::Mutex::new(Vec::new());
+static FRONTEND_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 前端已就绪就直接发事件，否则入队等它来取。
+///
+/// 判定和入队在**同一把锁**里完成：否则「检查未就绪」和「push」之间前端刚好取走队列，
+/// 这条事件就会永远留在队列里没人处理。
+fn emit_or_buffer(app: &AppHandle, event: ExternalAddEvent) {
+    let mut queue = match PENDING_EXTERNAL.lock() {
+        Ok(q) => q,
+        Err(e) => e.into_inner(),
+    };
+    if FRONTEND_READY.load(std::sync::atomic::Ordering::SeqCst) {
+        drop(queue);
+        emit_external_event(app, &event);
+    } else {
+        queue.push(event);
+    }
+}
+
+fn emit_external_event(app: &AppHandle, event: &ExternalAddEvent) {
+    match event {
+        ExternalAddEvent::Added(result) => {
+            let _ = app.emit("project-added-externally", result);
+        }
+        ExternalAddEvent::Failed(msg) => {
+            let _ = app.emit("project-add-failed", msg.clone());
+        }
+    }
+}
+
+/// 前端注册完监听后调用：标记就绪并取走冷启动期间积压的事件。
+///
+/// 取队列和置位在同一把锁里，保证不会出现「取完之后、置位之前」产生的事件被丢掉。
+#[tauri::command]
+#[specta::specta]
+pub fn take_pending_external_projects() -> Vec<ExternalAddEvent> {
+    let mut queue = match PENDING_EXTERNAL.lock() {
+        Ok(q) => q,
+        Err(e) => e.into_inner(),
+    };
+    FRONTEND_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+    std::mem::take(&mut *queue)
 }
 
 /// 支持 `--add-project <路径>` 与 `--add-project=<路径>` 两种写法。

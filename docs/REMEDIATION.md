@@ -35,10 +35,10 @@
 2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-050~~
    已完成（AUD-007 部分完成）。
 3. ~~**数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051~~ —— 已完成。
-4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026、AUD-027、AUD-029～AUD-031~~ 已完成；
-   其余按模块分批处理。
+4. **P2/P3 整理**：~~AUD-012～AUD-015、AUD-026～AUD-031、AUD-033、AUD-034~~ 已完成；
+   剩 AUD-032、AUD-035～AUD-038、AUD-040～AUD-043、AUD-052～AUD-061。
 
-> 进度：39 / 61 已整改（AUD-001～006、008～027、029～031、039、044～051），
+> 进度：42 / 61 已整改（AUD-001～006、008～031、033、034、039、044～051），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -771,7 +771,18 @@
 
 ### AUD-028 · P2 · PairDrop 历史和上传目标使用单一真相源
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- **历史合并写**：本地端和远端各有一个 hook 实例，各自在挂载时读一份 history 到 state，
+  又各自把**整份**写回同一个 localStorage key —— 后写的把先写的另一端数据整个抹掉。
+  改成 `persistEndpoint(key, endpoint)`：落盘前重新读一次，**只替换自己那个 endpoint 段**。
+  不需要引入共享 store。
+- **上传绑定 endpoint**：`sendFile` 开始时固定 `boundKey` 和 `boundApiBase`，
+  进度回调、成功/失败消息全部写回这个 key。原来 `updateEndpoint` 用的是
+  `endpointKeyRef.current`（**实时**值），大文件上传中途切房间会让进度条和最终结果
+  落到新房间的会话里 —— 文件串房。
+- 验证：把新旧两种落盘方式并排跑了一遍。旧行为下两端先后写入后
+  `endpoints` 只剩 `remote:443`，**本地数据确认丢失**；新行为下两端数据都在，
+  且本地再次写入不会抹掉远端。
 - 风险：localClient 与 remoteClient 各自持有并整份写回同一个 localStorage 历史，后写者可覆盖另一端；
   上传过程中切换远端时，HTTP 上传、通知和历史还可能落到不同 endpoint。
 - 涉及位置：
@@ -861,7 +872,13 @@
 
 ### AUD-033 · P2 · 剪切操作必须先确认剪贴板写入成功
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 剪切改为 `await` 写入成功后才 `execCommand("delete")`，失败则**原文不动**并提示。
+  原来是 `writeText(...).catch(() => {})` 后立刻删除 —— 写入被拒时文本凭空消失且无法撤销。
+- 抽了一个 `writeClipboard` helper：`navigator.clipboard` 被拒时退回后端
+  `write_to_clipboard` 命令（粘贴那条路径本来就走后端，说明它在 webview 里更可靠）。
+  **没有新增命令**，复用既有的。
+- 两处「复制」也不再静默吞掉失败。
 - 风险：自定义右键菜单发起异步 `clipboard.writeText` 后立即删除选区，写入被拒绝时文本仍会丢失。
 - 涉及位置：
   - `src/components/ui/AppContextMenu.tsx`
@@ -871,7 +888,17 @@
 
 ### AUD-034 · P2 · 冷启动外部添加项目事件不得丢失
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 后端在「前端就绪」之前**只入队不发事件**：新增 `ExternalAddEvent` 队列 +
+  `FRONTEND_READY` 标志，`emit_or_buffer` 在**同一把锁**里完成判定和入队 ——
+  否则「检查未就绪」和「push」之间前端刚好取走队列，这条事件会永远留在队列里。
+- 新增命令 `take_pending_external_projects()`：取队列和置位就绪也在同一把锁里，
+  保证不会有「取完之后、置位之前」产生的事件被丢掉。
+- 前端在两个 listener **都注册完成后**才调用它，把冷启动期间积压的事件补跑一遍；
+  处理逻辑抽成 `applyAdded` 供实时事件和补跑共用，行为完全一致。
+- 顺带发现一处既有分歧并在代码里注明：tauri-specta 生成的 `Project` 用
+  `string | null`，手写的 `@/types` 用 `string | undefined`，运行时是同一份 JSON。
+  这里用一次带注释的 cast 桥接，没有去动两套类型定义（影响面大，值得单独处理）。
 - 风险：Tauri setup 阶段可能在 React listener 注册前发出“外部添加项目”成功/失败事件，冷启动时选择、
   toast 或失败信息会丢失。
 - 涉及位置：

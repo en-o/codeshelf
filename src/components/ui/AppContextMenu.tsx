@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { showToast } from "./Toast";
 
 /**
  * 全局右键菜单：补回被 main.tsx 屏蔽掉的原生菜单里真正有用的那部分。
@@ -64,13 +65,40 @@ export function AppContextMenu() {
             : null;
         const readOnly = inputLike && (editable.readOnly || editable.disabled);
 
+        /**
+         * 写剪贴板并**如实返回是否成功**。
+         *
+         * `navigator.clipboard.writeText` 在 webview 里受权限/手势限制，可能被拒；
+         * 原来三处都是 `.catch(() => {})` 直接吞掉。剪切尤其致命：
+         * 写失败之后照样执行删除，用户的文本就凭空消失了。
+         *
+         * 失败时退回后端命令（粘贴那条路径本来就走后端，说明它更可靠）。
+         */
+        const writeClipboard = async (text: string): Promise<boolean> => {
+          try {
+            await navigator.clipboard.writeText(text);
+            return true;
+          } catch {
+            try {
+              await invoke("write_to_clipboard", { content: text });
+              return true;
+            } catch {
+              return false;
+            }
+          }
+        };
+
         items.push(
           {
             label: "剪切",
             hint: "Ctrl/⌘ X",
             disabled: !selected || readOnly,
-            onSelect: () => {
-              navigator.clipboard.writeText(selected).catch(() => {});
+            onSelect: async () => {
+              // 必须先确认写入成功再删除，否则写失败 = 文本直接丢失且无法撤销
+              if (!(await writeClipboard(selected))) {
+                showToast("error", "剪切失败", "剪贴板写入被拒绝，文本未改动");
+                return;
+              }
               restoreFocus(editable, range);
               document.execCommand("delete");
             },
@@ -79,8 +107,10 @@ export function AppContextMenu() {
             label: "复制",
             hint: "Ctrl/⌘ C",
             disabled: !selected,
-            onSelect: () => {
-              navigator.clipboard.writeText(selected).catch(() => {});
+            onSelect: async () => {
+              if (!(await writeClipboard(selected))) {
+                showToast("error", "复制失败", "剪贴板写入被拒绝");
+              }
             },
           },
           {
@@ -111,8 +141,16 @@ export function AppContextMenu() {
         items.push({
           label: "复制",
           hint: "Ctrl/⌘ C",
-          onSelect: () => {
-            navigator.clipboard.writeText(selected).catch(() => {});
+          onSelect: async () => {
+            try {
+              await navigator.clipboard.writeText(selected);
+            } catch {
+              try {
+                await invoke("write_to_clipboard", { content: selected });
+              } catch {
+                showToast("error", "复制失败", "剪贴板写入被拒绝");
+              }
+            }
           },
         });
       }

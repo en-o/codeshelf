@@ -327,7 +327,7 @@ pub async fn create_project(input: CreateProjectInput) -> AppResult<Project> {
 
 /// 只给了路径时的添加结果。`created = false` 表示书架里已有，
 /// 前端据此提示「已在书架中」并定位过去，而不是报错。
-#[derive(Debug, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AddProjectByPathResult {
     pub project: Project,
     pub created: bool,

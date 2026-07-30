@@ -61,6 +61,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         project::batch_delete_projects,
         project::import_projects,
         project::reload_projects,
+        crate::app_setup::take_pending_external_projects,
         project::set_project_editor,
         project::set_project_claude_env,
         // Stats

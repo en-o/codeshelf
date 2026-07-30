@@ -6,7 +6,7 @@ import { MainLayout } from "@/components/layout";
 import { ToastContainer, UpdateNotification, ShortcutQuickLookup, ClipboardQuickAccess, AppContextMenu, showToast } from "@/components/ui";
 import { ConfirmHost } from "@/components/common/useConfirm";
 import { StartupErrorScreen } from "@/components/common/StartupErrorScreen";
-import { commands, type StartupStatus } from "@/bindings";
+import { commands, type ExternalAddEvent, type StartupStatus } from "@/bindings";
 
 // 页面按需加载：各 page 拆成独立 chunk，避免初始 index.js 突破 1MB。
 // 各 page 模块都是 named export，所以用 .then 包一层成 default。
@@ -208,27 +208,45 @@ function AppContent() {
   // 应用外部添加项目：Windows 右键菜单 / 命令行 / macOS「打开方式」与 Dock 拖放。
   // 已在书架里的不报错，直接定位过去（后端 created=false）。
   useEffect(() => {
+    function applyAdded(payload: { project: Project; created: boolean }) {
+      const { project, created } = payload;
+      const store = useProjectsStore.getState();
+      if (created) {
+        store.addProject(project);
+        store.markProjectDirty(project.path);
+      }
+      store.setSelectedProjectId(project.id);
+      useUiStore.getState().setCurrentPage("shelf");
+      showToast(
+        created ? "success" : "info",
+        created ? "已添加到书架" : "该项目已在书架中",
+        project.name
+      );
+    }
+
     const added = listen<{ project: Project; created: boolean }>(
       "project-added-externally",
-      (event) => {
-        const { project, created } = event.payload;
-        const store = useProjectsStore.getState();
-        if (created) {
-          store.addProject(project);
-          store.markProjectDirty(project.path);
-        }
-        store.setSelectedProjectId(project.id);
-        useUiStore.getState().setCurrentPage("shelf");
-        showToast(
-          created ? "success" : "info",
-          created ? "已添加到书架" : "该项目已在书架中",
-          project.name
-        );
-      }
+      (event) => applyAdded(event.payload)
     );
     const failed = listen<string>("project-add-failed", (event) => {
       showToast("error", "添加项目失败", event.payload);
     });
+
+    // 冷启动补齐：后端在 setup 阶段就可能把项目加完，那时这两个 listener 还没注册，
+    // 事件直接掉地上（用户点了右键菜单却什么都没发生）。
+    // 后端在「前端就绪」之前只入队不发事件，这里注册完再一次性取走。
+    Promise.all([added, failed])
+      .then(() => invoke<ExternalAddEvent[]>("take_pending_external_projects"))
+      .then((pending) => {
+        for (const evt of pending) {
+          // bindings 生成的 Project 用 `string | null`，手写的 @/types 用 `string | undefined`，
+          // 运行时是同一份 JSON，只是这两套类型定义对「缺省」的表达不同。
+          if (evt.kind === "added") applyAdded(evt.payload as unknown as { project: Project; created: boolean });
+          else showToast("error", "添加项目失败", evt.payload);
+        }
+      })
+      .catch((err) => console.error("读取冷启动待处理项目失败:", err));
+
     return () => {
       added.then((fn) => fn());
       failed.then((fn) => fn());
