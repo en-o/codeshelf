@@ -192,6 +192,125 @@ pub fn safe_data_path(dir: &Path, id: &str, suffix: &str) -> AppResult<PathBuf> 
     Ok(candidate)
 }
 
+/// 校验一个**用户可见的**文件/目录名（仓库名、导出文件名……）是单一正常路径组件。
+///
+/// 与 `safe_file_id` 的区别：那个是给机器生成的 ID 用的，只放行 ASCII `[A-Za-z0-9._-]`；
+/// 仓库名是人写的，`我的项目`、`foo+bar`、`lib.rs~` 都合法，按 ID 那套会误杀。
+/// 所以这里改成**黑名单**：只挡真正会造成穿越或跨平台炸掉的字符。
+pub fn safe_path_component(name: &str) -> AppResult<&str> {
+    let bad = |why: &str| AppError::from(format!("名称非法（{}）：{:?}", why, name));
+
+    if name.is_empty() || name.len() > 255 {
+        return Err(bad("长度"));
+    }
+    if name == "." || name == ".." {
+        return Err(bad("保留名"));
+    }
+    // 路径分隔符两个平台都挡，避免「macOS 上放行、Windows 上变成子目录」
+    if name.contains('/') || name.contains('\\') {
+        return Err(bad("包含路径分隔符"));
+    }
+    // `:` 在 Windows 上是盘符 / NTFS 数据流分隔符
+    if name.contains(':') {
+        return Err(bad("包含冒号"));
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return Err(bad("包含控制字符"));
+    }
+    // Windows 不允许结尾是空格或点，且首尾空白基本都是误输入
+    if name.trim() != name || name.ends_with('.') {
+        return Err(bad("首尾空白或以点结尾"));
+    }
+    // Windows 保留设备名（含带扩展名的形式，如 `CON.txt`）
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if RESERVED.contains(&stem.as_str()) {
+        return Err(bad("Windows 保留设备名"));
+    }
+    Ok(name)
+}
+
+/// 在 `parent` 下**原子地占位**一个新目录，并返回它的 canonical 路径。
+///
+/// 用于 git clone 这类「先建目录、失败再删掉」的流程。三件事一起做完，
+/// 才谈得上「清理只删自己创建的那个目录」：
+/// 1. `name` 必须是单一正常路径组件（`safe_path_component`：挡掉 `..`、绝对路径、
+///    `/` 与 `\` 分隔符、控制字符、Windows 保留名；中文等非 ASCII 名字照常放行）；
+/// 2. `create_dir` 而不是 `create_dir_all` —— 目标已存在就直接失败，
+///    没有「先 exists() 再创建」那段 TOCTOU 窗口；
+/// 3. 建完立刻 canonicalize 并复核仍落在 `parent` 内，且不在受保护集合里。
+///
+/// 调用方应保存返回的 canonical 路径；清理时用 `ensure_created_dir_unchanged`
+/// 确认它还是同一个目录再删。
+pub fn claim_new_subdir(parent: &Path, name: &str) -> AppResult<PathBuf> {
+    let name = safe_path_component(name)?;
+
+    let parent_canon = parent
+        .canonicalize()
+        .map_err(|e| AppError::from(format!("目标目录不可用 {}：{}", parent.display(), e)))?;
+    if !parent_canon.is_dir() {
+        return Err(AppError::from(format!(
+            "目标不是文件夹：{}",
+            parent_canon.display()
+        )));
+    }
+
+    let candidate = parent_canon.join(name);
+    // 原子占位：已存在（目录/文件/symlink）都会返回 AlreadyExists
+    std::fs::create_dir(&candidate).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            AppError::from(format!("目录 '{}' 已存在", name))
+        } else {
+            AppError::from(format!("创建目录失败 {}：{}", candidate.display(), e))
+        }
+    })?;
+
+    // 建完再解析一次：parent 若是 symlink，或期间被人换掉，这里才看得出来
+    let canonical = match candidate.canonicalize() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = std::fs::remove_dir(&candidate);
+            return Err(AppError::from(format!("解析新建目录失败：{}", e)));
+        }
+    };
+    if canonical.parent() != Some(parent_canon.as_path()) {
+        let _ = std::fs::remove_dir(&canonical);
+        return Err(AppError::from(format!(
+            "路径越界：{} 不在 {} 下",
+            canonical.display(),
+            parent_canon.display()
+        )));
+    }
+    if let Some(hit) = protection_hit(&canonical) {
+        let _ = std::fs::remove_dir(&canonical);
+        return Err(AppError::from(format!(
+            "拒绝在受保护目录下创建：{}（命中 {}）",
+            canonical.display(),
+            hit.display()
+        )));
+    }
+
+    Ok(canonical)
+}
+
+/// 清理前的复核：`created` 必须仍解析到当初 `claim_new_subdir` 返回的同一个 canonical 路径。
+///
+/// 期间目录被换成 symlink 或被替换掉时返回 Err，调用方就不该删 —— 那已经不是自己创建的东西了。
+pub fn ensure_created_dir_unchanged(created: &Path) -> AppResult<PathBuf> {
+    let canonical = ensure_deletable_dir(created)?;
+    if canonical != created {
+        return Err(AppError::from(format!(
+            "目标已被替换，拒绝删除：{} 现在解析为 {}",
+            created.display(),
+            canonical.display()
+        )));
+    }
+    Ok(canonical)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +401,82 @@ mod tests {
         assert!(safe_data_path(&dir, "sub/escape", ".json").is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn claim_new_subdir_blocks_escapes_and_is_atomic() {
+        let parent = std::env::temp_dir().join(format!("codeshelf-claim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+
+        // `..`、绝对路径、混合分隔符、点开头 —— 必须在建任何目录之前就失败
+        for bad in [
+            "..",
+            "../outside",
+            "..\\outside",
+            "a/b",
+            "a\\b",
+            "/etc",
+            "C:\\Windows",
+            "",
+            "CON",
+            "nul.txt",
+            "trailing ",
+            "trailing.",
+            "with\u{0}nul",
+        ] {
+            assert!(claim_new_subdir(&parent, bad).is_err(), "应拒绝: {bad:?}");
+        }
+        // 一个都不许落地
+        assert_eq!(std::fs::read_dir(&parent).unwrap().count(), 0);
+
+        // 正常名字：建出来、落在 parent 内。
+        // 非 ASCII / `+` / 点开头都是合法仓库名，不能因为「安全」把它们误杀。
+        for good in ["my-repo", "我的项目", "foo+bar", ".github", "a.b.c"] {
+            let ok = claim_new_subdir(&parent, good).unwrap_or_else(|e| panic!("{good}: {e:?}"));
+            assert!(ok.is_dir());
+            assert_eq!(ok.parent().unwrap(), parent.canonicalize().unwrap());
+        }
+
+        // 原子占位：同名第二次必须失败（这就是取代 exists() 检查的那道 TOCTOU 防线）
+        assert!(claim_new_subdir(&parent, "my-repo").is_err());
+
+        // 目标位置已被文件占用时同样失败
+        std::fs::write(parent.join("taken"), b"x").unwrap();
+        assert!(claim_new_subdir(&parent, "taken").is_err());
+
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn cleanup_refuses_when_target_was_swapped() {
+        let parent = std::env::temp_dir().join(format!("codeshelf-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+
+        let created = claim_new_subdir(&parent, "repo").unwrap();
+        // 没被动过：允许清理
+        assert!(ensure_created_dir_unchanged(&created).is_ok());
+
+        // 换成指向别处的 symlink：canonical 变了，必须拒绝删除
+        let elsewhere = parent.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::remove_dir_all(&created).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, &created).unwrap();
+        #[cfg(windows)]
+        let _ = std::os::windows::fs::symlink_dir(&elsewhere, &created);
+
+        if created.exists() {
+            assert!(
+                ensure_created_dir_unchanged(&created).is_err(),
+                "目标被换成 symlink 后不该允许删除"
+            );
+            // 被指向的目录必须毫发无损
+            assert!(elsewhere.is_dir());
+        }
+
+        let _ = std::fs::remove_dir_all(&parent);
     }
 
     #[test]

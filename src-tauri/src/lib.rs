@@ -5,6 +5,7 @@ mod handlers;
 mod keyboard_hook;
 pub mod mcp_gateway;
 pub mod path_guard;
+pub mod process_guard;
 mod storage;
 
 use tauri::{Manager, RunEvent};

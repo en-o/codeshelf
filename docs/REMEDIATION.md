@@ -32,12 +32,12 @@
 所有 P0/P1 都是发布前置条件，不应带着未验收的 P1 发版。建议按以下顺序推进：
 
 1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
-2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-047~~
-   已完成，AUD-007 部分完成；剩 AUD-048～AUD-050。
+2. **安全边界与错误对象操作**：~~AUD-002～AUD-006、AUD-008、AUD-009、AUD-016～AUD-020、AUD-045～AUD-048~~
+   已完成，AUD-007 部分完成；剩 AUD-049、AUD-050。
 3. **数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
 
-> 进度：20 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044～047），
+> 进度：21 / 61 已整改（AUD-001～006、008、009、011、016～020、039、044～048），
 > AUD-007 部分整改。
 > AUD-039 是顺手关掉的：加 sidecar 测试文件时立刻踩到它描述的枚举式 ignore 漏洞。
 > AUD-061 依赖 Apple Developer ID 与 Windows Authenticode 证书，需要项目所有者先完成证书采购与
@@ -56,7 +56,9 @@
 >   （旧导出仍可导入）。
 >
 > 已建立的公共守卫，后续条目应直接复用而不是各写一份：
-> - `src-tauri/src/path_guard.rs` —— 受保护目录、可删除目录、外部 ID → 安全路径。
+> - `src-tauri/src/path_guard.rs` —— 受保护目录、可删除目录、外部 ID → 安全路径、
+>   用户可见名称校验（`safe_path_component`）、原子占位新目录（`claim_new_subdir`）
+>   与清理前复核（`ensure_created_dir_unchanged`）。
 > - `src-tauri/src/commands/toolbox/ssh_hostkey.rs` —— SSH 主机密钥校验（正/反向隧道共用）。
 > - `src-tauri/src/commands/toolbox/mod.rs::listen_ip` —— 监听地址与展示地址。
 > - `src-node/resume-agent/src/storage/paths.ts` —— Node 侧的 `assertSafeId` / `safeJoin`。
@@ -986,7 +988,40 @@
 
 ### AUD-048 · P1 · Git clone 目标受目录边界约束，任务占位和清理必须原子
 
-- [ ] 状态：待处理
+- [x] 状态：已整改
+- 实现说明（路径边界）：
+  - `path_guard` 新增 `claim_new_subdir(parent, name)`，把三件事并成一步：
+    校验 `name` 是单一正常路径组件 → `create_dir`（**不是** `create_dir_all`）原子占位
+    → 建完 canonicalize 复核仍落在 `parent` 内且不在受保护集合里。
+    `create_dir` 在目标已存在时直接返回 `AlreadyExists`，取代了原先「先 `exists()` 再建」
+    的 TOCTOU 窗口，也让「这个目录确实是本次创建的」成为可断言的事实。
+  - 新增 `safe_path_component`。**没有复用 `safe_file_id`** —— 那个是给机器生成的 ID 用的，
+    只放行 ASCII `[A-Za-z0-9._-]`，套到仓库名上会把 `我的项目`、`foo+bar`、`.github`
+    这些现在能正常克隆的名字全部误杀。改成黑名单：只挡路径分隔符、冒号、控制字符、
+    `.`/`..`、首尾空白与结尾点、Windows 保留设备名。
+  - 清理路径用 `ensure_created_dir_unchanged`：复核目标仍解析到当初返回的同一个
+    canonical 路径，被换成 symlink 或被替换掉就**拒绝删除**并打日志，
+    不会反过来删掉调用者没创建的东西。
+- 实现说明（任务所有权）：
+  - 裸 `Option<u32>` PID + 全局 `AtomicBool` 换成一把锁保护的 `CloneTask { id, pid, cancelled }`。
+    原来的三个洞：检查与写 PID 之间没有占位（两个请求都能通过检查、第二个覆盖第一个的 PID，
+    取消只杀得掉一个）；任一任务结束都无条件清空 PID（抹掉另一个任务的跟踪状态）；
+    取消标志是全局的（取消 A 会让 B 也认为自己被取消，进而**删掉 B 的目录**）。
+  - `claim_clone_task` 在持锁期间完成「检查 + 写入 owner id」；`set_clone_pid` /
+    `release_clone_task` 都先核对「槽位还是我的吗」，过期任务改不动当前槽位。
+  - `cancel_git_clone` 只标记当前任务并杀它的 PID，槽位由跑着的任务自己释放。
+  - 认领之后的每一条提前返回都走 `fail()`：清理自己创建的目录 + 释放槽位，
+    不会把后续 clone 永久挡在门外。
+- 验证：
+  - `cargo test --lib` 30 通过（新增 5 条）。`claim_new_subdir` 用例覆盖 `..`、`../outside`、
+    `..\outside`、`a/b`、`a\b`、绝对路径、`CON`、`nul.txt`、结尾空格/点、内嵌 NUL ——
+    并断言失败后 parent 目录里**一个条目都没落地**；同时断言 `我的项目` / `foo+bar` /
+    `.github` 正常放行。symlink 替换用例确认清理被拒绝且被指向的目录毫发无损。
+  - 状态机三条用例：并发只有一个能认领、取消不波及下一个任务、过期任务动不了当前槽位。
+  - **Windows 交叉编译已跑**（改动落在 `#[cfg(target_os = "windows")]` 的 spawn 分支里，
+    按硬约束 3 必须验证）：`cargo check --lib --target x86_64-pc-windows-gnu` 通过。
+- 未做：前端 `AddProjectDialog.tsx` 没有再写一份同样的校验。规则在后端一处，
+  前端复刻只会漂移；后端错误信息已经写明原因，直接显示即可。
 - 风险：
   - 可编辑的 repoName 原样参与 `target_dir.join(repo_name)`；`../outside`、绝对路径或平台分隔符
     可让 clone 及失败清理落到用户所选目录之外。
