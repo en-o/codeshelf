@@ -24,6 +24,24 @@ import {
 import type { DockerCommandResult, DockerContainerInfo, DockerImageInfo, DockerStatus } from "@/types/toolbox";
 import { buildAiPrompt, dockerImageNameFromProject, hasUsableAiProvider, splitListText } from "./utils";
 
+/**
+ * 镜像引用里是否**已经**带了 tag 或 digest。
+ *
+ * 不能直接 `includes(":")`：registry 主机名可以带端口，
+ * `localhost:5000/team/app` 里的冒号是端口不是 tag ——
+ * 误判成「已有 tag」会让用户填的 tag 被静默忽略。
+ *
+ * 规则与后端 `has_tag_or_digest`（docker/commands.rs）保持一致：
+ * 含 `@` 即带 digest；否则只看最后一个 `/` 之后的部分有没有 `:`。
+ */
+function hasTagOrDigest(image: string): boolean {
+  const s = image.trim();
+  if (s.includes("@")) return true;
+  const lastSlash = s.lastIndexOf("/");
+  return (lastSlash >= 0 ? s.slice(lastSlash + 1) : s).includes(":");
+}
+
+
 interface UseDockerImageToolOptions {
   initialProjectPath?: string;
   initialProjectName?: string;
@@ -79,8 +97,9 @@ export function useDockerImageTool(options: UseDockerImageToolOptions = {}) {
 
   const aiReady = useMemo(() => hasUsableAiProvider(aiProviders), [aiProviders]);
   const fullImageName = useMemo(() => {
-    if (!imageName.trim()) return "";
-    return imageName.includes(":") ? imageName.trim() : `${imageName.trim()}:${imageTag.trim() || "latest"}`;
+    const name = imageName.trim();
+    if (!name) return "";
+    return hasTagOrDigest(name) ? name : `${name}:${imageTag.trim() || "latest"}`;
   }, [imageName, imageTag]);
 
   useEffect(() => {

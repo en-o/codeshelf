@@ -87,7 +87,13 @@ pub(super) fn tool_edit(ctx: &ToolCtx, args: &Value) -> AppResult<String> {
 
 fn glob_walk(root: &Path, pattern: &str) -> AppResult<Vec<PathBuf>> {
     let regex_src = glob_to_regex(pattern);
-    let re = regex_lite(&regex_src)?;
+    // 用 regex crate 而不是手写匹配器。原来那份 `SimpleRegex` 有两个真 bug：
+    //   1. `for i in 0..=s.len()` + `&s[i..]` 按**字节**下标切片，中文/emoji 文件名直接 panic；
+    //   2. tokenize 时 `b as char` 把非 ASCII 字节按 Latin-1 解释，中文 pattern 永远匹配不上。
+    // 当初写它的理由是「避免引入 regex crate」，但 regex 现在已经是直接依赖
+    // （web_fetch 的规则提取在用），理由不成立了。
+    let re = regex::Regex::new(&regex_src)
+        .map_err(|e| crate::error::AppError::from(format!("glob 模式无效: {}", e)))?;
     let mut out = Vec::new();
     walk_dir(root, root, &re, &mut out, 0)?;
     out.sort();
@@ -97,7 +103,7 @@ fn glob_walk(root: &Path, pattern: &str) -> AppResult<Vec<PathBuf>> {
 fn walk_dir(
     base: &Path,
     dir: &Path,
-    re: &SimpleRegex,
+    re: &regex::Regex,
     out: &mut Vec<PathBuf>,
     depth: u32,
 ) -> AppResult<()> {
@@ -123,7 +129,7 @@ fn walk_dir(
             walk_dir(base, &path, re, out, depth + 1)?;
         } else if let Ok(rel) = path.strip_prefix(base) {
             let rel_str = rel.to_string_lossy().replace('\\', "/");
-            if re.matches(&rel_str) {
+            if re.is_match(&rel_str) {
                 out.push(rel.to_path_buf());
             }
         }
@@ -158,110 +164,6 @@ fn glob_to_regex(pattern: &str) -> String {
     }
     out.push('$');
     out
-}
-
-/// 超极简"正则"：只实现 `.*`、`[^/]*`、`[^/]`、字面字符、锚点，用于 glob 场景，
-/// 避免引入 regex crate。
-struct SimpleRegex {
-    tokens: Vec<RegexTok>,
-}
-enum RegexTok {
-    Lit(String),
-    AnyExceptSlash,  // [^/]
-    StarExceptSlash, // [^/]*
-    DotStar,         // .*
-}
-
-fn regex_lite(src: &str) -> AppResult<SimpleRegex> {
-    let bytes = src.as_bytes();
-    let mut i = 0;
-    let mut tokens = Vec::new();
-    if bytes.first() != Some(&b'^') {
-        return Err("regex must start with ^".into());
-    }
-    i += 1;
-    let end = bytes.len().saturating_sub(1);
-    while i < end {
-        let b = bytes[i];
-        if i + 1 < end && bytes[i] == b'.' && bytes[i + 1] == b'*' {
-            tokens.push(RegexTok::DotStar);
-            i += 2;
-        } else if i + 4 < end
-            && bytes[i] == b'['
-            && bytes[i + 1] == b'^'
-            && bytes[i + 2] == b'/'
-            && bytes[i + 3] == b']'
-            && bytes[i + 4] == b'*'
-        {
-            tokens.push(RegexTok::StarExceptSlash);
-            i += 5;
-        } else if i + 3 < end
-            && bytes[i] == b'['
-            && bytes[i + 1] == b'^'
-            && bytes[i + 2] == b'/'
-            && bytes[i + 3] == b']'
-        {
-            tokens.push(RegexTok::AnyExceptSlash);
-            i += 4;
-        } else if b == b'\\' && i + 1 < end {
-            if let Some(RegexTok::Lit(ref mut s)) = tokens.last_mut() {
-                s.push(bytes[i + 1] as char);
-            } else {
-                tokens.push(RegexTok::Lit((bytes[i + 1] as char).to_string()));
-            }
-            i += 2;
-        } else {
-            if let Some(RegexTok::Lit(ref mut s)) = tokens.last_mut() {
-                s.push(b as char);
-            } else {
-                tokens.push(RegexTok::Lit((b as char).to_string()));
-            }
-            i += 1;
-        }
-    }
-    Ok(SimpleRegex { tokens })
-}
-
-impl SimpleRegex {
-    fn matches(&self, input: &str) -> bool {
-        self.match_tokens(&self.tokens, input)
-    }
-    fn match_tokens(&self, toks: &[RegexTok], s: &str) -> bool {
-        if toks.is_empty() {
-            return s.is_empty();
-        }
-        match &toks[0] {
-            RegexTok::Lit(lit) => {
-                s.starts_with(lit.as_str()) && self.match_tokens(&toks[1..], &s[lit.len()..])
-            }
-            RegexTok::AnyExceptSlash => {
-                let mut it = s.chars();
-                match it.next() {
-                    Some(c) if c != '/' => self.match_tokens(&toks[1..], it.as_str()),
-                    _ => false,
-                }
-            }
-            RegexTok::StarExceptSlash => {
-                for i in 0..=s.len() {
-                    if s.as_bytes().iter().take(i).any(|b| *b == b'/') {
-                        return false;
-                    }
-                    if self.match_tokens(&toks[1..], &s[i..]) {
-                        return true;
-                    }
-                }
-                false
-            }
-            RegexTok::DotStar => {
-                for i in 0..=s.len() {
-                    if self.match_tokens(&toks[1..], &s[i..]) {
-                        return true;
-                    }
-                }
-                false
-            }
-        }
-    }
 }
 
 pub(super) fn tool_glob(ctx: &ToolCtx, args: &Value) -> AppResult<String> {
@@ -323,5 +225,64 @@ pub(super) fn tool_grep(ctx: &ToolCtx, args: &Value) -> AppResult<String> {
         Ok("（无匹配）".into())
     } else {
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod glob_tests {
+    use super::*;
+
+    fn matches(pattern: &str, path: &str) -> bool {
+        let re = regex::Regex::new(&glob_to_regex(pattern)).expect("pattern");
+        re.is_match(path)
+    }
+
+    /// 中文 / emoji / 组合字符：旧的手写匹配器在这里既会 panic（按字节切片）
+    /// 又匹配不上（`b as char` 把 UTF-8 字节按 Latin-1 解释）。
+    #[test]
+    fn non_ascii_names_match_and_never_panic() {
+        assert!(matches("*.md", "读我.md"));
+        assert!(matches("**/*.ts", "源码/组件/按钮.ts"));
+        assert!(matches("文档/*.txt", "文档/说明.txt"));
+        assert!(matches("*", "🙂.txt"));
+        assert!(matches("*.rs", "e\u{301}moji-组合.rs")); // e + 组合重音
+        assert!(matches("**/中文/*", "a/中文/b.rs"));
+
+        // 不该匹配的也要正确拒绝
+        assert!(!matches("*.md", "读我.txt"));
+        assert!(!matches("*.ts", "源码/按钮.ts")); // 单星不跨 /
+    }
+
+    #[test]
+    fn basic_glob_semantics_unchanged() {
+        assert!(matches("*.rs", "main.rs"));
+        assert!(!matches("*.rs", "src/main.rs")); // * 不跨目录分隔符
+        assert!(matches("**/*.rs", "src/a/b/main.rs"));
+        assert!(matches("src/*.rs", "src/main.rs"));
+        assert!(matches("?.rs", "a.rs"));
+        assert!(!matches("?.rs", "ab.rs"));
+        // 点号是字面量，不是「任意字符」
+        assert!(!matches("a.rs", "axrs"));
+    }
+
+    /// glob 里的正则元字符必须当**字面量**处理，否则用户搜 `a+b.txt`
+    /// 会被解释成正则量词，匹配到一堆无关文件。
+    #[test]
+    fn regex_metacharacters_are_literal() {
+        assert!(matches("a+b.txt", "a+b.txt"));
+        assert!(!matches("a+b.txt", "aab.txt")); // `+` 不是量词
+        assert!(matches("(x).rs", "(x).rs"));
+        assert!(matches("a|b.md", "a|b.md"));
+        assert!(!matches("a|b.md", "a.md")); // `|` 不是或
+        assert!(matches("v1.2.3.log", "v1.2.3.log"));
+        assert!(!matches("v1.2.3.log", "v1x2x3xlog")); // `.` 不是任意字符
+
+        // 所有这些模式都必须能编译成合法正则，不会让 glob 直接失败
+        for p in ["[", "]", "(", ")", "{", "}", "$", "^", "\\", "a+*.rs"] {
+            assert!(
+                regex::Regex::new(&glob_to_regex(p)).is_ok(),
+                "模式 {p:?} 应能编译"
+            );
+        }
     }
 }

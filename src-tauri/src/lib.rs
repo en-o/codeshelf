@@ -4,6 +4,7 @@ pub mod error;
 mod handlers;
 mod keyboard_hook;
 pub mod mcp_gateway;
+pub mod http_body;
 pub mod path_guard;
 pub mod process_guard;
 mod storage;

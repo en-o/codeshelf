@@ -124,12 +124,35 @@ pub async fn docker_generate_dockerfile_ai(
     generate_dockerfile_with_ai(input).await
 }
 
+/// 镜像引用里是否**已经**带了 tag 或 digest。
+///
+/// 不能直接 `contains(':')`：registry 主机名可以带端口，
+/// `localhost:5000/team/app` 里的冒号是端口，不是 tag ——
+/// 误判成「已有 tag」会让用户填的 tag 被静默忽略，构建出错误的镜像。
+///
+/// 判定规则（对齐 Docker 的镜像引用语法）：
+/// - 含 `@` → 带 digest（`name@sha256:...`），视为完整引用；
+/// - 否则只看**最后一个 `/` 之后**的部分有没有 `:`。
+///   registry 和端口一定在第一个 `/` 之前，所以这样切不会被端口干扰，
+///   IPv6 形式 `[::1]:5000/team/app` 同理。
+fn has_tag_or_digest(image: &str) -> bool {
+    let image = image.trim();
+    if image.contains('@') {
+        return true;
+    }
+    let last_segment = match image.rfind('/') {
+        Some(i) => &image[i + 1..],
+        None => image,
+    };
+    last_segment.contains(':')
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn docker_build_image(input: DockerBuildInput) -> AppResult<DockerCommandResult> {
     let root = project_root(&input.project_path)?;
     resolve_existing_project_file(&root, &input.dockerfile_path)?;
-    let full_image = if input.image_name.contains(':') {
+    let full_image = if has_tag_or_digest(&input.image_name) {
         input.image_name
     } else {
         format!(
@@ -431,4 +454,45 @@ pub async fn docker_inspect_container_yaml(container: String) -> AppResult<Strin
         .and_then(|items| items.first())
         .unwrap_or(&value);
     Ok(json_to_yaml(first, 0))
+}
+
+#[cfg(test)]
+mod image_ref_tests {
+    use super::has_tag_or_digest;
+
+    #[test]
+    fn registry_port_is_not_mistaken_for_a_tag() {
+        // 带 registry 端口但**没有** tag —— 这正是原来 `contains(':')` 误判的情况，
+        // 误判会导致用户填的 tag 被忽略
+        assert!(!has_tag_or_digest("localhost:5000/team/app"));
+        assert!(!has_tag_or_digest("registry.example.com:8443/a/b/c"));
+        assert!(!has_tag_or_digest("[::1]:5000/team/app"));
+        assert!(!has_tag_or_digest("[2001:db8::1]:5000/app"));
+
+        // 带端口**且**带 tag
+        assert!(has_tag_or_digest("localhost:5000/team/app:v1"));
+        assert!(has_tag_or_digest("[::1]:5000/team/app:latest"));
+    }
+
+    #[test]
+    fn plain_images_and_digests() {
+        assert!(!has_tag_or_digest("nginx"));
+        assert!(!has_tag_or_digest("library/nginx"));
+        assert!(!has_tag_or_digest("ghcr.io/owner/repo"));
+
+        assert!(has_tag_or_digest("nginx:1.25"));
+        assert!(has_tag_or_digest("ghcr.io/owner/repo:main"));
+        assert!(has_tag_or_digest(
+            "nginx@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        ));
+        assert!(has_tag_or_digest(
+            "localhost:5000/app@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        ));
+    }
+
+    #[test]
+    fn whitespace_is_ignored() {
+        assert!(!has_tag_or_digest("  localhost:5000/team/app  "));
+        assert!(has_tag_or_digest("  nginx:1.25  "));
+    }
 }
