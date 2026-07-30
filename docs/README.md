@@ -10,6 +10,7 @@
 | 知道提交信息、分支、代码风格怎么写 | [CONVENTIONS.md](CONVENTIONS.md) |
 | 用 AI 协作开发本项目 | [CLAUDE.md](../CLAUDE.md)（硬约束）+ [AI-CODING.md](AI-CODING.md)（方法论） |
 | 写一份大功能的 Spec | [specs/README.md](specs/README.md) |
+| 查看当前全局审查问题和整改进度 | [REMEDIATION.md](REMEDIATION.md) |
 
 ## 分层
 
@@ -27,6 +28,7 @@ CLAUDE.md            约束层 · 硬性规则，AI 每次会话自动加载
 - [BUILD.md](../BUILD.md) — 环境要求、构建打包、发版流程
 - [DEVELOPMENT.md](DEVELOPMENT.md) — 目录结构、如何加 Tauri 命令、存储层约定、sidecar
 - [CONVENTIONS.md](CONVENTIONS.md) — 开发规范
+- [REMEDIATION.md](REMEDIATION.md) — 全局审查问题、整改顺序与验收清单
 - [更新步骤说明](更新步骤说明.md) — updater 签名密钥、GitHub Secrets、发版排错
 
 ### AI 协作
