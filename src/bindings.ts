@@ -2195,6 +2195,14 @@ async fetchApiDocumentUrl(url: string) : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async getStartupStatus() : Promise<Result<StartupStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_startup_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listDataBackups() : Promise<Result<string[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_data_backups") };
@@ -3566,6 +3574,19 @@ group?: string | null }
  * SSH 隧道统计
  */
 export type SshTunnelStats = { tunnelId: string; connections: number; bytesIn: number; bytesOut: number }
+export type StartupStatus = { 
+/**
+ * 非空表示启动阶段有致命错误，前端不应加载任何数据
+ */
+fatalError: string | null; 
+/**
+ * 上一次备份恢复的失败原因（如果有）
+ */
+restoreError: string | null; dataDir: string; logsDir: string; 
+/**
+ * 可用备份时间戳，新到旧
+ */
+backups: string[] }
 /**
  * 系统统计信息
  */

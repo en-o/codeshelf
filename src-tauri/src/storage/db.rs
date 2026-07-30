@@ -50,7 +50,25 @@ pub async fn init_db(db_path: &Path) -> AppResult<()> {
     Ok(())
 }
 
-/// 获取全局连接池。必须先调用 `init_db`，否则 panic。
+/// 启动失败时的兜底：装一个空的内存库。
+///
+/// 前端会被启动错误界面挡住、不发数据命令（见 `get_startup_status`），
+/// 这里只保证万一有命令漏过去时得到的是普通 SQL 错误，而不是 `pool()` panic
+/// 把整个进程带走。内存库随进程消失，不会污染用户数据。
+pub async fn init_fallback_pool() {
+    if DB_POOL.get().is_some() {
+        return;
+    }
+    if let Ok(pool) = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+    {
+        let _ = DB_POOL.set(pool);
+    }
+}
+
+/// 获取全局连接池。必须先调用 `init_db` 或 `init_fallback_pool`，否则 panic。
 pub fn pool() -> &'static SqlitePool {
     DB_POOL
         .get()

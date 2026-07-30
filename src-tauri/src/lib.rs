@@ -4,6 +4,7 @@ pub mod error;
 mod handlers;
 mod keyboard_hook;
 pub mod mcp_gateway;
+pub mod path_guard;
 mod storage;
 
 use tauri::{Manager, RunEvent};

@@ -10,6 +10,22 @@ pub use schema::*;
 
 use std::io::Write;
 use std::path::Path;
+use std::sync::OnceLock;
+
+/// 启动阶段的致命错误（数据目录不可写 / SQLite 打不开 / 迁移失败 / 恢复失败）。
+///
+/// 以前这些失败只打一行日志就继续启动，前端照常加载，结果是"假可用"：
+/// 界面看起来空了，用户以为数据没了，下一次保存还会把空状态写回去。
+/// 现在记录下来，由前端在初始化前查询并整屏阻断。
+static STARTUP_ERROR: OnceLock<String> = OnceLock::new();
+
+pub fn set_startup_error(message: String) {
+    let _ = STARTUP_ERROR.set(message);
+}
+
+pub fn startup_error() -> Option<&'static String> {
+    STARTUP_ERROR.get()
+}
 
 /// 原子写文件：先写同目录 .tmp 再 rename，避免崩溃/断电/磁盘满留下半截文件。
 /// 签名与 `std::fs::write` 一致，数据文件的写入应一律用它。

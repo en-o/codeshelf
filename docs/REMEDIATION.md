@@ -30,10 +30,13 @@
 
 所有 P0/P1 都是发布前置条件，不应带着未验收的 P1 发版。建议按以下顺序推进：
 
-1. **P0 数据止损**：AUD-001、AUD-044。
+1. ~~**P0 数据止损**：AUD-001、AUD-044~~ —— 已完成（连带完成 AUD-011，它与恢复失败共用同一条启动路径）。
 2. **安全边界与错误对象操作**：AUD-002～AUD-009、AUD-016～AUD-020、AUD-045～AUD-050。
-3. **数据、升级与发布 P1**：AUD-010、AUD-011、AUD-021～AUD-025、AUD-051。
+3. **数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051。
 4. **P2/P3 整理**：其余条目按模块分批处理。
+
+> 进度：3 / 61 已整改（AUD-001、AUD-011、AUD-044）。AUD-061 依赖 Apple Developer ID 与
+> Windows Authenticode 证书，需要项目所有者先完成证书采购与 CI secrets 配置，代码侧无法单独关闭。
 
 ---
 
@@ -41,12 +44,23 @@
 
 ### AUD-001 · P0 · 保护 HOME、系统根目录和盘符根
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待人工回归）
 - 风险：项目路径只校验“存在且为目录”，删除项目本地目录时直接递归删除。HOME、`/`、
   盘符根或由导入数据写入的危险路径都可能成为删除目标。
 - 涉及位置：
+  - `src-tauri/src/path_guard.rs`（新增，守卫收敛点）
   - `src-tauri/src/commands/project.rs`
-  - `src-tauri/src/handlers.rs`
+  - `src-tauri/src/lib.rs`
+- 实现说明：
+  - 新增 `path_guard::{ensure_safe_project_path, ensure_deletable_dir}`：只认 canonical path，
+    命中「受保护目录本身 / 受保护目录的祖先 / 应用数据目录内部 / 无父级的根」即拒绝。
+  - 三个边界都过守卫：`normalize_project_path`（添加）、`import_projects`（导入，跳过并告警
+    而不是让整份导入失败）、`delete_project_directory`（删除时重新 canonicalize，不信任库内路径，
+    并且删的是解析后的路径）。
+  - 保护集合含 HOME、各系统用户数据根、应用 data/logs 及其父目录、Unix 系统目录、
+    Windows `SystemDrive/SystemRoot/ProgramFiles/ProgramData/PUBLIC`。
+  - 测试：`src-tauri/src/path_guard.rs` 的 4 个单测（根/HOME/祖先/symlink/普通目录/文件），
+    全部只做判定，不执行任何删除。
 - 整改目标：
   - 后端在添加、导入和最终删除三个边界都校验 canonical path。
   - 明确拒绝文件系统根、用户 HOME、应用数据目录及其他受保护目录。
@@ -206,11 +220,22 @@
 
 ### AUD-011 · P1 · 数据库初始化失败不得进入“假可用”状态
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待人工回归）
 - 风险：存储、SQLite 或迁移失败只写日志并继续启动；后续 `pool()` 会 panic，或在部分迁移 schema 上持续失败。
 - 涉及位置：
   - `src-tauri/src/app_setup.rs`
   - `src-tauri/src/storage/db.rs`
+  - `src-tauri/src/storage/mod.rs`
+  - `src-tauri/src/commands/storage_admin.rs`
+  - `src/App.tsx`
+  - `src/components/common/StartupErrorScreen.tsx`（新增）
+- 实现说明：
+  - `init_storage_and_db` 拆出 `try_init_storage_and_db`，失败写入 `storage::set_startup_error`，
+    错误文案区分「数据目录不可用 / 从备份恢复失败 / 数据库打开失败 / 数据库迁移失败」。
+  - 新命令 `get_startup_status` 返回 fatalError、上次恢复失败原因、data/logs 目录和可用备份列表。
+  - `App.tsx` 在 `initializeApp()` **之前**查询它；有 fatalError 就整屏阻断，一条数据都不加载。
+  - `storage::db::init_fallback_pool()`：启动失败时装一个空的内存库，漏过去的命令得到普通 SQL 错误
+    而不是 `pool()` panic 掉整个进程。
 - 整改目标：启动失败时进入明确、可恢复、不会继续执行数据命令的错误状态。
 - 验收标准：
   - 数据目录不可写、数据库损坏和迁移失败都有用户可见提示。
@@ -612,7 +637,7 @@
 
 ### AUD-044 · P0 · 备份恢复必须先完整验证和 staging，不能先清空当前数据
 
-- [ ] 状态：待处理
+- [x] 状态：已整改（待人工回归）
 - 风险：
   - `timestamp` 被直接拼成 `backup_<timestamp>`，只检查 `exists()`；利用一个真实备份名再追加
     `/..`、`/../data` 可逃逸备份根、选中当前 data 目录或备份父目录。
@@ -624,6 +649,22 @@
   - `src-tauri/src/storage/migrations/mod.rs`
   - `src-tauri/src/app_setup.rs`
   - `src-tauri/src/handlers.rs`
+  - `src/components/common/StartupErrorScreen.tsx`（新增，恢复入口）
+- 实现说明：
+  - `validate_timestamp` 严格匹配 `\d{8}T\d{6}Z`（16 字节），`..`、分隔符、绝对路径连进入拼接的机会都没有；
+    `resolve_backup_dir` 再做 `symlink_metadata` 非 symlink 检查、canonical 直接子目录 containment、
+    以及 source==destination / source 含 destination 的重叠检查。`list_backup_timestamps` 同样只返回合法格式。
+  - `apply_pending_restore` 顺序改为：**先摘 flag**（失败不再无限重复破坏性步骤）→ 校验 →
+    复制到同级 `.restore_staging_<ts>` → `verify_staging`（非空 + SQLite 文件头）→
+    两次 rename 原子切换（`data → .restore_previous_<ts>`，`staging → data`；第二步失败自动换回）。
+    当前数据在最后一次 rename 之前始终完好。
+  - 失败时写 `.restore_failed` 并向上抛错；`app_setup` 据此进入启动阻断状态（见 AUD-011），
+    不会在半恢复的数据上继续 `init_db`。
+  - 前端入口：启动错误页列出可用备份并可一键标记恢复；同时展示上一次恢复失败原因与数据目录位置。
+  - 测试：`storage::migrations::tests` 5 个单测覆盖时间戳格式、逃逸拒绝（校验前数据未动）、
+    坏 SQLite 导致恢复失败后当前数据不变且不重试、正常恢复切换并保留快照、列举忽略非法目录。
+  - ponytail: `verify_staging` 只验 SQLite 文件头魔数，不做 `PRAGMA integrity_check`；
+    若出现「能打开但内容坏了」再升级。
 - 整改目标：
   - timestamp 使用严格格式和 canonical containment 校验，来源必须是备份根内的真实目录，
     拒绝 symlink、source=destination 和包含 destination 的来源。

@@ -266,6 +266,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         api_chat::execute_api_endpoint,
         api_chat::fetch_api_document_url,
         // Storage admin
+        storage_admin::get_startup_status,
         storage_admin::list_data_backups,
         storage_admin::restore_from_backup,
         // MCP gateway

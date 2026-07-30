@@ -147,29 +147,37 @@ pub fn apply_dock_visibility(app: &AppHandle, show_dock: bool) {
 
 /// 初始化存储系统 + SQLite。
 /// 顺序：apply_pending_restore → init_db → run_migrations。
-/// 任何环节失败都只打 log，不阻止应用启动。
+///
+/// 任何环节失败都记入 `storage::set_startup_error`，前端在加载数据前查询它并整屏阻断。
+/// 以前是"打条日志继续启动"：界面照常渲染空数据，用户以为数据没了，
+/// 下一次保存就把空状态覆盖上去。
 fn init_storage_and_db() {
-    if let Err(e) = storage::init_storage() {
-        eprintln!("存储系统初始化警告: {}", e);
+    if let Err(e) = try_init_storage_and_db() {
+        eprintln!("启动失败: {}", e);
+        log::error!("启动失败: {}", e);
+        storage::set_startup_error(e);
+        // pool() 不能 panic：内存兜底库让漏过去的命令返回普通 SQL 错误
+        tauri::async_runtime::block_on(storage::db::init_fallback_pool());
     }
+}
 
-    if let Ok(config) = storage::get_storage_config() {
-        let db_path = config.db_file();
-        let data_dir = config.data_dir.clone();
+fn try_init_storage_and_db() -> Result<(), String> {
+    let config = storage::init_storage().map_err(|e| format!("数据目录不可用：{}", e))?;
+    let db_path = config.db_file();
+    let data_dir = config.data_dir.clone();
 
-        if let Err(e) = storage::migrations::apply_pending_restore(&data_dir) {
-            eprintln!("应用 pending restore 失败: {}", e);
-            log::error!("应用 pending restore 失败: {}", e);
-        }
+    // 恢复失败时必须停在这里：不能在半恢复的数据上继续 init_db
+    storage::migrations::apply_pending_restore(&data_dir)
+        .map_err(|e| format!("从备份恢复失败：{}", e))?;
 
-        if let Err(e) = tauri::async_runtime::block_on(async {
-            storage::db::init_db(&db_path).await?;
-            storage::migrations::run_migrations(&data_dir).await
-        }) {
-            eprintln!("SQLite 初始化或迁移失败: {}", e);
-            log::error!("SQLite 初始化或迁移失败: {}", e);
-        }
-    }
+    tauri::async_runtime::block_on(async {
+        storage::db::init_db(&db_path)
+            .await
+            .map_err(|e| format!("数据库打开失败：{}", e))?;
+        storage::migrations::run_migrations(&data_dir)
+            .await
+            .map_err(|e| format!("数据库迁移失败：{}", e))
+    })
 }
 
 /// 注册 tauri_plugin_log，日志写到 storage 配置的 logs_dir。

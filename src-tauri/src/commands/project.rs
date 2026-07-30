@@ -184,6 +184,10 @@ pub fn normalize_project_path(path: &str) -> AppResult<String> {
         crate::error::AppError::from(format!("无法访问路径 {}：{}", trimmed, e))
     })?;
 
+    // HOME、`/`、盘符根、应用数据目录等不能进书架 —— 一旦入库，
+    // 「删除本地目录」就会拿它去 remove_dir_all。
+    crate::path_guard::ensure_safe_project_path(&canonical)?;
+
     Ok(strip_verbatim_prefix(canonical.to_string_lossy().as_ref()))
 }
 
@@ -460,8 +464,11 @@ pub async fn delete_project_directory(id: String) -> AppResult<()> {
     let path = PathBuf::from(&project.path);
 
     if path.exists() {
+        // 不信任库里的历史路径：删除前按当前文件系统重新 canonicalize 并过守卫，
+        // 删的也是解析后的路径（symlink 指向受保护目录时会在这里被拒）。
+        let target = crate::path_guard::ensure_deletable_dir(&path)?;
         // 物理目录删除走阻塞线程，避免占住 tokio runtime
-        tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&path))
+        tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&target))
             .await
             .map_err(|e| crate::error::AppError::from(format!("删除任务调度失败: {}", e)))?
             .map_err(|e| crate::error::AppError::from(format!("删除目录失败: {}", e)))?;
@@ -657,6 +664,15 @@ pub async fn import_projects(new_projects: Vec<CreateProjectInput>) -> AppResult
     let pool = pool();
 
     for input in new_projects {
+        // 导入的路径可能来自另一台机器、本地并不存在，所以不强制 canonicalize；
+        // 但受保护目录一律不许写进库（否则「删除本地目录」会拿它当目标）。
+        // 与「跳过重复路径」一致：跳过而不是让整份导入失败。
+        if let Err(e) = crate::path_guard::ensure_safe_project_path(std::path::Path::new(&input.path))
+        {
+            log::warn!("导入跳过受保护路径 {}: {}", input.path, e);
+            continue;
+        }
+
         // 跳过已存在的路径（与旧实现一致）
         let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM projects WHERE path = ?")
             .bind(&input.path)

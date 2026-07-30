@@ -4,6 +4,7 @@ export { ConfirmDialog, type ConfirmVariant } from "./ConfirmDialog";
 export { useConfirm, ConfirmHost, type ConfirmOptions } from "./useConfirm";
 export { LoadingSpinner } from "./LoadingSpinner";
 export { ErrorBoundary } from "./ErrorBoundary";
+export { StartupErrorScreen } from "./StartupErrorScreen";
 export { EmptyState } from "./EmptyState";
 export { CopyButton } from "./CopyButton";
 export { SearchInput } from "./SearchInput";

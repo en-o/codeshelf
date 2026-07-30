@@ -1,10 +1,12 @@
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { MainLayout } from "@/components/layout";
 import { ToastContainer, UpdateNotification, ShortcutQuickLookup, ClipboardQuickAccess, AppContextMenu, showToast } from "@/components/ui";
 import { ConfirmHost } from "@/components/common/useConfirm";
+import { StartupErrorScreen } from "@/components/common/StartupErrorScreen";
+import { commands, type StartupStatus } from "@/bindings";
 
 // 页面按需加载：各 page 拆成独立 chunk，避免初始 index.js 突破 1MB。
 // 各 page 模块都是 named export，所以用 .then 包一层成 default。
@@ -151,9 +153,19 @@ async function initializeApp() {
 function AppContent() {
   const initialized = useUiStore((state) => state.initialized);
   const popupAutoHideWindow = useUiStore((s) => s.popupAutoHideWindow);
+  const [startupError, setStartupError] = useState<StartupStatus | null>(null);
 
+  // 先问后端启动是否失败，再决定要不要加载数据。
+  // 数据目录不可写 / 库打不开 / 迁移失败时继续加载，等于用空状态覆盖用户数据。
   useEffect(() => {
-    initializeApp();
+    (async () => {
+      const res = await commands.getStartupStatus().catch(() => null);
+      if (res && res.status === "ok" && res.data.fatalError) {
+        setStartupError(res.data);
+        return;
+      }
+      initializeApp();
+    })();
   }, []);
 
   useAppShortcuts();
@@ -195,6 +207,10 @@ function AppContent() {
       failed.then((fn) => fn());
     };
   }, []);
+
+  if (startupError) {
+    return <StartupErrorScreen status={startupError} />;
+  }
 
   if (!initialized) {
     return (
