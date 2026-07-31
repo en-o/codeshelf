@@ -52,7 +52,10 @@
       "icons/128x128@2x.png",
       "icons/app-icon-circle.ico",
       "icons/icon.png"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   },
   "plugins": {
     "updater": {

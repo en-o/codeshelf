@@ -1,9 +1,9 @@
 //! 文件管理器右键菜单集成：右键文件夹 →「添加到 CodeShelf」。
 //!
 //! Windows：写用户级注册表（HKCU），不需要管理员权限。
-//! macOS：Finder 右键走 app bundle 的 CFBundleDocumentTypes 声明（见 src-tauri/Info.plist），
-//!        表现为「右键 →打开方式→ CodeShelf」，安装即生效、没有运行时开关，
-//!        所以这里只报告「不支持切换」。
+//! macOS：Finder 右键走 app bundle 的 NSServices 声明（见 src-tauri/Info.plist），
+//!        表现为「右键 → 快速操作/服务 → 添加到 CodeShelf」；拖到 Dock 图标
+//!        则走 CFBundleDocumentTypes + RunEvent::Opened。
 //! Linux：各家文件管理器各一套（Nautilus/Dolphin/Thunar），不做。
 //!
 //! 菜单项最终执行 `codeshelf.exe --add-project "<目录>"`，
@@ -11,6 +11,9 @@
 
 use crate::error::AppResult;
 use serde::Serialize;
+
+#[cfg(target_os = "macos")]
+mod macos;
 
 #[derive(Debug, Serialize, specta::Type)]
 pub struct ShellContextMenuState {
@@ -36,12 +39,18 @@ pub fn get_shell_context_menu_state() -> AppResult<ShellContextMenuState> {
 
     #[cfg(target_os = "macos")]
     {
+        let registered = macos::is_declared_in_bundle();
         Ok(ShellContextMenuState {
             supported: false,
-            registered: true,
-            note: "macOS 无需开关：在 Finder 中右键文件夹 →「打开方式」→ CodeShelf 即可添加。\
-                   开启 Dock 图标后，也可以把文件夹直接拖到 Dock 图标上。"
-                .to_string(),
+            registered,
+            note: if registered {
+                "Finder 中右键文件夹 →「快速操作」或「服务」→「添加到 CodeShelf」。\
+                 首次安装后启动一次 CodeShelf 即会刷新服务列表；开启 Dock 图标后，\
+                 也可以把文件夹直接拖到 Dock 图标上。"
+                    .to_string()
+            } else {
+                "当前运行版本的安装包未包含 Finder 服务，请安装包含此功能的新版本。".to_string()
+            },
         })
     }
 
@@ -90,11 +99,22 @@ pub fn refresh_registration_on_startup() {
     }
 }
 
+/// 注册 Info.plist 中声明的 Finder Service provider，并要求 macOS 立即刷新服务列表。
+/// 必须在主线程的 setup 阶段调用。
+pub fn register_macos_finder_service(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    macos::register(app);
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
 // ============== Windows 实现 ==============
 
 #[cfg(target_os = "windows")]
 mod win {
     use crate::error::{AppError, AppResult};
+    use std::ffi::c_void;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::ERROR_SUCCESS;
     use windows::Win32::System::Registry::{
@@ -102,10 +122,13 @@ mod win {
         HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
     };
 
-    /// 两处入口：右键文件夹本身，以及在文件夹空白处右键（此时 %V 是当前目录）
-    const MENU_KEYS: [&str; 2] = [
-        r"Software\Classes\Directory\shell\CodeShelf",
-        r"Software\Classes\Directory\Background\shell\CodeShelf",
+    /// 两处入口：文件夹本身用 %1；文件夹空白处用 %V 表示当前目录。
+    const MENU_KEYS: [(&str, &str); 2] = [
+        (r"Software\Classes\Directory\shell\CodeShelf", "%1"),
+        (
+            r"Software\Classes\Directory\Background\shell\CodeShelf",
+            "%V",
+        ),
     ];
 
     const MENU_LABEL: &str = "添加到 CodeShelf";
@@ -169,12 +192,12 @@ mod win {
         Ok(())
     }
 
-    pub fn is_registered() -> bool {
+    fn key_exists(subkey: &str) -> bool {
         let mut hkey = HKEY::default();
         let status = unsafe {
             RegOpenKeyExW(
                 HKEY_CURRENT_USER,
-                PCWSTR(wide(&format!("{}\\command", MENU_KEYS[0])).as_ptr()),
+                PCWSTR(wide(subkey).as_ptr()),
                 None,
                 KEY_READ,
                 &mut hkey,
@@ -190,31 +213,57 @@ mod win {
         }
     }
 
+    pub fn is_registered() -> bool {
+        MENU_KEYS
+            .iter()
+            .all(|(base, _)| key_exists(&format!("{}\\command", base)))
+    }
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SHChangeNotify(event_id: i32, flags: u32, item1: *const c_void, item2: *const c_void);
+    }
+
+    /// 通知 Explorer 关联信息已变化，避免必须重启资源管理器或注销才能看到菜单。
+    fn notify_explorer() {
+        const SHCNE_ASSOCCHANGED: i32 = 0x0800_0000;
+        const SHCNF_IDLIST: u32 = 0;
+        unsafe {
+            SHChangeNotify(
+                SHCNE_ASSOCCHANGED,
+                SHCNF_IDLIST,
+                std::ptr::null(),
+                std::ptr::null(),
+            );
+        }
+    }
+
     pub fn register() -> AppResult<()> {
         let exe = std::env::current_exe()
             .map_err(|e| AppError::from(format!("获取程序路径失败: {}", e)))?;
         let exe = exe.to_string_lossy().to_string();
 
-        // %V 是被右键的目录；两侧引号必须写进值里，否则带空格的路径会被拆成多个参数
-        let command = format!("\"{}\" --add-project \"%V\"", exe);
-
-        for base in MENU_KEYS {
+        for (base, placeholder) in MENU_KEYS {
             let key = create_key(base)?;
             set_string(&key, None, MENU_LABEL)?;
             // Icon 让菜单项显示应用图标
-            set_string(&key, Some("Icon"), &exe)?;
+            set_string(&key, Some("Icon"), &format!("\"{}\",0", exe))?;
+            // 明确单选语义，避免 Explorer 将多选路径拼成无法解析的单个参数。
+            set_string(&key, Some("MultiSelectModel"), "Single")?;
 
             let cmd_key = create_key(&format!("{}\\command", base))?;
+            // 两侧引号必须写进值里，否则带空格的路径会被拆成多个参数。
+            let command = format!("\"{}\" --add-project \"{}\"", exe, placeholder);
             set_string(&cmd_key, None, &command)?;
         }
 
+        notify_explorer();
         Ok(())
     }
 
     pub fn unregister() -> AppResult<()> {
-        for base in MENU_KEYS {
-            let status =
-                unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(wide(base).as_ptr())) };
+        for (base, _) in MENU_KEYS {
+            let status = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(wide(base).as_ptr())) };
             // 本来就不存在不算失败（ERROR_FILE_NOT_FOUND = 2）
             if status != ERROR_SUCCESS && status.0 != 2 {
                 return Err(AppError::from(format!(
@@ -223,6 +272,7 @@ mod win {
                 )));
             }
         }
+        notify_explorer();
         Ok(())
     }
 }

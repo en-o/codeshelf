@@ -19,6 +19,7 @@ pub fn run_setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     init_workers(app);
     init_global_shortcuts(app.handle())?;
     init_keyboard_hook(app);
+    commands::shell_integration::register_macos_finder_service(app.handle());
 
     // 启动剪贴板监控（后台任务，无需 manage 返回值）
     commands::toolbox::clipboard::start_clipboard_monitor(app.handle().clone());

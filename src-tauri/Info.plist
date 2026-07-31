@@ -3,15 +3,40 @@
 <!--
   Tauri 打包时会把这个文件合并进 .app 的 Info.plist。
 
-  声明 CodeShelf 能「打开文件夹」，换来两条 macOS 上的快速添加入口：
-    1. Finder 里右键文件夹 →「打开方式」→ CodeShelf
-    2. 把文件夹拖到 Dock 图标上（需在设置里开启 Dock 图标）
+  Finder 的文件夹右键菜单没有稳定的「打开方式」入口，必须声明 NSServices
+  并在应用启动时注册 servicesProvider。这里同时保留文件夹 document type，
+  供拖到 Dock 图标和 Finder 的“用应用打开”类入口使用。
 
-  两条都走 RunEvent::Opened（见 lib.rs），不需要 NSServices 那套 Objective-C
-  service provider。层级上和 Windows 的「显示更多选项」是同一档妥协。
+  NSServices → shell_integration/macos.rs 的 addToCodeShelf:userData:error:
+  CFBundleDocumentTypes → lib.rs 的 RunEvent::Opened
 -->
 <plist version="1.0">
 <dict>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>添加到 CodeShelf</string>
+      </dict>
+      <key>NSMessage</key>
+      <string>addToCodeShelf</string>
+      <key>NSPortName</key>
+      <string>CodeShelf</string>
+      <key>NSSendFileTypes</key>
+      <array>
+        <string>public.folder</string>
+      </array>
+      <key>NSRequiredContext</key>
+      <dict/>
+      <key>NSServiceDescription</key>
+      <string>将选中的文件夹添加到 CodeShelf 代码书架</string>
+      <key>NSTimeout</key>
+      <string>10000</string>
+    </dict>
+  </array>
+
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

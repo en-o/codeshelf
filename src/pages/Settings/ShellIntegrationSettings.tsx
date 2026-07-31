@@ -84,8 +84,8 @@ export function ShellIntegrationSettings({ onClose }: ShellIntegrationSettingsPr
       <div className="flex items-start gap-2 p-3 bg-gray-100 rounded-lg">
         <Info className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-gray-500 space-y-1">
-          <p>Windows 11 的右键菜单需要先点「显示更多选项」才能看到该项。</p>
-          <p>菜单项写在当前用户的注册表下，不需要管理员权限。</p>
+          <p>Windows 11：添加后在「显示更多选项」中显示，不需要管理员权限。</p>
+          <p>macOS：安装版启动一次后，在 Finder 的「快速操作」或「服务」中显示。</p>
         </div>
       </div>
     </div>

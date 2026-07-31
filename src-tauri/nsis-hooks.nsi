@@ -30,3 +30,11 @@
   ; Notify shell of icon change
   System::Call 'shell32::SHChangeNotify(i 0x00000008, i 0x0000, p 0, p 0)'
 !macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  ; 右键菜单由应用设置页按需写入 HKCU。卸载时无论当前开关状态如何都清理，
+  ; 避免 command 永久指向已被删除的 CodeShelf.exe。
+  DeleteRegKey HKCU "Software\Classes\Directory\shell\CodeShelf"
+  DeleteRegKey HKCU "Software\Classes\Directory\Background\shell\CodeShelf"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x0000, p 0, p 0)'
+!macroend
