@@ -205,7 +205,10 @@ async fn probe_ipv6(timeout: Duration) -> Ipv6Probe {
 ///
 /// `local_items` 是本机诊断的结果，用来做**交叉核对** —— 单独看出口 IP 价值有限，
 /// 「本机说 A、外面看到 B」这种矛盾才是排障线索。
-pub async fn observe(local_items: &[DiagnosticItem], timeout: Duration) -> Vec<DiagnosticItem> {
+pub async fn observe(
+    local_items: &[DiagnosticItem],
+    timeout: Duration,
+) -> (Vec<DiagnosticItem>, NetworkSituation) {
     let mut out = Vec::new();
     let mut eg = Egress::default();
 
@@ -276,7 +279,101 @@ pub async fn observe(local_items: &[DiagnosticItem], timeout: Duration) -> Vec<D
     }
 
     out.extend(cross_checks(local_items, &eg));
-    out
+    let situation = describe_situation(local_items, &eg);
+    (out, situation)
+}
+
+
+/// 当前网络环境的**画像**：一句话说清「我现在处在什么网络环境、这意味着什么」。
+///
+/// 这是整个工具最该给出的东西。列一堆检测项只回答了「测了什么」，
+/// 用户真正要的是「我这会儿的网络是什么状态，会影响到什么」。
+/// 参考项目那句「存在公网地址不一致或环境特征被标记的风险」就是这个角色，
+/// 但它偏风险判定；开发场景更需要的是**处境描述 + 具体影响**。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSituation {
+    /// 一句话画像，例如「流量经代理从新加坡出网」
+    pub summary: String,
+    /// 逐条影响：这个环境下会发生什么。每条都要能直接对应到用户的实际动作。
+    pub implications: Vec<String>,
+}
+
+/// 由本机观测 + 出口观测推导画像。
+fn describe_situation(local_items: &[DiagnosticItem], eg: &Egress) -> NetworkSituation {
+    let find = |id: &str| local_items.iter().find(|i| i.id == id);
+    let tun = find("local.ipv4")
+        .and_then(|i| i.detail.as_deref())
+        .map(|d| d.contains("fake-IP"))
+        .unwrap_or(false);
+    let proxy_on = find("local.system_proxy")
+        .and_then(|i| i.value.as_deref())
+        .map(|v| v != "未启用")
+        .unwrap_or(false);
+
+    // ── 一句话画像 ──
+    let where_ = match (&eg.ipv4, &eg.loc) {
+        (Some(_), Some(l)) => format!("从{}出网", country_name(l)),
+        (Some(_), None) => "已连通公网".to_string(),
+        (None, _) => "公网出口未确认".to_string(),
+    };
+    let how = if eg.warp {
+        "经 Cloudflare WARP"
+    } else if tun {
+        "经代理工具 TUN 接管"
+    } else if proxy_on {
+        "经系统代理"
+    } else {
+        "直连"
+    };
+    let summary = if eg.ipv4.is_some() {
+        format!("流量{}{}", how, where_)
+    } else {
+        format!("{}（{}）", where_, how)
+    };
+
+    // ── 逐条影响 ──
+    let mut implications = Vec::new();
+
+    if tun {
+        implications.push(
+            "本机看到的 IP 是代理工具的 fake-IP，不是真实网卡地址 —— \
+             用 ifconfig / 系统设置查到的地址不能代表你的实际出口"
+                .to_string(),
+        );
+    }
+
+    // DNS 与出口分属不同地区：对开发者最实际的影响是「解析结果可能不是你以为的那个」
+    if let (Some(dns), Some(loc)) = (find("local.dns").and_then(|i| i.value.as_deref()), &eg.loc) {
+        if dns_region_hint(dns, eg.colo.as_deref().unwrap_or("")).is_some() {
+            implications.push(format!(
+                "域名解析走国内 DNS（{}），实际连接却从{}出去 —— \
+                 拉取镜像 / 访问 CDN 时可能被解析到离出口很远的节点，表现为「能连上但很慢」",
+                dns,
+                country_name(loc)
+            ));
+        }
+    }
+
+    match (&eg.ipv4, &eg.ipv6) {
+        (Some(_), Some(_)) => implications.push(
+            "IPv4 与 IPv6 都能独立出网。只为 IPv4 配代理时，支持 IPv6 的服务会绕开代理直连"
+                .to_string(),
+        ),
+        (Some(_), None) => {
+            implications.push("只有 IPv4 出口，不存在 IPv6 绕过代理的情况".to_string())
+        }
+        _ => {}
+    }
+
+    if implications.is_empty() {
+        implications.push("未发现本机配置与实际出口之间的矛盾".to_string());
+    }
+
+    NetworkSituation {
+        summary,
+        implications,
+    }
 }
 
 /// 一致性核对：本机配置 vs 外部观测。**矛盾才是价值。**

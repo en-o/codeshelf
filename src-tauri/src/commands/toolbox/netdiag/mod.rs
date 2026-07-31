@@ -131,6 +131,15 @@ pub fn netdiag_egress_disclosures() -> Vec<egress::EgressEndpointDisclosure> {
 /// 且界面已通过 `netdiag_egress_disclosures` 披露过接收方。
 #[tauri::command]
 #[specta::specta]
-pub async fn netdiag_egress(local: local::LocalDiagnostics) -> AppResult<Vec<types::DiagnosticItem>> {
-    Ok(egress::observe(&local.items, CHECK_TIMEOUT).await)
+pub async fn netdiag_egress(local: local::LocalDiagnostics) -> AppResult<EgressResult> {
+    let (items, situation) = egress::observe(&local.items, CHECK_TIMEOUT).await;
+    Ok(EgressResult { items, situation })
+}
+
+/// 出口观测的完整结果：逐项结论 + 当前网络环境画像。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EgressResult {
+    pub items: Vec<types::DiagnosticItem>,
+    pub situation: egress::NetworkSituation,
 }
