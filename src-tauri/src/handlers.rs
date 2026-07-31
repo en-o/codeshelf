@@ -70,6 +70,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         toolbox::netdiag::netdiag_get_snapshot,
         toolbox::netdiag::netdiag_delete_snapshot,
         toolbox::netdiag::netdiag_clear_snapshots,
+        toolbox::netdiag::netdiag_export_report,
         crate::storage::legacy_windows::detect_legacy_windows_data,
         crate::storage::legacy_windows::migrate_legacy_windows_data,
         project::set_project_editor,

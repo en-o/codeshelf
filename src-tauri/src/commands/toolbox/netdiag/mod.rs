@@ -101,3 +101,18 @@ pub async fn netdiag_delete_snapshot(id: String) -> AppResult<()> {
 pub async fn netdiag_clear_snapshots() -> AppResult<()> {
     history::clear().await
 }
+
+/// 导出诊断报告。
+///
+/// `include_full_ip = false`（默认）时遮盖所有 IP，只保留网段 ——
+/// 报告经常要发给同事或技术支持，完整 IP 属于可识别信息。
+/// 想带完整 IP 必须由用户**主动**选择（spec：完整 IP 必须由用户主动选择显示）。
+#[tauri::command]
+#[specta::specta]
+pub fn netdiag_export_report(payload: String, include_full_ip: bool) -> String {
+    if include_full_ip {
+        payload
+    } else {
+        redact::redact_report_text(&payload)
+    }
+}

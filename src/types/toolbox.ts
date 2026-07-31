@@ -414,7 +414,7 @@ export interface ConfigProfile {
 
 // ============== 工具箱页面状态 ==============
 
-export type ToolType = "monitor" | "downloader" | "server" | "docker" | "claude" | "netcat" | "shortcuts" | "clipboard" | "resume" | "sshTunnel" | "reverseTunnel" | "pairdrop";
+export type ToolType = "monitor" | "downloader" | "server" | "docker" | "claude" | "netcat" | "shortcuts" | "clipboard" | "resume" | "sshTunnel" | "reverseTunnel" | "pairdrop" | "netdiag";
 
 export interface ToolInfo {
   id: ToolType;

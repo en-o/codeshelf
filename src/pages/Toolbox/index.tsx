@@ -14,6 +14,7 @@ import {
   FileText,
   Send,
   Globe,
+  Wifi,
 } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useUiStore } from "@/stores/uiStore";
@@ -22,6 +23,7 @@ import type { ToolType } from "@/types/toolbox";
 
 // 子页面组件
 import { FileDownloader } from "./FileDownloader";
+import { NetworkDiagnostics } from "./NetworkDiagnostics";
 import { LocalService } from "./LocalService";
 import { SystemMonitor } from "./SystemMonitor";
 import { ClaudeCodeManager } from "./ClaudeCodeManager";
@@ -76,6 +78,14 @@ const tools = [
     description: "TCP/UDP 协议测试工具，支持客户端和服务器模式，用于调试物联网设备",
     icon: Radio,
     color: "bg-cyan-500",
+    beta: true,
+  },
+  {
+    id: "netdiag" as ToolType,
+    name: "网络环境诊断",
+    description: "排查本机网卡、路由、系统与环境变量代理、DNS，以及 GitHub/npm/Crates 等开发服务的连通性",
+    icon: Wifi,
+    color: "bg-teal-500",
     beta: true,
   },
   {
@@ -187,6 +197,8 @@ export function ToolboxPage() {
         return <ReverseTunnel onBack={() => setActiveTool(null)} />;
       case "pairdrop":
         return <PairDrop onBack={() => setActiveTool(null)} />;
+      case "netdiag":
+        return <NetworkDiagnostics onBack={() => setActiveTool(null)} />;
       default:
         return null;
     }

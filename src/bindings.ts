@@ -486,6 +486,16 @@ async netdiagClearSnapshots() : Promise<Result<null, string>> {
 }
 },
 /**
+ * 导出诊断报告。
+ * 
+ * `include_full_ip = false`（默认）时遮盖所有 IP，只保留网段 ——
+ * 报告经常要发给同事或技术支持，完整 IP 属于可识别信息。
+ * 想带完整 IP 必须由用户**主动**选择（spec：完整 IP 必须由用户主动选择显示）。
+ */
+async netdiagExportReport(payload: string, includeFullIp: boolean) : Promise<string> {
+    return await TAURI_INVOKE("netdiag_export_report", { payload, includeFullIp });
+},
+/**
  * 扫描已知的历史嵌套层级，返回**确实有数据**的候选目录。
  * 
  * 只在 Windows 上有意义；其它平台返回空列表（macOS 用系统数据目录，

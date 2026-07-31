@@ -62,34 +62,58 @@ function fmtTime(iso: string): string {
   }
 }
 
-function ItemRow({ item }: { item: DiagnosticItem }) {
+/** 值太长或带换行时单独占一行，短值与标题同行 —— 大多数值只有十几个字符。 */
+function valueNeedsOwnLine(v: string): boolean {
+  return v.includes("\n") || v.length > 48;
+}
+
+function ItemRow({ item, nested = false }: { item: DiagnosticItem; nested?: boolean }) {
   const style = VERDICT_STYLE[item.verdict] ?? VERDICT_STYLE.unknown;
+  // "正常 + 已观测" 是重复信息。只在证据状态**不是**顺利观测时才单独标出来，
+  // 那时它才携带信息（跳过 / 失败 / 不支持）。
+  const showEvidence = item.evidence !== "observed" && item.evidence !== "no_hit";
+  const ownLine = item.value ? valueNeedsOwnLine(item.value) : false;
+
   return (
-    <div className="border border-gray-200 rounded-lg px-3 py-2.5 bg-white">
-      <div className="flex items-start gap-2">
+    <div className={nested ? "px-3 py-2 bg-white" : "border border-gray-200 rounded-lg px-3 py-2 bg-white"}>
+      <div className="flex items-baseline gap-2 flex-wrap">
         <span className={`text-[11px] px-1.5 py-0.5 rounded border shrink-0 ${style.cls}`}>
           {style.label}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-sm font-medium text-gray-800">{item.label}</span>
-            <span className="text-[11px] text-gray-400">
-              {EVIDENCE_LABEL[item.evidence] ?? item.evidence}
-              {item.failure ? ` · ${FAILURE_LABEL[item.failure] ?? item.failure}` : ""}
-            </span>
-          </div>
-          {item.value && (
-            <pre className="mt-1 text-xs font-mono text-gray-700 whitespace-pre-wrap break-all">
-              {item.value}
-            </pre>
-          )}
-          {item.detail && <p className="mt-1 text-xs text-gray-500 leading-relaxed">{item.detail}</p>}
-          {/* 数据来源与观测时间：spec 要求每个结论都可追溯 */}
-          <p className="mt-1 text-[11px] text-gray-400">
-            来源：{item.source} · {fmtTime(item.observedAt)}
-          </p>
-        </div>
+        <span className="text-sm font-medium text-gray-800 shrink-0">{item.label}</span>
+
+        {/* 短值与标题同行：一眼能看到答案，不用往下扫 */}
+        {item.value && !ownLine && (
+          <span className="text-xs font-mono text-gray-900">{item.value}</span>
+        )}
+        {showEvidence && (
+          <span className="text-[11px] text-gray-500">
+            {EVIDENCE_LABEL[item.evidence] ?? item.evidence}
+            {item.failure ? ` · ${FAILURE_LABEL[item.failure] ?? item.failure}` : ""}
+          </span>
+        )}
+
+        {/* 数据来源靠右：spec 要求每个结论可追溯，但它是次要信息，不该占据视线中心。
+            观测时间放进 title —— 同一次检测里各项时间几乎相同，逐行铺开全是重复；
+            但它必须**可看到**（spec 验收标准），所以 hover 一定能取到。 */}
+        <span
+          className="ml-auto text-[11px] text-gray-400 shrink-0 cursor-help"
+          title={`来源：${item.source}\n观测时间：${fmtTime(item.observedAt)}`}
+        >
+          {item.source}
+        </span>
       </div>
+
+      {item.value && ownLine && (
+        <pre className="mt-1.5 text-xs font-mono text-gray-900 whitespace-pre-wrap break-all">
+          {item.value}
+        </pre>
+      )}
+
+      {/* 说明限宽：铺满整屏时一行能到 150+ 字符，眼睛跟不上换行 */}
+      {item.detail && (
+        <p className="mt-1 text-xs text-gray-500 leading-relaxed max-w-3xl">{item.detail}</p>
+      )}
     </div>
   );
 }
@@ -188,7 +212,7 @@ export function NetworkDiagnostics({ onBack }: Props) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200">
-        <button onClick={onBack} className="icon-btn" title="返回">
+        <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors" title="返回">
           <ChevronLeft size={18} />
         </button>
         <div className="flex-1 min-w-0">
@@ -199,12 +223,12 @@ export function NetworkDiagnostics({ onBack }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-5">
         {/* 覆盖率概览：刻意不给总分 */}
         {coverage.total > 0 && (
-          <div className="flex flex-wrap gap-3 text-xs">
+          <div className="flex items-center gap-2 flex-wrap text-xs">
             <span className="px-2 py-1 rounded bg-gray-100 text-gray-700">
-              检测覆盖 {coverage.observed}/{coverage.total}
+              已观测 {coverage.observed}/{coverage.total}
             </span>
             {coverage.warning > 0 && (
               <span className="px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">
@@ -216,28 +240,37 @@ export function NetworkDiagnostics({ onBack }: Props) {
                 未知 {coverage.unknown}
               </span>
             )}
-            <span className="px-2 py-1 text-gray-400">
-              不提供总风险分：本地检测无法覆盖公网出口与 DNS 递归路径
+            {/* 独立成句而不是和徽章挤一行 —— 它是一条说明，不是一个指标 */}
+            <span className="w-full sm:w-auto sm:ml-2 text-[11px] text-gray-400">
+              不提供总风险分：本地检测覆盖不到公网出口与 DNS 递归路径
             </span>
           </div>
         )}
 
         {/* 本机诊断 */}
         <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800">本机网络</h3>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-baseline gap-2">
+              <h3 className="text-sm font-semibold text-gray-800">本机网络</h3>
+              {/* 同一次检测里每项时间都一样，放这里一次即可 */}
+              {local && (
+                <span className="text-[11px] text-gray-400">
+                  检测于 {fmtTime(local.collectedAt)}
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
-              <button onClick={runLocal} disabled={localLoading} className="btn-secondary text-xs">
+              <button onClick={runLocal} disabled={localLoading} className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
                 {localLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
                 <span className="ml-1">重新检测</span>
               </button>
-              <button onClick={saveSnapshot} disabled={!local} className="btn-secondary text-xs">
+              <button onClick={saveSnapshot} disabled={!local} className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
                 <Save size={13} />
                 <span className="ml-1">保存快照</span>
               </button>
             </div>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {local?.items.map((it) => <ItemRow key={it.id} item={it} />)}
           </div>
         </section>
@@ -246,14 +279,14 @@ export function NetworkDiagnostics({ onBack }: Props) {
         <section className="space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-800">开发服务连通性</h3>
-            <button onClick={runChecks} disabled={checking} className="btn-primary text-xs">
+            <button onClick={runChecks} disabled={checking} className="inline-flex items-center px-3 py-1.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50 transition-colors">
               {checking ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
               <span className="ml-1">开始检测</span>
             </button>
           </div>
-          <p className="text-xs text-gray-500">
-            会向下列地址发起真实 HTTPS 请求，并**遵循**当前系统与环境变量代理 ——
-            测出来的就是 npm / cargo / git 会遇到的情况。不会自动绕过代理。
+          <p className="text-xs text-gray-500 max-w-3xl leading-relaxed">
+            会向下列地址发起真实 HTTPS 请求，并<strong className="font-medium text-gray-700">遵循</strong>
+            当前系统与环境变量代理 —— 测出来的就是 npm / cargo / git 会遇到的情况，不会自动绕过代理。
           </p>
 
           <div className="flex flex-wrap gap-1.5">
@@ -278,27 +311,39 @@ export function NetworkDiagnostics({ onBack }: Props) {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="名称，如 公司镜像源"
-              className="input text-xs flex-1"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1"
             />
             <input
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
               placeholder="https://..."
-              className="input text-xs flex-[2]"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 flex-[2]"
             />
-            <button onClick={addTarget} className="btn-secondary text-xs">
+            <button onClick={addTarget} className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
               <Plus size={13} />
             </button>
           </div>
 
           {checks?.map((c) => (
             <div key={c.url} className="border border-gray-200 rounded-lg overflow-hidden">
-              <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-800">{c.name}</span>
-                <span className="text-[11px] text-gray-400 font-mono truncate ml-2">{c.url}</span>
+              <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-baseline justify-between gap-2">
+                <span className="text-sm font-medium text-gray-800 shrink-0">{c.name}</span>
+                <span className="text-[11px] text-gray-400 font-mono truncate flex-1 text-right">
+                  {c.url}
+                </span>
+                {/* 各目标的检测时间不同，这里显示有信息量（本机那组则完全相同，提到分区标题） */}
+                {c.items[0] && (
+                  <span className="text-[11px] text-gray-400 shrink-0">
+                    {fmtTime(c.items[0].observedAt)}
+                  </span>
+                )}
               </div>
-              <div className="p-2 space-y-2">
-                {c.items.map((it, i) => <ItemRow key={`${c.url}-${it.id}-${i}`} item={it} />)}
+              {/* 三层结果用分隔线而不是各自描边：它们属于同一个目标，
+                  嵌套边框会让层级看起来比实际更深 */}
+              <div className="divide-y divide-gray-100">
+                {c.items.map((it, i) => (
+                  <ItemRow key={`${c.url}-${it.id}-${i}`} item={it} nested />
+                ))}
               </div>
             </div>
           ))}
@@ -307,8 +352,8 @@ export function NetworkDiagnostics({ onBack }: Props) {
         {/* 浏览器深度检测入口：固定 HTTPS 地址 */}
         <section className="space-y-2">
           <h3 className="text-sm font-semibold text-gray-800">浏览器环境检测</h3>
-          <p className="text-xs text-gray-500 leading-relaxed">
-            公网出口 IP、WebRTC、双栈出口这类检测必须在你**真正使用的浏览器**里做。
+          <p className="text-xs text-gray-500 leading-relaxed max-w-3xl">
+            公网出口 IP、WebRTC、双栈出口这类检测必须在你<strong>真正使用的浏览器</strong>里做。
             CodeShelf 内嵌的 WebView 有自己的 User-Agent 和渲染环境，
             在这里测出来的结果不能代表你的 Chrome / Firefox / Edge。
             <br />
@@ -322,7 +367,7 @@ export function NetworkDiagnostics({ onBack }: Props) {
                 showToast("error", "打开失败", errMsg(e, "未知原因"));
               }
             }}
-            className="btn-secondary text-xs"
+            className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
             <ExternalLink size={13} />
             <span className="ml-1">在默认浏览器中查看出口 IP</span>
@@ -344,14 +389,14 @@ export function NetworkDiagnostics({ onBack }: Props) {
                     showToast("error", "清空失败", errMsg(e, "未知原因"));
                   }
                 }}
-                className="btn-secondary text-xs"
+                className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
               >
                 <Trash2 size={13} />
                 <span className="ml-1">全部清除</span>
               </button>
             )}
           </div>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 max-w-3xl">
             仅保存在本机，最多保留 20 条。切换 VPN / 网络前后各存一次，可对比变化。
           </p>
           {snapshots.length === 0 ? (

@@ -64,6 +64,40 @@ fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// 识别代理工具 TUN 模式的 fake-IP 地址段。
+///
+/// Clash / Surge / sing-box 这类工具在 TUN 模式下会把 DNS 结果映射到一段保留地址，
+/// 并把这段地址设为默认路由。此时「本机出站 IP」看到的是 fake-IP，
+/// **不是**真实网卡地址，也不是公网出口 —— 用户如果不知道这一点，
+/// 会以为自己的网络配置坏了。
+///
+/// - `198.18.0.0/15`：RFC 2544 基准测试段，Clash 默认的 fake-IP 池
+/// - `fdfe:dcba:9876::/48`：Clash 默认的 IPv6 fake-IP 池
+/// - `100.64.0.0/10`：CGNAT 段，Tailscale 等也会用
+fn fake_ip_note(addr: &str) -> Option<&'static str> {
+    if let Ok(v4) = addr.parse::<std::net::Ipv4Addr>() {
+        let o = v4.octets();
+        if o[0] == 198 && (o[1] == 18 || o[1] == 19) {
+            return Some(
+                "这是代理工具 TUN 模式的 fake-IP（198.18.0.0/15），不是真实网卡地址。\
+                 说明流量正被 Clash / Surge / sing-box 一类工具接管",
+            );
+        }
+        if o[0] == 100 && (64..=127).contains(&o[1]) {
+            return Some(
+                "这是 CGNAT 段（100.64.0.0/10），可能来自运营商大内网，也可能是 Tailscale 等虚拟网络",
+            );
+        }
+    }
+    if let Ok(v6) = addr.parse::<std::net::Ipv6Addr>() {
+        let seg = v6.segments();
+        if seg[0] == 0xfdfe && seg[1] == 0xdcba && seg[2] == 0x9876 {
+            return Some("这是 Clash 默认的 IPv6 fake-IP 段（fdfe:dcba:9876::/48），不是真实地址");
+        }
+    }
+    None
+}
+
 /// 本机出站 IPv4。
 ///
 /// 用 UDP socket 的 connect **不发送任何数据**，只让内核按路由表选出源地址。
@@ -72,9 +106,16 @@ fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
 fn primary_ipv4() -> DiagnosticItem {
     let item = DiagnosticItem::new("local.ipv4", "本机出站 IPv4", "本机路由选择");
     match local_addr_via_udp("8.8.8.8:80", false) {
-        Ok(addr) => item
-            .observed(addr, Verdict::Normal)
-            .with_detail("按当前路由表选出的源地址；这不是公网出口 IP，公网出口需要外部观察点才能确认"),
+        Ok(addr) => {
+            let base = "按当前路由表选出的源地址；这不是公网出口 IP，公网出口需要外部观察点才能确认";
+            match fake_ip_note(&addr) {
+                // 被代理工具接管不是故障，但用户必须知道 —— 标成需要核对
+                Some(note) => item
+                    .observed(addr, Verdict::Warning)
+                    .with_detail(format!("{}。{}", note, base)),
+                None => item.observed(addr, Verdict::Normal).with_detail(base),
+            }
+        }
         Err(e) => item.failed(FailureKind::Offline, format!("无法确定出站 IPv4：{}", e)),
     }
 }
@@ -82,9 +123,15 @@ fn primary_ipv4() -> DiagnosticItem {
 fn primary_ipv6() -> DiagnosticItem {
     let item = DiagnosticItem::new("local.ipv6", "本机出站 IPv6", "本机路由选择");
     match local_addr_via_udp("[2001:4860:4860::8888]:80", true) {
-        Ok(addr) => item
-            .observed(addr, Verdict::Normal)
-            .with_detail("本机存在 IPv6 出站路径；是否绕过代理需要双栈公网探针才能确认"),
+        Ok(addr) => {
+            let base = "本机存在 IPv6 出站路径；是否绕过代理需要双栈公网探针才能确认";
+            match fake_ip_note(&addr) {
+                Some(note) => item
+                    .observed(addr, Verdict::Warning)
+                    .with_detail(format!("{}。{}", note, base)),
+                None => item.observed(addr, Verdict::Normal).with_detail(base),
+            }
+        }
         // 没有 IPv6 是非常正常的状态，不是故障 —— 但也**不能**说成"正常"，
         // 因为"没有 IPv6"和"有但探测不到"在本地模式下无法区分。
         Err(_) => DiagnosticItem::new("local.ipv6", "本机出站 IPv6", "本机路由选择")
@@ -413,6 +460,23 @@ mod tests {
         }
     }
 
+    /// fake-IP 必须被识别出来并解释，否则用户看到 198.18.0.1 只会一头雾水。
+    #[test]
+    fn fake_ip_ranges_are_recognised() {
+        assert!(fake_ip_note("198.18.0.1").is_some(), "Clash fake-IP 未识别");
+        assert!(fake_ip_note("198.19.255.254").is_some(), "198.19 也属于 /15");
+        assert!(fake_ip_note("fdfe:dcba:9876::1").is_some(), "IPv6 fake-IP 未识别");
+        assert!(fake_ip_note("100.64.0.1").is_some(), "CGNAT 未识别");
+
+        // 正常地址不能被误判 —— 误报比漏报更糟，会让用户去查一个不存在的问题
+        for ok in ["192.168.1.10", "10.0.0.5", "172.16.0.1", "8.8.8.8", "2408:8000::1"] {
+            assert!(fake_ip_note(ok).is_none(), "{ok} 被误判为 fake-IP");
+        }
+        // 边界：198.17 和 198.20 不在 /15 内
+        assert!(fake_ip_note("198.17.0.1").is_none());
+        assert!(fake_ip_note("198.20.0.1").is_none());
+    }
+
     /// 环境变量里的代理凭据不能出现在结果里。
     #[test]
     fn env_proxy_credentials_are_redacted() {
@@ -442,5 +506,34 @@ mod tests {
         assert_eq!(item.verdict, Verdict::Unknown);
         assert!(item.failure.is_some(), "应带失败分类");
         assert!(item.value.is_none(), "失败时不该有观测值");
+    }
+}
+
+#[cfg(test)]
+mod smoke {
+    use super::*;
+
+    /// 端到端冒烟：把本机诊断真实跑一遍并打印，人工可核对内容是否合理。
+    /// `--nocapture` 时可见。
+    #[test]
+    fn print_real_local_diagnostics() {
+        let d = collect();
+        println!("\n=== 本机诊断（platform={}）===", d.platform);
+        for it in &d.items {
+            println!(
+                "[{:?}/{:?}] {} = {}\n    来源: {} | 说明: {}",
+                it.evidence,
+                it.verdict,
+                it.label,
+                it.value.as_deref().unwrap_or("(无)"),
+                it.source,
+                it.detail.as_deref().unwrap_or("-")
+            );
+        }
+        // 任何情况下都不能把凭据带出来
+        let all = format!("{:?}", d);
+        for leak in ["password", "passwd"] {
+            assert!(!all.to_lowercase().contains(leak), "疑似泄露凭据字段: {leak}");
+        }
     }
 }

@@ -27,12 +27,16 @@ pub struct ServiceTarget {
 /// spec 明确要求「避免把固定服务列表写死」，所以前端会把内置项和自定义项合并后传进来。
 pub fn default_targets() -> Vec<ServiceTarget> {
     [
+        // 端点特意挑「健康网络下会返回 2xx」的：
+        // 默认目标如果本来就返回 4xx（比如 static.crates.io 不支持 HEAD、
+        // registry-1.docker.io 根路径 404），用户一打开就看到一片"需核对"，
+        // 会以为自己网络有问题 —— 默认项必须在正常情况下是干净的。
         ("GitHub", "https://github.com"),
         ("GitHub API", "https://api.github.com"),
         ("npm registry", "https://registry.npmjs.org"),
-        ("crates.io", "https://static.crates.io"),
-        ("Maven Central", "https://repo1.maven.org"),
-        ("Docker Hub", "https://registry-1.docker.io"),
+        ("crates.io 索引", "https://index.crates.io/config.json"),
+        ("Maven Central", "https://repo1.maven.org/maven2/"),
+        ("Docker Hub", "https://hub.docker.com"),
     ]
     .into_iter()
     .map(|(name, url)| ServiceTarget {
@@ -277,5 +281,41 @@ mod tests {
         let r = check_one(&t, Duration::from_secs(2)).await;
         assert_eq!(r.items.len(), 1);
         assert_eq!(r.items[0].verdict, Verdict::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod smoke {
+    use super::*;
+
+    /// 端到端冒烟：对真实开发服务跑一遍，`--nocapture` 可见分层结果。
+    /// 断言只做「不 panic + 状态语义自洽」，不断言必须连通 —— 那取决于跑测试时的网络。
+    #[tokio::test]
+    async fn print_real_service_checks() {
+        let targets = default_targets();
+        let out = check_all(targets, Duration::from_secs(10)).await;
+        println!("\n=== 开发服务连通性 ===");
+        for c in &out {
+            println!("{} ({})", c.name, c.url);
+            for it in &c.items {
+                println!(
+                    "  [{:?}/{:?}] {} = {}",
+                    it.evidence,
+                    it.verdict,
+                    it.label,
+                    it.value.as_deref().unwrap_or(it.detail.as_deref().unwrap_or("-"))
+                );
+            }
+        }
+        for c in &out {
+            for it in &c.items {
+                // 核心不变式在真实数据上也必须成立
+                if it.evidence != super::super::types::EvidenceStatus::Observed
+                    && it.evidence != super::super::types::EvidenceStatus::NoHit
+                {
+                    assert_eq!(it.verdict, Verdict::Unknown, "{}/{} 状态不自洽", c.name, it.id);
+                }
+            }
+        }
     }
 }
