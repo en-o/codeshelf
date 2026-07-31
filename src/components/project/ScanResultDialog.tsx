@@ -17,10 +17,24 @@ interface CategoryInfo {
   border: string;
 }
 
+/**
+ * 一次分类操作的完整记录。
+ *
+ * 原来只存 `{ category, name, count }`，撤销时按 category 把**当前所有**同分类路径
+ * 全删掉。于是分两批把 A/B 和 C 放进同一个分类后，撤销第一条会连 C 一起撤掉，
+ * 剩下的历史项也与真实状态对不上。
+ *
+ * 现在记下本次实际分配的路径，以及每个路径**分配前**的值，撤销时逐个逆向还原。
+ */
 interface HistoryItem {
+  /** 操作 ID，撤销按它定位，不按数组下标 */
+  id: string;
   category: string;
   name: string;
-  count: number;
+  /** 本次操作实际写入的路径 */
+  paths: string[];
+  /** 每个路径在本次操作**之前**的分类；undefined 表示当时未分配 */
+  previous: Record<string, string | undefined>;
 }
 
 export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialogProps) {
@@ -120,15 +134,19 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
     const paths = Array.from(selectedPaths);
 
     const newAssigned = { ...assignedCategories };
+    const previous: Record<string, string | undefined> = {};
     paths.forEach(path => {
+      previous[path] = assignedCategories[path]; // 可能是别的分类，也可能 undefined
       newAssigned[path] = selectedCategory;
     });
     setAssignedCategories(newAssigned);
 
     setHistory([...history, {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       category: selectedCategory,
       name: catInfo.name,
-      count: paths.length,
+      paths,
+      previous,
     }]);
 
     setSelectedPaths(new Set());
@@ -216,16 +234,24 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
     setShowRenameInput(false);
   }
 
-  function undoHistory(index: number) {
-    const item = history[index];
+  function undoHistory(id: string) {
+    const item = history.find(h => h.id === id);
+    if (!item) return;
+
     const newAssigned = { ...assignedCategories };
-    Object.keys(newAssigned).forEach(path => {
-      if (newAssigned[path] === item.category) {
+    for (const path of item.paths) {
+      // 只还原**仍然是本次操作结果**的路径。后续操作把它改成别的分类了，
+      // 就不该被这条撤销顺手清掉 —— 那是另一次操作的成果。
+      if (newAssigned[path] !== item.category) continue;
+      const prev = item.previous[path];
+      if (prev === undefined) {
         delete newAssigned[path];
+      } else {
+        newAssigned[path] = prev;
       }
-    });
+    }
     setAssignedCategories(newAssigned);
-    setHistory(history.filter((_, i) => i !== index));
+    setHistory(history.filter(h => h.id !== id));
   }
 
   function resetAll() {
@@ -525,18 +551,18 @@ export function ScanResultDialog({ repos, onConfirm, onCancel }: ScanResultDialo
               {history.length === 0 ? (
                 <span className="text-xs text-gray-400 italic">暂无归类操作</span>
               ) : (
-                history.map((item, idx) => {
+                history.map((item) => {
                   const cat = categories[item.category];
                   return (
                     <div
-                      key={idx}
-                      onClick={() => undoHistory(idx)}
+                      key={item.id}
+                      onClick={() => undoHistory(item.id)}
                       className={`scan-history-tag inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium cursor-pointer hover:opacity-80 whitespace-nowrap ${cat?.bg || "bg-gray-100"} ${cat?.text || "text-gray-700"} border ${cat?.border || "border-gray-200"}`}
                       title="点击撤销"
                     >
                       <span>{cat?.icon || "📦"}</span>
                       <span>{item.name}</span>
-                      <span className="opacity-60">×{item.count}</span>
+                      <span className="opacity-60">×{item.paths.length}</span>
                       <i className="fa-solid fa-xmark ml-1 opacity-60 text-[10px]"></i>
                     </div>
                   );

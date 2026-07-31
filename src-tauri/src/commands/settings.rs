@@ -268,6 +268,8 @@ pub struct TerminalInput {
     pub terminal_type: String,
     pub custom_path: Option<String>,
     pub terminal_path: Option<String>,
+    /// 每种终端各自的路径。缺省时沿用已存的，不会把界面上配好的其它类型清掉。
+    pub terminal_paths: Option<std::collections::HashMap<String, String>>,
 }
 
 #[tauri::command]
@@ -283,7 +285,18 @@ pub async fn get_terminal_config() -> AppResult<TerminalConfig> {
     let content = fs::read_to_string(&path)
         .map_err(|e| crate::error::AppError::from(format!("读取终端配置失败: {}", e)))?;
 
-    let terminal: TerminalConfig = crate::storage::parse_json_or_backup(&path, &content);
+    let mut terminal: TerminalConfig = crate::storage::parse_json_or_backup(&path, &content);
+
+    // 老配置只有单值 terminal_path，把它补进 map，升级后不丢原有设置
+    if terminal.terminal_paths.is_empty() {
+        if let Some(p) = terminal.terminal_path.clone() {
+            if !p.trim().is_empty() {
+                terminal
+                    .terminal_paths
+                    .insert(terminal.terminal_type.clone(), p);
+            }
+        }
+    }
     Ok(terminal)
 }
 
@@ -293,10 +306,17 @@ pub async fn save_terminal_config(input: TerminalInput) -> AppResult<()> {
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
+    // 读-改-写：input 没带 terminal_paths 时沿用已存的那份，
+    // 否则任何一次只改 type 的保存都会把其它类型配好的路径清空。
+    let existing = get_terminal_config().await.unwrap_or_default();
+    let terminal_paths = input.terminal_paths.unwrap_or(existing.terminal_paths);
+
     let terminal = TerminalConfig {
         terminal_type: input.terminal_type,
-        custom_path: input.custom_path,
+        // custom_path 同理：不传就保留，不能因为切到别的类型就把它抹掉
+        custom_path: input.custom_path.or(existing.custom_path),
         terminal_path: input.terminal_path,
+        terminal_paths,
     };
 
     let content = serde_json::to_string(&terminal)
@@ -610,9 +630,49 @@ pub async fn get_app_shortcuts() -> AppResult<Vec<AppShortcutBinding>> {
     serde_json::from_str(&content).map_err(|e| format!("解析应用快捷键配置失败: {}", e).into())
 }
 
+/// 校验启用中的快捷键组合两两不重复。
+///
+/// 只看 `enabled` 的项：禁用的绑定不注册，留着重复不影响行为，
+/// 强行报错反而会挡住"先禁用再改键"这种正常操作。
+///
+/// 比较前做归一化（去空格、统一大小写、按修饰键排序），
+/// 否则 `Ctrl+Shift+A` 和 `shift+ctrl+a` 会被当成两个不同的组合而漏检。
+fn validate_shortcut_uniqueness(shortcuts: &[AppShortcutBinding]) -> AppResult<()> {
+    fn normalize(keys: &str) -> String {
+        let mut parts: Vec<String> = keys
+            .split('+')
+            .map(|p| p.trim().to_ascii_lowercase())
+            .filter(|p| !p.is_empty())
+            .collect();
+        // 修饰键顺序无关紧要，排序后再比
+        parts.sort();
+        parts.join("+")
+    }
+
+    let mut seen: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+    for s in shortcuts.iter().filter(|s| s.enabled) {
+        let norm = normalize(&s.keys);
+        if norm.is_empty() {
+            continue;
+        }
+        if let Some(prev) = seen.insert(norm, &s.label) {
+            return Err(crate::error::AppError::from(format!(
+                "快捷键冲突：「{}」与「{}」都绑定了 {}。请先修改其中一个再保存。",
+                prev, s.label, s.keys
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn save_app_shortcuts(shortcuts: Vec<AppShortcutBinding>) -> AppResult<()> {
+    // 唯一性校验放在**保存之前**，且在后端做 —— 界面校验挡不住其它调用方，
+    // 而一旦落盘，重复绑定里只有第一个匹配会被执行，后面的动作永久不可达，
+    // 用户只会看到"这个快捷键没反应"，完全无从排查。
+    validate_shortcut_uniqueness(&shortcuts)?;
+
     let config = get_storage_config()?;
     config.ensure_dirs()?;
 
@@ -858,3 +918,63 @@ static DEFAULT_SENSITIVE_FILE_PATTERNS: Lazy<Vec<String>> = Lazy::new(|| {
     serde_json::from_str(include_str!("../../../src/config/defaultSensitiveFilePatterns.json"))
         .expect("defaultSensitiveFilePatterns.json must be valid JSON")
 });
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    fn b(id: &str, label: &str, keys: &str, enabled: bool) -> AppShortcutBinding {
+        AppShortcutBinding {
+            id: id.into(),
+            label: label.into(),
+            description: String::new(),
+            keys: keys.into(),
+            default_keys: keys.into(),
+            enabled,
+            global: false,
+        }
+    }
+
+    #[test]
+    fn duplicate_enabled_bindings_are_rejected() {
+        // 完全相同
+        let v = vec![b("a", "打开书架", "Ctrl+K", true), b("b", "打开设置", "Ctrl+K", true)];
+        let e = validate_shortcut_uniqueness(&v).unwrap_err();
+        assert!(format!("{e:?}").contains("冲突"), "{e:?}");
+
+        // 只是修饰键顺序/大小写/空格不同 —— 同样要挡住，
+        // 否则界面看着不一样、实际注册的是同一个组合
+        for other in ["shift+ctrl+a", "CTRL+SHIFT+A", " Ctrl + Shift + A "] {
+            let v = vec![
+                b("a", "动作一", "Ctrl+Shift+A", true),
+                b("b", "动作二", other, true),
+            ];
+            assert!(
+                validate_shortcut_uniqueness(&v).is_err(),
+                "应判为冲突: {other:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_and_distinct_bindings_pass() {
+        // 禁用项不注册，重复也无所谓 —— 挡住它会让"先禁用再改键"没法做
+        let v = vec![
+            b("a", "动作一", "Ctrl+K", true),
+            b("b", "动作二", "Ctrl+K", false),
+        ];
+        assert!(validate_shortcut_uniqueness(&v).is_ok());
+
+        // 不同组合正常通过
+        let v = vec![
+            b("a", "动作一", "Ctrl+K", true),
+            b("b", "动作二", "Ctrl+J", true),
+            b("c", "动作三", "Ctrl+Shift+K", true),
+        ];
+        assert!(validate_shortcut_uniqueness(&v).is_ok());
+
+        // 空 keys 视为未绑定，不参与冲突判定
+        let v = vec![b("a", "动作一", "", true), b("b", "动作二", "  ", true)];
+        assert!(validate_shortcut_uniqueness(&v).is_ok());
+    }
+}

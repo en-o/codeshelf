@@ -1,5 +1,6 @@
 // 存储模块
 
+pub mod legacy_windows;
 pub mod config;
 pub mod db;
 pub mod migrations;

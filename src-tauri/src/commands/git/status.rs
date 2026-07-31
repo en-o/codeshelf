@@ -1,7 +1,7 @@
 // 工作区状态与冲突处理：get_git_status / 冲突相关命令
 
 use super::{
-    is_system_junk_file, run_git_command, unquote_git_path, ConflictFileContent, GitStatus,
+    is_system_junk_file, run_git_command, run_git_command_raw, ConflictFileContent, GitStatus,
 };
 use crate::error::AppResult;
 
@@ -12,48 +12,84 @@ pub async fn get_git_status(path: String) -> AppResult<GitStatus> {
     let branch = run_git_command(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
         .unwrap_or_else(|_| "unknown".to_string());
 
-    // Get status with -uall to show all untracked files recursively
-    let status_output = run_git_command(&path, &["status", "--porcelain", "-uall"])?;
+    // 用 `-z` 解析工作区状态。
+    //
+    // 默认 porcelain 输出对「特殊」路径会加引号并做 **C 风格八进制转义**
+    // （中文 `改名.txt` 变成 `"\346\224\271\345\220\215.txt"`），
+    // 而 rename 会写成 `old -> new` 两个路径挤在一行。
+    // 之前的 `unquote_git_path` 只处理 `\n \t \\ \"` 四种转义、也不拆 rename，
+    // 于是中文/emoji/空格路径和 rename 都会解析成**不存在的假路径**，
+    // 再被 stage / discard / resolve 拿去操作。
+    //
+    // `-z` 不加引号、不转义，条目以 NUL 结尾；rename 条目额外跟一个 NUL 分隔的旧路径。
+    let raw = run_git_command_raw(&path, &["status", "--porcelain", "-uall", "-z"])?;
 
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
     let mut untracked = Vec::new();
     let mut conflicted = Vec::new();
 
-    for line in status_output.lines() {
-        if line.len() < 3 {
+    let mut fields = raw.split(|b| *b == 0);
+    while let Some(entry) = fields.next() {
+        if entry.is_empty() {
             continue;
         }
-        let status = &line[0..2];
-        // 跳过状态码后的所有空白字符，更稳健地获取文件路径
-        let file_part = line[2..].trim_start();
-        let file = unquote_git_path(file_part);
+        // 每条格式：XY<空格>路径
+        if entry.len() < 3 {
+            continue;
+        }
+        let status = &entry[0..2];
+        let path_bytes = &entry[3..];
 
-        if file.is_empty() {
+        // rename / copy 的条目后面**紧跟**一个 NUL 分隔的旧路径，必须一并消费掉，
+        // 否则它会被当成下一条状态记录来解析。
+        let is_rename = status[0] == b'R' || status[0] == b'C';
+        let old_path = if is_rename { fields.next() } else { None };
+
+        // 非 UTF-8 路径无法在前端安全表示，也无法回传给 git 做后续操作。
+        // 显式跳过并记日志，而不是 lossy 转换出一个"看起来像但打不开"的路径。
+        let file = match std::str::from_utf8(path_bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                log::warn!(
+                    "跳过非 UTF-8 路径（暂不支持）: {}",
+                    String::from_utf8_lossy(path_bytes)
+                );
+                continue;
+            }
+        };
+        if is_rename {
+            if let Some(old) = old_path {
+                if std::str::from_utf8(old).is_err() {
+                    log::warn!("跳过 rename 的非 UTF-8 旧路径");
+                    continue;
+                }
+            }
+        }
+
+        if file.is_empty() || is_system_junk_file(&file) {
             continue;
         }
 
-        if is_system_junk_file(&file) {
-            continue;
-        }
-
-        if status.contains('U') || matches!(status, "AA" | "DD") {
+        // 冲突：任一位是 U，或 AA / DD
+        if status.contains(&b'U') || status == b"AA" || status == b"DD" {
             conflicted.push(file);
             continue;
         }
 
-        match status.chars().next() {
-            Some('?') => untracked.push(file),
-            Some(' ') => unstaged.push(file),
-            Some(_) => {
-                if status.chars().nth(1) == Some(' ') {
+        // 第一位 = index 状态，第二位 = 工作区状态。两位可以同时非空
+        // （`MM` 表示既有暂存改动又有未暂存改动），必须分别记入两个列表。
+        match status[0] {
+            b'?' => untracked.push(file),
+            b' ' => unstaged.push(file),
+            _ => {
+                if status[1] == b' ' {
                     staged.push(file);
                 } else {
                     staged.push(file.clone());
                     unstaged.push(file);
                 }
             }
-            None => {}
         }
     }
 
@@ -175,6 +211,74 @@ pub async fn git_mark_resolved(path: String, file: String) -> AppResult<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 特殊文件名与 rename 必须解析成**真实存在**的路径。
+    ///
+    /// 默认 porcelain 会把中文写成 `"\346\224\271..."` 八进制转义、
+    /// 把 rename 写成 `old -> new` 一行两路径。旧解析器两者都处理不了，
+    /// 产出的假路径会被 stage / discard 拿去操作。
+    #[tokio::test]
+    async fn special_filenames_and_renames_resolve_to_real_paths() {
+        let dir = std::env::temp_dir().join(format!("codeshelf-zparse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.to_string_lossy().to_string();
+        let git = |args: &[&str]| run_git_command(&p, args).unwrap_or_else(|e| panic!("{args:?}: {e:?}"));
+
+        git(&["init", "-q", "."]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("base.txt"), b"x").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+
+        // 各类特殊文件名
+        std::fs::write(dir.join("中文文件.txt"), b"a").unwrap();
+        std::fs::write(dir.join("emoji 🙂.txt"), b"b").unwrap();
+        std::fs::write(dir.join("有 空格.txt"), b"c").unwrap();
+        git(&["add", "中文文件.txt"]);
+        // rename
+        git(&["mv", "base.txt", "改名后.txt"]);
+        // 同一文件既有暂存改动又有未暂存改动
+        std::fs::write(dir.join("双重.txt"), b"v1").unwrap();
+        git(&["add", "双重.txt"]);
+        std::fs::write(dir.join("双重.txt"), b"v1+v2").unwrap();
+
+        let st = get_git_status(p.clone()).await.expect("status");
+        let all: Vec<&String> = st
+            .staged
+            .iter()
+            .chain(st.unstaged.iter())
+            .chain(st.untracked.iter())
+            .collect();
+
+        // 每一条报出来的路径都必须真实存在 —— 这是整条修复的核心断言。
+        // 旧解析器在这里会给出 `"\346..."` 之类的假路径。
+        for f in &all {
+            assert!(
+                dir.join(f).exists(),
+                "报出的路径不存在（解析错误）: {:?}\n全部: {:?}",
+                f,
+                all
+            );
+        }
+
+        assert!(st.staged.contains(&"中文文件.txt".to_string()), "{:?}", st.staged);
+        assert!(st.untracked.contains(&"emoji 🙂.txt".to_string()), "{:?}", st.untracked);
+        assert!(st.untracked.contains(&"有 空格.txt".to_string()), "{:?}", st.untracked);
+        // rename 的新路径进 staged，且**不能**混进 `base.txt -> 改名后.txt` 这种拼接串
+        assert!(st.staged.contains(&"改名后.txt".to_string()), "{:?}", st.staged);
+        assert!(
+            !all.iter().any(|f| f.contains("->")),
+            "rename 未被拆开: {:?}",
+            all
+        );
+        // 双重状态必须同时出现在两个列表里
+        assert!(st.staged.contains(&"双重.txt".to_string()), "{:?}", st.staged);
+        assert!(st.unstaged.contains(&"双重.txt".to_string()), "{:?}", st.unstaged);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// 造一个带多个 remote 的真实仓库，验证 upstream 解析。
     /// 重点是分支名里带斜杠的情况 —— 按第一个 `/` 切会把 `feature/x` 切成 `feature`。

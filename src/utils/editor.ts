@@ -2,8 +2,21 @@ import type { Project } from "@/types";
 import type { EditorConfig } from "@/stores/editorsStore";
 
 /**
+ * 全局默认编辑器：**按 `is_default` 标志**取，不是数组第一项。
+ *
+ * 后端用 `is_default` 标识默认项且**不重排数组**，前端却一直读 `editors[0]`，
+ * 于是「设为默认」当次靠乐观重排看起来生效，后端返回原顺序一覆盖就打回原形，
+ * 重启后更是完全无效。
+ *
+ * 没有任何一项带标志时（历史数据）退回第一项，保持行为可预期。
+ */
+function getDefaultEditor(editors: EditorConfig[]): EditorConfig | undefined {
+  return editors.find((e) => e.is_default) ?? editors[0];
+}
+
+/**
  * 获取项目应使用的编辑器路径
- * 优先使用项目级 editorId 对应的编辑器，否则返回全局默认（editors[0]）
+ * 优先使用项目级 editorId 对应的编辑器，否则返回全局默认
  */
 export function getEditorForProject(
   project: Project,
@@ -13,7 +26,7 @@ export function getEditorForProject(
     const matched = editors.find((e) => e.id === project.editorId);
     if (matched) return matched.path;
   }
-  return editors[0]?.path;
+  return getDefaultEditor(editors)?.path;
 }
 
 /**
@@ -27,7 +40,7 @@ export function getEditorConfigForProject(
     const matched = editors.find((e) => e.id === project.editorId);
     if (matched) return matched;
   }
-  return editors[0];
+  return getDefaultEditor(editors);
 }
 
 /** 已知编辑器名称 → 图标映射 */

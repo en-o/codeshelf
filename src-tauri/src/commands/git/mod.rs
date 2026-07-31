@@ -163,6 +163,35 @@ pub(super) fn run_git_command(path: &str, args: &[&str]) -> AppResult<String> {
     }
 }
 
+/// 与 `run_git_command` 相同，但返回**原始字节**且不做 trim。
+///
+/// `--porcelain -z` 的输出以 NUL 分隔、条目以 NUL 结尾，trim 会破坏最后一条；
+/// 而且路径可能不是合法 UTF-8，先转 String 会丢信息。解析方自己决定怎么处理。
+pub(super) fn run_git_command_raw(path: &str, args: &[&str]) -> AppResult<Vec<u8>> {
+    #[cfg(target_os = "windows")]
+    let output = Command::new("git")
+        .args(["-C", path])
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| crate::error::AppError::from(e.to_string()))?;
+
+    #[cfg(not(target_os = "windows"))]
+    let output = Command::new("git")
+        .args(["-C", path])
+        .args(args)
+        .output()
+        .map_err(|e| crate::error::AppError::from(e.to_string()))?;
+
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(crate::error::AppError::from(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
+    }
+}
+
 /// `run_git_command` 的异步版：在阻塞线程池里跑，不占用 tokio worker。
 ///
 /// 本地 git 操作（status/log/branch）是毫秒级，直接调同步版即可；但**网络类操作**
@@ -185,19 +214,3 @@ pub(super) fn is_system_junk_file(file: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// 解析 git status --porcelain 输出中的文件路径
-/// 处理引号包裹的路径（包含空格或特殊字符时）
-pub(super) fn unquote_git_path(path: &str) -> String {
-    let path = path.trim();
-    if path.starts_with('"') && path.ends_with('"') && path.len() >= 2 {
-        // 去除引号并处理转义字符
-        let inner = &path[1..path.len() - 1];
-        inner
-            .replace("\\n", "\n")
-            .replace("\\t", "\t")
-            .replace("\\\\", "\\")
-            .replace("\\\"", "\"")
-    } else {
-        path.to_string()
-    }
-}

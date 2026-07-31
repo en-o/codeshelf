@@ -42,7 +42,14 @@ pub struct EditorConfig {
 pub struct TerminalConfig {
     pub terminal_type: String,
     pub custom_path: Option<String>,
+    /// 遗留字段：只存"当前类型"那一条路径。保留是为了能读老配置，新写入用 `terminal_paths`。
     pub terminal_path: Option<String>,
+    /// 每种终端各自的路径。
+    ///
+    /// 界面允许为每种终端分别设置/测试路径，但持久层原本只有上面那个单值 ——
+    /// 给非当前类型配好的路径重启即丢，切离 custom 还会把 customPath 一起清掉。
+    #[serde(default)]
+    pub terminal_paths: std::collections::HashMap<String, String>,
 }
 
 // ============== 应用设置数据 ==============

@@ -148,41 +148,52 @@ fn get_dates_in_last_week() -> Vec<String> {
     dates
 }
 
+/// 读取提交记录。
+///
+/// 返回 `Err` 表示**分析失败**（git 不可用 / 不是仓库 / 权限问题），
+/// 与「仓库确实没有提交」是两回事 —— 原来两者都返回空 Vec，
+/// 于是一次 git 失败会被当成"0 次提交"覆盖掉上一次正确的缓存。
 fn get_project_commits(
     path: &str,
     limit: u32,
-) -> Vec<(String, String, String, String, String, String)> {
-    let format = "%H|%h|%s|%an|%ae|%ai";
+) -> Result<Vec<(String, String, String, String, String, String)>, String> {
+    // 字段用 `%x1f`（US, 单元分隔符）、记录用 `-z`（NUL）分隔。
+    //
+    // 原来用 `|` 分隔：提交主题和作者名里出现竖线是很常见的
+    // （`fix: 处理 a|b`、`作者|带竖线`），一旦出现，`split('|')` 之后
+    // 所有字段整体错位 —— 作者变成主题的后半截、日期变成邮箱，
+    // 「最近活动」时间也跟着错。这两个控制字符不会出现在正常的 git 元数据里。
+    let format = "%H%x1f%h%x1f%s%x1f%an%x1f%ae%x1f%ai";
     let output = run_git_command(
         path,
         &[
             "log",
+            "-z",
             &format!("-{}", limit),
             &format!("--format={}", format),
         ],
-    );
+    )
+    .map_err(|e| e.to_string())?;
 
-    match output {
-        Ok(result) => result
-            .lines()
-            .filter_map(|line| {
-                let parts: Vec<&str> = line.split('|').collect();
-                if parts.len() >= 6 {
-                    Some((
-                        parts[0].to_string(),
-                        parts[1].to_string(),
-                        parts[2].to_string(),
-                        parts[3].to_string(),
-                        parts[4].to_string(),
-                        parts[5].to_string(),
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        Err(_) => Vec::new(),
-    }
+    Ok(output
+        .split('\0')
+        .filter(|r| !r.trim().is_empty())
+        .filter_map(|record| {
+            let parts: Vec<&str> = record.split('\u{1f}').collect();
+            if parts.len() >= 6 {
+                Some((
+                    parts[0].to_string(),
+                    parts[1].to_string(),
+                    parts[2].to_string(),
+                    parts[3].to_string(),
+                    parts[4].to_string(),
+                    parts[5].to_string(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect())
 }
 
 fn get_unpushed_count(path: &str) -> u32 {
@@ -204,10 +215,13 @@ fn get_unpushed_count(path: &str) -> u32 {
     }
 }
 
-/// 跑 git 收集一个项目的统计（spawn_blocking 调用）
-fn analyze_project(name: String, path: String) -> ProjectStatsCache {
+/// 跑 git 收集一个项目的统计（spawn_blocking 调用）。
+///
+/// 返回 `Err` 表示分析失败，调用方**不应该**用它覆盖已有缓存 ——
+/// 一次 git 失败不代表这个项目真的没有提交。
+fn analyze_project(name: String, path: String) -> Result<ProjectStatsCache, String> {
     let unpushed = get_unpushed_count(&path);
-    let commits = get_project_commits(&path, 365);
+    let commits = get_project_commits(&path, 365)?;
 
     let mut commits_by_date: HashMap<String, u32> = HashMap::new();
     let mut recent_commits: Vec<RecentCommit> = Vec::new();
@@ -230,12 +244,12 @@ fn analyze_project(name: String, path: String) -> ProjectStatsCache {
         }
     }
 
-    ProjectStatsCache {
+    Ok(ProjectStatsCache {
         unpushed,
         commits_by_date,
         recent_commits,
         last_updated: get_current_timestamp(),
-    }
+    })
 }
 
 // ============== sqlite 持久化 ==============
@@ -597,9 +611,20 @@ pub async fn refresh_dirty_stats(projects: Vec<ProjectInfo>) -> AppResult<Cached
     // 收集结果并写入
     let mut cleared_paths: Vec<String> = Vec::new();
     for handle in handles {
-        if let Ok((path, stats)) = handle.await {
-            write_project_stats(&path, &stats).await?;
-            cleared_paths.push(path);
+        if let Ok((path, result)) = handle.await {
+            match result {
+                Ok(stats) => {
+                    write_project_stats(&path, &stats).await?;
+                    // 只有分析成功才清 dirty；失败的项目保持 dirty，下次会重试
+                    cleared_paths.push(path);
+                }
+                Err(e) => {
+                    // 分析失败**不写缓存也不清 dirty**：
+                    // 否则一次 git 失败就会把上一次正确的统计覆盖成 0，
+                    // 而且 dirty 被清掉后再也不会自动重算。
+                    log::warn!("项目统计分析失败，保留上次缓存并留待重试 ({}): {}", path, e);
+                }
+            }
         }
     }
     clear_dirty(&cleared_paths).await?;
@@ -642,9 +667,20 @@ pub async fn refresh_dashboard_stats(projects: Vec<ProjectInfo>) -> AppResult<Ca
 
     let mut cleared_paths: Vec<String> = Vec::new();
     for handle in handles {
-        if let Ok((path, stats)) = handle.await {
-            write_project_stats(&path, &stats).await?;
-            cleared_paths.push(path);
+        if let Ok((path, result)) = handle.await {
+            match result {
+                Ok(stats) => {
+                    write_project_stats(&path, &stats).await?;
+                    // 只有分析成功才清 dirty；失败的项目保持 dirty，下次会重试
+                    cleared_paths.push(path);
+                }
+                Err(e) => {
+                    // 分析失败**不写缓存也不清 dirty**：
+                    // 否则一次 git 失败就会把上一次正确的统计覆盖成 0，
+                    // 而且 dirty 被清掉后再也不会自动重算。
+                    log::warn!("项目统计分析失败，保留上次缓存并留待重试 ({}): {}", path, e);
+                }
+            }
         }
     }
     clear_dirty(&cleared_paths).await?;
@@ -744,4 +780,54 @@ pub async fn cleanup_stats_cache(current_project_paths: Vec<String>) -> AppResul
         .await
         .map_err(|e| crate::error::AppError::from(format!("提交事务失败: {}", e)))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod commit_parse_tests {
+    use super::*;
+
+    /// 提交主题和作者名里含 `|` 时字段不能错位。
+    /// 旧实现用 `|` 分隔，`fix: 处理 a|b` + 作者 `作者|带竖线` 会让
+    /// 主题、作者、邮箱、日期整体串位，"最近活动"时间也跟着错。
+    #[test]
+    fn pipe_in_subject_and_author_does_not_shift_fields() {
+        let dir = std::env::temp_dir().join(format!("codeshelf-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.to_string_lossy().to_string();
+        let git = |args: &[&str]| run_git_command(&p, args).unwrap_or_else(|e| panic!("{args:?}: {e:?}"));
+
+        git(&["init", "-q", "."]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "作者|带竖线"]);
+        std::fs::write(dir.join("a.txt"), b"x").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "fix: 处理 a|b 的边界情况"]);
+
+        let commits = get_project_commits(&p, 10).expect("应能读取");
+        assert_eq!(commits.len(), 1);
+        let (hash, short, subject, author, email, date) = &commits[0];
+
+        assert_eq!(subject, "fix: 处理 a|b 的边界情况", "主题被截断了");
+        assert_eq!(author, "作者|带竖线", "作者被截断了");
+        assert_eq!(email, "t@t", "邮箱字段错位");
+        assert!(date.starts_with("20"), "日期字段错位: {date}");
+        assert_eq!(hash.len(), 40, "完整 hash 长度不对");
+        assert!(hash.starts_with(short.as_str()), "短 hash 与完整 hash 不匹配");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 非 git 仓库必须报错，而不是"0 次提交" —— 后者会覆盖掉上一次正确的缓存。
+    #[test]
+    fn non_repo_reports_error_not_empty() {
+        let dir = std::env::temp_dir().join(format!("codeshelf-nolog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let r = get_project_commits(&dir.to_string_lossy(), 10);
+        assert!(r.is_err(), "非仓库应返回 Err，实际: {r:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

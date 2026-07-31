@@ -12,6 +12,7 @@ import { scanDirectory, getGitStatus } from "@/services/git";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Dropdown, FilterPopover } from "@/components/ui";
 import { MacWindowControls } from "@/components/layout/MacWindowControls";
+import { errMsg } from "@/utils/errMsg";
 
 export function ShelfPage() {
   const {
@@ -40,6 +41,10 @@ export function ShelfPage() {
   const [catScrollState, setCatScrollState] = useState({ left: false, right: false });
   // Git 状态缓存，用于筛选功能
   const [gitStatusMap, setGitStatusMap] = useState<Record<string, GitStatus>>({});
+  // 读取失败的项目单独记一份：失败 ≠ 干净，也 ≠ 还在加载。
+  // 只有一个 map 的话，「git 不存在 / 不是仓库 / 目录不可访问」会和「加载中」混在一起，
+  // 筛选时被静默归类，用户不知道有项目根本没读到状态。
+  const [gitErrorIds, setGitErrorIds] = useState<Set<string>>(new Set());
 
   // 批量操作状态
   const [batchMode, setBatchMode] = useState(false);
@@ -84,9 +89,55 @@ export function ShelfPage() {
     }
   }, [onlyModified, projects.length]);
 
+  /**
+   * 批量操作逐项执行并**对账**。
+   *
+   * 原来是 `for (...) await ...` 一把梭：中途某一项失败会直接抛出，
+   * 前面已经成功的那些既不会反映到界面上，也不会被告知用户；
+   * 而成功路径的 toast 固定报 `selectedIds.size`，与真正成功的数量未必一致。
+   *
+   * 现在每项独立成败，返回成功项和失败明细，由调用方按真实结果更新状态和提示。
+   */
+  async function runBatch<T>(
+    ids: Iterable<string>,
+    fn: (id: string) => Promise<T>,
+  ): Promise<{ ok: T[]; failed: { id: string; error: unknown }[] }> {
+    const ok: T[] = [];
+    const failed: { id: string; error: unknown }[] = [];
+    // 去重：同一个 ID 出现两次会被执行两遍，第二次多半报"不存在"
+    for (const id of new Set(ids)) {
+      try {
+        ok.push(await fn(id));
+      } catch (error) {
+        console.error(`批量操作失败 (${id}):`, error);
+        failed.push({ id, error });
+      }
+    }
+    return { ok, failed };
+  }
+
+  /** 按真实成败给提示：全成功 / 部分失败 / 全失败 三种都要说清楚 */
+  function reportBatch(action: string, okCount: number, failed: { id: string; error: unknown }[]) {
+    if (failed.length === 0) {
+      showToast("success", `${action}成功`, `${okCount} 个项目`);
+      return;
+    }
+    const detail = errMsg(failed[0].error, "未知原因");
+    if (okCount === 0) {
+      showToast("error", `${action}失败`, `${failed.length} 个项目全部失败：${detail}`);
+    } else {
+      showToast(
+        "warning",
+        `${action}部分失败`,
+        `${okCount} 个成功，${failed.length} 个失败：${detail}`,
+      );
+    }
+  }
+
   // 加载所有项目的 git 状态
   async function loadAllGitStatus() {
     const statusMap: Record<string, GitStatus> = {};
+    const failed = new Set<string>();
     await Promise.all(
       projects.map(async (project) => {
         try {
@@ -94,10 +145,12 @@ export function ShelfPage() {
           statusMap[project.id] = status;
         } catch (error) {
           console.error(`Failed to get git status for ${project.name}:`, error);
+          failed.add(project.id);
         }
       })
     );
     setGitStatusMap(statusMap);
+    setGitErrorIds(failed);
   }
 
   // 监听滚动，显示/隐藏浮动分类球
@@ -303,19 +356,22 @@ export function ShelfPage() {
 
     try {
       setLoading(true);
-      const removedProjects = projects.filter(p => selectedIds.has(p.id));
-      for (const id of selectedIds) {
+      const { ok: removedIds, failed } = await runBatch(selectedIds, async (id) => {
         await removeProject(id);
-      }
-      setProjects(projects.filter(p => !selectedIds.has(p.id)));
-      // Mark removed projects as dirty for stats refresh
+        return id;
+      });
+      const removedSet = new Set(removedIds);
+      // 只移除**确实删掉**的那些，失败的留在书架上（它们还在）
+      const removedProjects = projects.filter(p => removedSet.has(p.id));
+      setProjects(projects.filter(p => !removedSet.has(p.id)));
       removedProjects.forEach(p => markProjectDirty(p.path));
-      setSelectedIds(new Set());
-      setBatchMode(false);
-      showToast("success", "移除成功", `已从书架移除 ${selectedIds.size} 个项目`);
+      // 失败的保持选中，用户可以直接重试
+      setSelectedIds(new Set(failed.map(f => f.id)));
+      if (failed.length === 0) setBatchMode(false);
+      reportBatch("移除", removedIds.length, failed);
     } catch (error) {
       console.error("Failed to remove projects:", error);
-      showToast("error", "移除失败", String(error));
+      showToast("error", "移除失败", errMsg(error, "未知原因"));
     } finally {
       setLoading(false);
     }
@@ -328,36 +384,30 @@ export function ShelfPage() {
       setLoading(true);
       const updatedProjects: Project[] = [];
 
-      for (const id of selectedIds) {
+      // 逐项独立成败：中途一项失败不该让前面成功的改动丢掉界面反馈
+      const { ok: okUpdates, failed } = await runBatch(selectedIds, async (id) => {
         const currentProject = projects.find(p => p.id === id);
-        let finalTags: string[];
-
-        if (mode === "append") {
-          // 追加模式：合并原有分类和新分类，去重
-          const existingTags = currentProject?.tags || [];
-          finalTags = Array.from(new Set([...existingTags, ...newCategories]));
-        } else {
-          // 替换模式：直接使用新分类
-          finalTags = newCategories;
-        }
-
-        const updated = await updateProject({ id, tags: finalTags });
-        updatedProjects.push(updated);
-      }
+        const finalTags =
+          mode === "append"
+            ? Array.from(new Set([...(currentProject?.tags || []), ...newCategories]))
+            : newCategories;
+        return updateProject({ id, tags: finalTags });
+      });
+      updatedProjects.push(...okUpdates);
 
       setProjects(projects.map(p => {
         const updated = updatedProjects.find(u => u.id === p.id);
         return updated || p;
       }));
 
-      setSelectedIds(new Set());
-      setBatchMode(false);
+      setSelectedIds(new Set(failed.map(f => f.id)));
+      if (failed.length === 0) setBatchMode(false);
       setShowBatchCategoryModal(false);
       const modeText = mode === "append" ? "追加" : "替换";
-      showToast("success", "更新成功", `已${modeText} ${selectedIds.size} 个项目的分类`);
+      reportBatch(`${modeText}分类`, updatedProjects.length, failed);
     } catch (error) {
       console.error("Failed to update categories:", error);
-      showToast("error", "更新失败", String(error));
+      showToast("error", "更新失败", errMsg(error, "未知原因"));
     } finally {
       setLoading(false);
     }
@@ -370,36 +420,29 @@ export function ShelfPage() {
       setLoading(true);
       const updatedProjects: Project[] = [];
 
-      for (const id of selectedIds) {
+      const { ok: okUpdates, failed } = await runBatch(selectedIds, async (id) => {
         const currentProject = projects.find(p => p.id === id);
-        let finalLabels: string[];
-
-        if (mode === "append") {
-          // 追加模式：合并原有标签和新标签，去重
-          const existingLabels = currentProject?.labels || [];
-          finalLabels = Array.from(new Set([...existingLabels, ...newLabels]));
-        } else {
-          // 替换模式：直接使用新标签
-          finalLabels = newLabels;
-        }
-
-        const updated = await updateProject({ id, labels: finalLabels });
-        updatedProjects.push(updated);
-      }
+        const finalLabels =
+          mode === "append"
+            ? Array.from(new Set([...(currentProject?.labels || []), ...newLabels]))
+            : newLabels;
+        return updateProject({ id, labels: finalLabels });
+      });
+      updatedProjects.push(...okUpdates);
 
       setProjects(projects.map(p => {
         const updated = updatedProjects.find(u => u.id === p.id);
         return updated || p;
       }));
 
-      setSelectedIds(new Set());
-      setBatchMode(false);
+      setSelectedIds(new Set(failed.map(f => f.id)));
+      if (failed.length === 0) setBatchMode(false);
       setShowBatchLabelModal(false);
       const modeText = mode === "append" ? "追加" : "替换";
-      showToast("success", "更新成功", `已${modeText} ${selectedIds.size} 个项目的标签`);
+      reportBatch(`${modeText}标签`, updatedProjects.length, failed);
     } catch (error) {
       console.error("Failed to update labels:", error);
-      showToast("error", "更新失败", String(error));
+      showToast("error", "更新失败", errMsg(error, "未知原因"));
     } finally {
       setLoading(false);
     }
@@ -418,8 +461,11 @@ export function ShelfPage() {
     // onlyModified 筛选：检查项目是否有未提交的修改
     if (onlyModified) {
       const status = gitStatusMap[p.id];
-      // 如果没有状态信息，暂时显示（等待加载）
+      // 状态未知（读取失败或仍在加载）时**保留**该项目：
+      // 隐藏等于替用户断言"它没有修改"，而我们根本不知道。
+      // 卡片本身会显示「状态未知 / 读取中…」，不会被静默误分类。
       if (!status) return true;
+      if (gitErrorIds.has(p.id)) return true;
       // 只显示有修改的项目
       if (status.isClean) return false;
     }

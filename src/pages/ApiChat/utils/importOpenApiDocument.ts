@@ -10,9 +10,42 @@ interface ImportResult {
   groups: ApiGroup[];
   endpoints: ApiEndpoint[];
   title: string;
+  /**
+   * 导入过程中**被跳过**的内容，供界面如实告知用户。
+   *
+   * 原来不支持的 operation 是静默 `continue` 掉的：用户导入 20 个接口、
+   * 界面显示"导入成功"，实际只进来 17 个，另外 3 个 HEAD/OPTIONS 凭空消失，
+   * 而且没有任何提示。
+   */
+  skipped: string[];
 }
 
-const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
+/**
+ * 支持导入的 HTTP 方法。
+ *
+ * 原来只有 GET/POST/PUT/PATCH/DELETE，而 OpenAPI 的 Path Item 合法方法还包括
+ * HEAD / OPTIONS / TRACE —— 这三个会被静默丢弃。它们与其它方法在本项目里
+ * 走的是同一条执行路径（reqwest 按方法名发请求），没有理由不支持。
+ */
+const HTTP_METHODS = new Set([
+  "get",
+  "post",
+  "put",
+  "patch",
+  "delete",
+  "head",
+  "options",
+  "trace",
+]);
+
+/** Path Item 里不是 HTTP 方法的合法键，跳过它们是正常的，不该报告为"丢弃" */
+const NON_OPERATION_KEYS = new Set([
+  "summary",
+  "description",
+  "servers",
+  "parameters",
+  "$ref",
+]);
 
 function isRecord(value: unknown): value is AnyRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -323,10 +356,22 @@ export function parseOpenApiDocument(content: string): ImportResult {
   };
 
   const endpoints: ApiEndpoint[] = [];
+  const skipped: string[] = [];
   for (const [path, rawPathItem] of Object.entries(doc.paths)) {
-    if (!isRecord(rawPathItem)) continue;
+    if (!isRecord(rawPathItem)) {
+      skipped.push(`${path}（路径项格式不正确）`);
+      continue;
+    }
     for (const [method, rawOperation] of Object.entries(rawPathItem)) {
-      if (!HTTP_METHODS.has(method) || !isRecord(rawOperation)) continue;
+      if (NON_OPERATION_KEYS.has(method)) continue; // 正常的非 operation 键
+      if (!HTTP_METHODS.has(method)) {
+        skipped.push(`${method.toUpperCase()} ${path}（不支持的方法）`);
+        continue;
+      }
+      if (!isRecord(rawOperation)) {
+        skipped.push(`${method.toUpperCase()} ${path}（operation 格式不正确）`);
+        continue;
+      }
       const operationSecurity = rawOperation.security;
       const operationAuth = Array.isArray(operationSecurity)
         ? authForSecurity(doc, operationSecurity)
@@ -355,9 +400,13 @@ export function parseOpenApiDocument(content: string): ImportResult {
   }
 
   if (endpoints.length === 0) {
-    throw new Error("文档中没有可导入的接口");
+    throw new Error(
+      skipped.length > 0
+        ? `文档中没有可导入的接口。已跳过 ${skipped.length} 项：${skipped.slice(0, 5).join("、")}${skipped.length > 5 ? " 等" : ""}`
+        : "文档中没有可导入的接口",
+    );
   }
-  return { groups: [group], endpoints, title };
+  return { groups: [group], endpoints, title, skipped };
 }
 
 export async function importOpenApiDocument(): Promise<ImportResult | null> {

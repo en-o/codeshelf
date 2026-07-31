@@ -67,6 +67,8 @@ interface TerminalConfigBackend {
   terminal_type: string;
   custom_path?: string;
   terminal_path?: string;
+  /** 每种终端各自的路径（新字段）；老配置只有单值 terminal_path */
+  terminal_paths?: Record<string, string>;
 }
 
 // 后端返回的通知类型
@@ -118,9 +120,13 @@ async function initializeApp() {
     const terminalConfig: TerminalConfig = {
       type: (terminal.terminal_type || "default") as TerminalConfig["type"],
       customPath: terminal.custom_path,
-      paths: terminal.terminal_path ? {
-        [terminal.terminal_type]: terminal.terminal_path
-      } : undefined,
+      // 优先用后端的完整 map；老配置只有单值 terminal_path 时退回到它
+      paths:
+        terminal.terminal_paths && Object.keys(terminal.terminal_paths).length > 0
+          ? (terminal.terminal_paths as TerminalConfig["paths"])
+          : terminal.terminal_path
+            ? ({ [terminal.terminal_type]: terminal.terminal_path } as TerminalConfig["paths"])
+            : undefined,
     };
 
     // 转换通知格式

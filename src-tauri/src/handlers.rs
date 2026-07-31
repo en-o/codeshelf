@@ -62,6 +62,8 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         project::import_projects,
         project::reload_projects,
         crate::app_setup::take_pending_external_projects,
+        crate::storage::legacy_windows::detect_legacy_windows_data,
+        crate::storage::legacy_windows::migrate_legacy_windows_data,
         project::set_project_editor,
         project::set_project_claude_env,
         // Stats

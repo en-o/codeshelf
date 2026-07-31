@@ -17,6 +17,20 @@ export interface UpdateInfo {
 // 缓存已检查的更新对象，以及已完成下载、可安装的更新对象
 let cachedUpdate: Update | null = null;
 let downloadedUpdate: Update | null = null;
+
+/**
+ * 全局 single-flight：下载 / 安装同一时间只允许一个在跑。
+ *
+ * 启动通知弹窗和设置页各自维护自己的 `downloading` 状态，却共享这个模块级的
+ * `cachedUpdate` / `downloadedUpdate`。两边同时点「下载」会并发调用
+ * `update.download()`：进度回调互相打架，`downloadedUpdate` 被写两次，
+ * 更糟的是两个下载可能写同一个临时文件。
+ *
+ * 用 Promise 而不是 boolean：后来者**复用**同一次下载并等它完成，
+ * 而不是直接失败 —— 用户在两个入口点了同一件事，期望是"它开始下载了"。
+ */
+let inFlightDownload: Promise<void> | null = null;
+let inFlightInstall: Promise<void> | null = null;
 let isPortableVersion: boolean | null = null;
 
 // 检查是否为便携版
@@ -91,6 +105,17 @@ export async function silentCheckForUpdates(): Promise<UpdateInfo | null> {
 export async function downloadUpdate(
   onProgress?: (progress: number, total: number) => void
 ): Promise<void> {
+  // 已有下载在跑就复用它，不再起第二个
+  if (inFlightDownload) return inFlightDownload;
+  inFlightDownload = doDownloadUpdate(onProgress).finally(() => {
+    inFlightDownload = null;
+  });
+  return inFlightDownload;
+}
+
+async function doDownloadUpdate(
+  onProgress?: (progress: number, total: number) => void
+): Promise<void> {
   if (!cachedUpdate) {
     const update = await check();
     if (!update) {
@@ -127,6 +152,15 @@ export async function downloadUpdate(
 
 // 安装已下载的更新并重启
 export async function installUpdate(): Promise<void> {
+  // 安装同样只允许一个：重复调用会触发两次安装器 + 两次 relaunch
+  if (inFlightInstall) return inFlightInstall;
+  inFlightInstall = doInstallUpdate().finally(() => {
+    inFlightInstall = null;
+  });
+  return inFlightInstall;
+}
+
+async function doInstallUpdate(): Promise<void> {
   if (!downloadedUpdate) {
     throw new Error("No update downloaded");
   }
@@ -135,8 +169,24 @@ export async function installUpdate(): Promise<void> {
   await relaunch();
 }
 
+/** 供界面禁用按钮：当前是否有下载或安装在进行中 */
+export function isUpdateBusy(): boolean {
+  return inFlightDownload !== null || inFlightInstall !== null;
+}
+
 // 下载并安装更新（保留原有功能）
 export async function downloadAndInstallUpdate(
+  onProgress?: (progress: number, total: number) => void
+): Promise<void> {
+  // 与 downloadUpdate 共用同一把锁：两个入口打的是同一个更新
+  if (inFlightDownload) return inFlightDownload;
+  inFlightDownload = doDownloadAndInstall(onProgress).finally(() => {
+    inFlightDownload = null;
+  });
+  return inFlightDownload;
+}
+
+async function doDownloadAndInstall(
   onProgress?: (progress: number, total: number) => void
 ): Promise<void> {
   let update = cachedUpdate;

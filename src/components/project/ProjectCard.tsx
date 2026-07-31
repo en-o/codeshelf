@@ -20,6 +20,14 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<ProjectCardProps, "viewMode">) {
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+  /**
+   * Git 状态必须是四态，不能只有「有修改 / 无修改」。
+   *
+   * 原来 `gitStatus?.isClean === false ? "有修改" : "无修改"` 把三种完全不同的情况
+   * 都显示成「无修改」：正在加载、读取失败（git 不存在 / 目录不可访问 / 不是仓库）、
+   * 以及真的干净。用户据此判断"这个项目没改动"，而实际上可能根本没读到。
+   */
+  const [gitState, setGitState] = useState<"loading" | "error" | "ok">("loading");
   const [remoteType, setRemoteType] = useState<"github" | "gitee" | "gitlab" | "other" | "none">("none");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showLabelModal, setShowLabelModal] = useState(false);
@@ -38,6 +46,7 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
   }, [project.path]);
 
   async function loadGitInfo() {
+    setGitState("loading");
     try {
       const [status, remotes] = await Promise.all([
         getGitStatus(project.path),
@@ -60,9 +69,12 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
       } else {
         setRemoteType("none");
       }
+      setGitState("ok");
     } catch (error) {
+      // git 不存在 / 目录不可访问 / 不是仓库 —— 都不是「无修改」
       console.error("Failed to load git info:", error);
-    } finally {
+      setGitStatus(null);
+      setGitState("error");
     }
   }
 
@@ -248,8 +260,21 @@ export function ProjectCard({ project, onUpdate, onShowDetail, onDelete }: Omit<
         </div>
 
         <div className="re-card-footer">
-          <span className="re-status">
-            {gitStatus?.isClean === false ? "有修改" : "无修改"}
+          <span
+            className="re-status"
+            title={
+              gitState === "error"
+                ? "读取 Git 状态失败：可能未安装 git、目录不可访问，或不是 Git 仓库"
+                : undefined
+            }
+          >
+            {gitState === "loading"
+              ? "读取中…"
+              : gitState === "error"
+                ? "状态未知"
+                : gitStatus?.isClean === false
+                  ? "有修改"
+                  : "无修改"}
           </span>
 
           <div className="re-card-actions">

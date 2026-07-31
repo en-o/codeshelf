@@ -351,12 +351,23 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
     }
   }
 
+  /** 有被跳过的内容就如实告知，别让用户以为全部导入成功了 */
+  function reportSkipped(skipped: string[]) {
+    if (skipped.length === 0) return;
+    showToast(
+      "warning",
+      `已跳过 ${skipped.length} 个接口`,
+      skipped.slice(0, 5).join("、") + (skipped.length > 5 ? ` 等 ${skipped.length} 项` : ""),
+    );
+  }
+
   async function handleImportDocument() {
     setDocumentImportChoiceOpen(false);
     try {
       const parsed = await importOpenApiDocument();
       if (!parsed) return;
       openImportDraft(parsed.title, parsed.groups, parsed.endpoints);
+      reportSkipped(parsed.skipped);
     } catch (err) {
       showToast("error", errMsg(err, "导入接口文档失败"));
     }
@@ -376,6 +387,7 @@ export function LibraryManagerDialog({ open, onClose, onChanged }: LibraryManage
       const parsed = await importOpenApiDocumentFromUrl(trimmed);
       setLoading(false);
       openImportDraft(parsed.title, parsed.groups, parsed.endpoints);
+      reportSkipped(parsed.skipped);
       setDocumentUrl("");
     } catch (err) {
       showToast("error", errMsg(err, "导入在线接口文档失败"));

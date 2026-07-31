@@ -414,6 +414,36 @@ async reloadProjects() : Promise<Result<Project[], string>> {
 async takePendingExternalProjects() : Promise<ExternalAddEvent[]> {
     return await TAURI_INVOKE("take_pending_external_projects");
 },
+/**
+ * 扫描已知的历史嵌套层级，返回**确实有数据**的候选目录。
+ * 
+ * 只在 Windows 上有意义；其它平台返回空列表（macOS 用系统数据目录，
+ * Linux 已在 AUD-023 改为 XDG 目录，都不存在这个嵌套问题）。
+ */
+async detectLegacyWindowsData() : Promise<Result<LegacyDataCandidate[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("detect_legacy_windows_data") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 把历史目录里的数据补进当前 data 目录。
+ * 
+ * **永不覆盖**已存在的文件：两边都有的条目保持当前版本不动，只补缺失的。
+ * 这样即使用户选错了源目录，也不会毁掉正在用的数据。
+ * 
+ * 返回实际复制的文件数。完成后写入持久标记，后续启动不再提示。
+ */
+async migrateLegacyWindowsData(from: string) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("migrate_legacy_windows_data", { from }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async setProjectEditor(id: string, editorId: string | null) : Promise<Result<Project, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_project_editor", { id, editorId }) };
@@ -3277,6 +3307,31 @@ export type GlobalShortcutBinding = { id: string; keys: string }
 export type HttpFetchConfig = { url: string; method?: string | null; headers?: Partial<{ [key in string]: string }> | null; body?: string | null; jsonPath?: string | null }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 export type KnowledgeInput = { projectId: string; projectName: string; projectPath: string; content: string }
+/**
+ * 一处候选的历史数据目录。
+ */
+export type LegacyDataCandidate = { 
+/**
+ * 历史 data 目录的绝对路径
+ */
+path: string; 
+/**
+ * 目录里的文件数量（递归）
+ */
+fileCount: number; 
+/**
+ * 所有文件的总字节数
+ */
+totalBytes: number; 
+/**
+ * 最近修改时间（RFC3339），拿不到时为 None
+ */
+lastModified: string | null; 
+/**
+ * 当前 data 目录里**已经存在**的同名文件数量。
+ * 大于 0 意味着两边都有数据，迁移只会补齐缺失的部分，不会覆盖。
+ */
+conflictingFiles: number }
 export type LlmProxyHeader = { name: string; value: string }
 export type LlmProxyRequest = { method: string; url: string; headers: LlmProxyHeader[]; body: string | null }
 export type LlmProxyResponse = { status: number; status_text: string; headers: LlmProxyHeader[]; body: string }
@@ -3693,8 +3748,23 @@ export type SystemStats = { totalMemory: number; usedMemory: number; totalSwap: 
 /**
  * 终端配置
  */
-export type TerminalConfig = { terminal_type: string; custom_path: string | null; terminal_path: string | null }
-export type TerminalInput = { terminal_type: string; custom_path: string | null; terminal_path: string | null }
+export type TerminalConfig = { terminal_type: string; custom_path: string | null; 
+/**
+ * 遗留字段：只存"当前类型"那一条路径。保留是为了能读老配置，新写入用 `terminal_paths`。
+ */
+terminal_path: string | null; 
+/**
+ * 每种终端各自的路径。
+ * 
+ * 界面允许为每种终端分别设置/测试路径，但持久层原本只有上面那个单值 ——
+ * 给非当前类型配好的路径重启即丢，切离 custom 还会把 customPath 一起清掉。
+ */
+terminal_paths?: Partial<{ [key in string]: string }> }
+export type TerminalInput = { terminal_type: string; custom_path: string | null; terminal_path: string | null; 
+/**
+ * 每种终端各自的路径。缺省时沿用已存的，不会把界面上配好的其它类型清掉。
+ */
+terminal_paths: Partial<{ [key in string]: string }> | null }
 export type TerminalTestResult = { available: boolean; error: string | null; suggested_path: string | null }
 /**
  * 端口连通性测试结果
