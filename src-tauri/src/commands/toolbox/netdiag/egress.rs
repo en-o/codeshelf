@@ -632,3 +632,49 @@ mod tests {
         assert!(!c.matched, "中国 DNS + 境外出口应标记为不一致");
     }
 }
+
+#[cfg(test)]
+mod smoke {
+    use super::*;
+
+    /// 端到端：真实观测出口、生成画像并交叉核对。`--nocapture` 可见。
+    /// 只断言状态语义自洽 —— 具体结论取决于跑测试时的网络。
+    #[tokio::test]
+    async fn print_real_egress_and_situation() {
+        let local = crate::commands::toolbox::netdiag::local::collect();
+        let (out, situation) = observe(&local.items, Duration::from_secs(15)).await;
+
+        println!("\n=== 当前网络环境 ===");
+        println!("  {}", situation.summary);
+        for i in &situation.implications {
+            println!("  · {}", i);
+        }
+
+        println!("\n=== 逐项结论 ===");
+        for it in &out {
+            let cmp = it
+                .comparison
+                .as_ref()
+                .map(|c| format!("  [{} {} ↔ {} {}]", c.left_label, c.left, c.right_label, c.right))
+                .unwrap_or_default();
+            println!(
+                "[{:?}/{:?}] {} = {}{}",
+                it.evidence,
+                it.verdict,
+                it.label,
+                it.value.as_deref().unwrap_or("-"),
+                cmp
+            );
+        }
+
+        for it in &out {
+            if it.evidence != super::super::types::EvidenceStatus::Observed
+                && it.evidence != super::super::types::EvidenceStatus::NoHit
+            {
+                assert_eq!(it.verdict, Verdict::Unknown, "{} 状态不自洽", it.id);
+            }
+        }
+        assert!(!situation.summary.is_empty(), "画像不能为空");
+        assert!(!situation.implications.is_empty(), "至少要给一条影响说明");
+    }
+}

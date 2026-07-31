@@ -507,7 +507,7 @@ async netdiagEgressDisclosures() : Promise<EgressEndpointDisclosure[]> {
  * **会把用户公网 IP 暴露给端点方**，必须由用户主动触发，
  * 且界面已通过 `netdiag_egress_disclosures` 披露过接收方。
  */
-async netdiagEgress(local: LocalDiagnostics) : Promise<Result<DiagnosticItem[], string>> {
+async netdiagEgress(local: LocalDiagnostics) : Promise<Result<EgressResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("netdiag_egress", { local }) };
 } catch (e) {
@@ -3426,6 +3426,10 @@ export type EditorInput = { name: string; path: string; icon: string | null; is_
  */
 export type EgressEndpointDisclosure = { host: string; purpose: string; operator: string }
 /**
+ * 出口观测的完整结果：逐项结论 + 当前网络环境画像。
+ */
+export type EgressResult = { items: DiagnosticItem[]; situation: NetworkSituation }
+/**
  * 环境类型
  */
 export type EnvType = "host" | "wsl"
@@ -3645,6 +3649,23 @@ autoSend?: AutoSendConfig }
  * 创建会话的输入参数
  */
 export type NetcatSessionInput = { protocol: Protocol; mode: SessionMode; host: string; port: number; name: string | null; autoReconnect: boolean | null; timeoutMs: number | null }
+/**
+ * 当前网络环境的**画像**：一句话说清「我现在处在什么网络环境、这意味着什么」。
+ * 
+ * 这是整个工具最该给出的东西。列一堆检测项只回答了「测了什么」，
+ * 用户真正要的是「我这会儿的网络是什么状态，会影响到什么」。
+ * 参考项目那句「存在公网地址不一致或环境特征被标记的风险」就是这个角色，
+ * 但它偏风险判定；开发场景更需要的是**处境描述 + 具体影响**。
+ */
+export type NetworkSituation = { 
+/**
+ * 一句话画像，例如「流量经代理从新加坡出网」
+ */
+summary: string; 
+/**
+ * 逐条影响：这个环境下会发生什么。每条都要能直接对应到用户的实际动作。
+ */
+implications: string[] }
 /**
  * 网卡 URL 信息（用于多网卡环境下生成多个 QR）
  */

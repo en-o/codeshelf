@@ -5,6 +5,8 @@ import { showToast } from "@/components/ui";
 import { errMsg } from "@/utils/errMsg";
 import type {
   DiagnosticItem,
+  EgressResult,
+  NetworkSituation,
   EgressEndpointDisclosure,
   LocalDiagnostics,
   NetDiagSnapshotSummary,
@@ -166,10 +168,28 @@ export interface RadarAxis {
   problems: number;
 }
 
+/**
+ * 轴长 = 该维度**无问题项的占比**。
+ *
+ * 第一版用「检测覆盖率」，结果检测一跑完四个轴全是满的（3/3、18/18），
+ * 图形永远是个正菱形 —— 等于没有信息量。用通过率才能让有矛盾的维度真正塌下去，
+ * 一眼看出问题集中在哪。
+ *
+ * 这**不是**风险评分：它就是「这个维度 N 项里有几项没问题」这个事实，
+ * 未知项和矛盾项一样把轴拉低（spec：未知项不能贡献满分）。
+ * 也因此仍然**不给综合分**。
+ */
+function axisRatio(a: RadarAxis): number {
+  if (a.total === 0) return 0;
+  return Math.max(0, a.total - a.problems) / a.total;
+}
+
 export function CoverageRadar({ axes }: { axes: RadarAxis[] }) {
-  const C = 130;
-  const CY = 118;
-  const R = 74;
+  // viewBox 留足边距：轴标签在 R+30 处，四周还要放下两行文字。
+  // 之前 260 宽装不下「本机链路 / 6·6 · 2 待核」这种长标签，左右都被裁掉了。
+  const C = 160;
+  const CY = 120;
+  const R = 66;
   const n = axes.length || 1;
   const angleFor = (i: number) => (-90 + (i * 360) / n) * (Math.PI / 180);
   const pt = (i: number, r: number) => ({
@@ -178,13 +198,12 @@ export function CoverageRadar({ axes }: { axes: RadarAxis[] }) {
   });
 
   // 轴长 = 覆盖率；一项都没测的维度收在中心（视觉上就是"这块是空的"）
-  const ratio = (a: RadarAxis) => (a.total === 0 ? 0 : a.observed / a.total);
-  const verts = axes.map((a, i) => pt(i, Math.max(4, ratio(a) * R)));
+  const verts = axes.map((a, i) => pt(i, Math.max(5, axisRatio(a) * R)));
   const polygon = verts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const anyProblem = axes.some((a) => a.problems > 0);
 
   return (
-    <svg viewBox="0 0 260 250" className="w-full h-auto overflow-visible" role="img" aria-label="检测覆盖雷达">
+    <svg viewBox="0 0 320 250" className="w-full h-auto overflow-visible" role="img" aria-label="检测覆盖雷达">
       {[0.33, 0.66, 1].map((r) => (
         <circle key={r} cx={C} cy={CY} r={R * r} fill="none" stroke="#e5e7eb" strokeWidth="1" />
       ))}
@@ -231,8 +250,11 @@ export function CoverageRadar({ axes }: { axes: RadarAxis[] }) {
               className={a.problems > 0 ? "fill-amber-600" : "fill-gray-400"}
               fontSize="10"
             >
-              {a.total === 0 ? "未检测" : `${a.observed}/${a.total}`}
-              {a.problems > 0 ? ` · ${a.problems} 待核` : ""}
+              {a.total === 0
+                ? "未检测"
+                : a.problems > 0
+                  ? `${a.problems} 项待核`
+                  : `${a.total} 项正常`}
             </text>
           </g>
         );
@@ -343,6 +365,7 @@ export function NetworkDiagnostics({ onBack }: Props) {
   const [checking, setChecking] = useState(false);
   const [snapshots, setSnapshots] = useState<NetDiagSnapshotSummary[]>([]);
   const [egress, setEgress] = useState<DiagnosticItem[] | null>(null);
+  const [situation, setSituation] = useState<NetworkSituation | null>(null);
   const [egressLoading, setEgressLoading] = useState(false);
   const [disclosures, setDisclosures] = useState<EgressEndpointDisclosure[]>([]);
   const [newName, setNewName] = useState("");
@@ -381,7 +404,9 @@ export function NetworkDiagnostics({ onBack }: Props) {
     if (!local) return;
     setEgressLoading(true);
     try {
-      setEgress(await invoke<DiagnosticItem[]>("netdiag_egress", { local }));
+      const r = await invoke<EgressResult>("netdiag_egress", { local });
+      setEgress(r.items);
+      setSituation(r.situation);
     } catch (e) {
       showToast("error", "出口观测失败", errMsg(e, "未知原因"));
     } finally {
@@ -444,7 +469,9 @@ export function NetworkDiagnostics({ onBack }: Props) {
     if (fresh) {
       setEgressLoading(true);
       try {
-        setEgress(await invoke<DiagnosticItem[]>("netdiag_egress", { local: fresh }));
+        const r = await invoke<EgressResult>("netdiag_egress", { local: fresh });
+        setEgress(r.items);
+        setSituation(r.situation);
       } catch (e) {
         showToast("error", "出口观测失败", errMsg(e, "未知原因"));
       } finally {
@@ -534,7 +561,13 @@ export function NetworkDiagnostics({ onBack }: Props) {
       ...(egress ?? []),
       ...(checks ?? []).flatMap((c) => c.items),
     ];
-    return all.filter((i) => i.verdict === "warning" || i.verdict === "unknown");
+    return all.filter((i) => {
+      if (i.verdict !== "warning" && i.verdict !== "unknown") return false;
+      // 本机侧的 fake-IP 提示属于**环境特征**，不是「本机与外部对不上」的矛盾 ——
+      // 它已经在上面的网络环境画像里讲过了，再列进核对项只会稀释真正的问题。
+      if (i.id === "local.ipv4" || i.id === "local.ipv6") return false;
+      return true;
+    });
   }, [local, egress, checks]);
 
   // 覆盖率：spec 要求首版用「问题清单 + 状态 + 检测覆盖率」代替总分
@@ -607,7 +640,24 @@ export function NetworkDiagnostics({ onBack }: Props) {
                     {headline?.title ?? "存在需要核对的项"}
                   </h3>
                 </div>
-                <p className="text-xs text-gray-500 mt-1 ml-[18px]">{headline?.sub}</p>
+                {/* 网络环境画像：「我现在处在什么网络环境、这意味着什么」。
+                    这比「N 处需要核对」有用得多 —— 后者只说了有问题，
+                    前者说清了当前处境和会踩到什么。 */}
+                {situation ? (
+                  <div className="mt-2 ml-[18px]">
+                    <p className="text-sm text-gray-700">{situation.summary}</p>
+                    <ul className="mt-1.5 space-y-1">
+                      {situation.implications.map((im, i) => (
+                        <li key={i} className="text-xs text-gray-500 leading-relaxed flex gap-1.5">
+                          <span className="text-gray-300 shrink-0">·</span>
+                          <span>{im}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1 ml-[18px]">{headline?.sub}</p>
+                )}
 
                 <div className="flex items-baseline justify-between mt-3 pt-3 border-t border-gray-100">
                   <span className="text-[11px] text-gray-400">核对项</span>
@@ -654,6 +704,7 @@ export function NetworkDiagnostics({ onBack }: Props) {
                   <span className="w-2 h-2 rounded-full bg-green-500" />
                   <h3 className="text-base font-semibold text-gray-900">未发现异常</h3>
                 </div>
+                {situation && <p className="text-sm text-gray-700 mt-1.5">{situation.summary}</p>}
                 <p className="text-xs text-gray-500 mt-1">
                   已检测 {coverage.total} 项。这只代表本次没有命中已知问题
                 </p>
@@ -711,8 +762,18 @@ export function NetworkDiagnostics({ onBack }: Props) {
               <div className="space-y-3 min-w-0">
                 <div>
                   <div className="text-[11px] text-gray-400">本机代理</div>
-                  <div className="text-sm text-gray-800 break-all">
-                    {local?.items.find((i) => i.id === "local.system_proxy")?.value ?? "—"}
+                  {/* 按分号拆行：一整串 `HTTP …；HTTPS …；SOCKS …` 靠 break-all
+                      会从 SOCKS 中间断开，读起来很别扭 */}
+                  <div className="text-sm text-gray-800 space-y-0.5">
+                    {(local?.items.find((i) => i.id === "local.system_proxy")?.value ?? "—")
+                      .split(/[；;]/)
+                      .map((seg) => seg.trim())
+                      .filter(Boolean)
+                      .map((seg, i) => (
+                        <div key={i} className="font-mono text-xs break-all">
+                          {seg}
+                        </div>
+                      ))}
                   </div>
                 </div>
                 <div>
