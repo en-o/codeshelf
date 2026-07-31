@@ -309,7 +309,11 @@ jobs:
   summarize-release:
     needs: [create-release, build]
     permissions:
-      contents: read
+      # 必须是 write 而不是 read：这一步读的是 **draft** release，
+      # 而 draft 只对有 push 权限的身份可见 —— 用 contents: read 的 token
+      # 调 getRelease 会直接 403「Resource not accessible by integration」。
+      # 本 job 只读不写，权限给到 write 纯粹是 draft 可见性的要求。
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Summarize draft release
