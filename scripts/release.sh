@@ -74,8 +74,16 @@ if [ -n "$(git status --porcelain)" ]; then
     error "工作树/暂存区不干净（见上）。发版必须从确定的源码开始：请先提交或 stash。"
 fi
 
-# 基线必须与远程一致，否则发出去的 commit 不是团队看到的那个
-info "校验 main 与 origin/main 是否同步..."
+# 基线校验：**只允许**领先在「发版 commit」上。
+#
+# 为什么不是简单要求与 origin/main 完全一致：本脚本自己就会在 main 上留下
+# 一个 `chore: release vX` 提交（提交后才切分支），下次再发版时 main 天然领先一个。
+# 要求完全一致会逼着你先 `git push origin main`，而那会让 CI 在 main 上再跑一遍 ——
+# 于是同一个 commit 触发两个 workflow。
+#
+# 但**落后**必须拦：那意味着拿的是旧代码，打出来的包不含 origin/main 上的新提交。
+# 分叉同理。
+info "校验基线..."
 git fetch origin main --quiet || error "无法 fetch origin/main，请检查网络或远程配置"
 
 LOCAL_SHA=$(git rev-parse HEAD)
@@ -84,14 +92,23 @@ BASE_SHA=$(git merge-base HEAD origin/main)
 
 if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
     if [ "$LOCAL_SHA" = "$BASE_SHA" ]; then
-        error "本地 main 落后于 origin/main，请先 git pull"
+        error "本地 main 落后于 origin/main，会用旧代码打包。请先 git pull"
     elif [ "$REMOTE_SHA" = "$BASE_SHA" ]; then
-        error "本地 main 领先于 origin/main（有未推送的提交），请先 git push"
+        # 领先：逐个检查未推送的提交，只有发版提交才放行
+        NON_RELEASE=$(git log --format=%s "origin/main..HEAD" | grep -vE '^chore: release v' || true)
+        if [ -n "$NON_RELEASE" ]; then
+            echo ""
+            echo "$NON_RELEASE"
+            echo ""
+            error "main 上有未推送的非发版提交（见上）。它们不会进入本次 release 分支，请先推送或整理。"
+        fi
+        AHEAD=$(git rev-list --count "origin/main..HEAD")
+        warn "main 领先 origin/main $AHEAD 个提交，均为历史发版提交，继续。"
     else
         error "本地 main 与 origin/main 已分叉，请先处理后再发版"
     fi
 fi
-success "基线一致: $LOCAL_SHA"
+success "基线校验通过"
 
 # 检查 release 分支是否已存在
 BRANCH_NAME="release/$VERSION"
@@ -187,8 +204,12 @@ src-tauri/Cargo.toml
 src-tauri/Cargo.lock'
 
 info "暂存更改..."
+# 只 add **确实存在**的文件：上面对缺失的 lock 文件是「warn 并跳过」，
+# 这里若无条件 add 一个不存在的路径，git add 会直接失败，两处行为对不上。
 # shellcheck disable=SC2086  # 这里正是要按换行/空白拆成多个参数
-git add $VERSION_FILES
+for f in $VERSION_FILES; do
+    [ -f "$f" ] && git add "$f"
+done
 
 # 提交内容必须**可预测**：因为开工前已确认工作树干净，此刻 staged 的应当
 # 恰好是这五个文件。多出任何一个都说明中途有别的东西混进来了，停下来。
