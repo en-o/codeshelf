@@ -260,7 +260,7 @@ mod tests {
     /// 迁移**只补缺失**，绝不覆盖当前数据 —— 用户选错源目录也不该毁掉正在用的库。
     #[test]
     fn migration_never_overwrites_existing_files() {
-        let root = std::env::temp_dir().join(format!("codeshelf-legacy-{}", std::process::id()));
+        let root = crate::storage::unique_test_dir("codeshelf-legacy");
         let _ = std::fs::remove_dir_all(&root);
         let src = root.join("old").join("data");
         let dst = root.join("new").join("data");
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn summary_counts_files_recursively() {
-        let root = std::env::temp_dir().join(format!("codeshelf-sum-{}", std::process::id()));
+        let root = crate::storage::unique_test_dir("codeshelf-sum");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("a").join("b")).unwrap();
         std::fs::write(root.join("x.json"), b"12345").unwrap();

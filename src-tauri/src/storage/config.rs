@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(linux_base_dir(Some(empty.clone())).unwrap(), xdg);
 
         // 3) exe 旁边已有 data/ 且可写 → 沿用旧位置，不能让老用户「数据全没了」
-        let legacy = std::env::temp_dir().join(format!("codeshelf-legacy-{}", std::process::id()));
+        let legacy = crate::storage::unique_test_dir("codeshelf-cfg-legacy");
         let _ = std::fs::remove_dir_all(&legacy);
         std::fs::create_dir_all(legacy.join("data")).unwrap();
         assert_eq!(linux_base_dir(Some(legacy.clone())).unwrap(), legacy);

@@ -496,6 +496,26 @@ async netdiagExportReport(payload: string, includeFullIp: boolean) : Promise<str
     return await TAURI_INVOKE("netdiag_export_report", { payload, includeFullIp });
 },
 /**
+ * 出口观测会访问哪些第三方端点。界面在用户点击**之前**必须把这个列出来。
+ */
+async netdiagEgressDisclosures() : Promise<EgressEndpointDisclosure[]> {
+    return await TAURI_INVOKE("netdiag_egress_disclosures");
+},
+/**
+ * 观测公网出口并与本机配置做一致性核对。
+ * 
+ * **会把用户公网 IP 暴露给端点方**，必须由用户主动触发，
+ * 且界面已通过 `netdiag_egress_disclosures` 披露过接收方。
+ */
+async netdiagEgress(local: LocalDiagnostics) : Promise<Result<DiagnosticItem[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_egress", { local }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * 扫描已知的历史嵌套层级，返回**确实有数据**的候选目录。
  * 
  * 只在 Windows 上有意义；其它平台返回空列表（macOS 用系统数据目录，
@@ -3274,6 +3294,18 @@ charCount: number;
  */
 model?: string | null }
 /**
+ * 并排对照：一致性类结论的核心表达。
+ * 
+ * 「本机配的是 A，外面看到的是 B」比一整段描述好读得多 ——
+ * 两边并排，一眼就知道对不对得上。参考项目用的也是这个形式
+ * （`时区: 浏览器 东八区 ↔ IP 东八区`）。
+ */
+export type Comparison = { leftLabel: string; left: string; rightLabel: string; right: string; 
+/**
+ * 两侧是否一致。false **不等于**有问题 —— 只表示需要核对。
+ */
+matched: boolean }
+/**
  * 配置文件信息
  */
 export type ConfigFileInfo = { name: string; path: string; exists: boolean; size: number; modified: string | null; description: string }
@@ -3338,7 +3370,21 @@ observedAt: string;
 /**
  * 失败时的分类
  */
-failure: FailureKind | null }
+failure: FailureKind | null; 
+/**
+ * 并排对照（一致性类结论用）。有它时界面优先渲染成 `左 ↔ 右`。
+ */
+comparison: Comparison | null; 
+/**
+ * **一句话的可核对事实**，例如「IPv6 可独立出网（2a12:...）」。
+ * 
+ * 与 `detail` 的分工很重要：`evidence_note` 是「观测到了什么」，
+ * 短、具体、能直接拿去核对；`detail` 是「这意味着什么、下一步怎么办」，
+ * 属于解释，放 hover 即可。参考项目的做法就是把
+ * 「网页可获取额外公网地址（183.67.52.5）」这种具体值放在正文，
+ * 而不是一段"这通常说明……"的推断。
+ */
+evidenceNote: string | null }
 /**
  * 局域网中主动发现到的其它桌面端服务
  */
@@ -3372,6 +3418,13 @@ maxRetries?: number; createdAt: string; updatedAt: string }
  */
 export type EditorConfig = { id: string; name: string; path: string; icon: string | null; is_default: boolean }
 export type EditorInput = { name: string; path: string; icon: string | null; is_default: boolean | null }
+/**
+ * 会被访问的端点清单，供界面在用户点击**之前**逐项披露。
+ * 
+ * spec：「使用 IP 情报……查询时，第三方会收到用户公网 IP……
+ * 开始前必须逐项披露数据接收方和用途，不能只笼统提示『需要联网』。」
+ */
+export type EgressEndpointDisclosure = { host: string; purpose: string; operator: string }
 /**
  * 环境类型
  */

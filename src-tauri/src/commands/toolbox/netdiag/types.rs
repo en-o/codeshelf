@@ -79,6 +79,22 @@ pub enum FailureKind {
     Other,
 }
 
+/// 并排对照：一致性类结论的核心表达。
+///
+/// 「本机配的是 A，外面看到的是 B」比一整段描述好读得多 ——
+/// 两边并排，一眼就知道对不对得上。参考项目用的也是这个形式
+/// （`时区: 浏览器 东八区 ↔ IP 东八区`）。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Comparison {
+    pub left_label: String,
+    pub left: String,
+    pub right_label: String,
+    pub right: String,
+    /// 两侧是否一致。false **不等于**有问题 —— 只表示需要核对。
+    pub matched: bool,
+}
+
 /// 一条诊断结论。
 ///
 /// 每项都带**数据来源**和**观测时间**，对应 spec「每个结论展示数据来源、
@@ -104,6 +120,16 @@ pub struct DiagnosticItem {
     pub observed_at: String,
     /// 失败时的分类
     pub failure: Option<FailureKind>,
+    /// 并排对照（一致性类结论用）。有它时界面优先渲染成 `左 ↔ 右`。
+    pub comparison: Option<Comparison>,
+    /// **一句话的可核对事实**，例如「IPv6 可独立出网（2a12:...）」。
+    ///
+    /// 与 `detail` 的分工很重要：`evidence_note` 是「观测到了什么」，
+    /// 短、具体、能直接拿去核对；`detail` 是「这意味着什么、下一步怎么办」，
+    /// 属于解释，放 hover 即可。参考项目的做法就是把
+    /// 「网页可获取额外公网地址（183.67.52.5）」这种具体值放在正文，
+    /// 而不是一段"这通常说明……"的推断。
+    pub evidence_note: Option<String>,
 }
 
 impl DiagnosticItem {
@@ -118,6 +144,8 @@ impl DiagnosticItem {
             source: source.to_string(),
             observed_at: now_rfc3339(),
             failure: None,
+            comparison: None,
+            evidence_note: None,
         }
     }
 
@@ -149,6 +177,31 @@ impl DiagnosticItem {
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// 附上一句话的可核对事实（不是解释）。
+    pub fn with_evidence(mut self, note: impl Into<String>) -> Self {
+        self.evidence_note = Some(note.into());
+        self
+    }
+
+    /// 附上并排对照。一致性类结论应当优先用它，而不是把差异写进一段长描述。
+    pub fn with_comparison(
+        mut self,
+        left_label: &str,
+        left: impl Into<String>,
+        right_label: &str,
+        right: impl Into<String>,
+        matched: bool,
+    ) -> Self {
+        self.comparison = Some(Comparison {
+            left_label: left_label.to_string(),
+            left: left.into(),
+            right_label: right_label.to_string(),
+            right: right.into(),
+            matched,
+        });
         self
     }
 }

@@ -11,6 +11,7 @@
 //!   不在 WebView 里做指纹结论（WebView 不是用户的真实浏览器）。
 
 pub mod connectivity;
+pub mod egress;
 pub mod history;
 pub mod local;
 pub mod redact;
@@ -115,4 +116,21 @@ pub fn netdiag_export_report(payload: String, include_full_ip: bool) -> String {
     } else {
         redact::redact_report_text(&payload)
     }
+}
+
+/// 出口观测会访问哪些第三方端点。界面在用户点击**之前**必须把这个列出来。
+#[tauri::command]
+#[specta::specta]
+pub fn netdiag_egress_disclosures() -> Vec<egress::EgressEndpointDisclosure> {
+    egress::endpoint_disclosures()
+}
+
+/// 观测公网出口并与本机配置做一致性核对。
+///
+/// **会把用户公网 IP 暴露给端点方**，必须由用户主动触发，
+/// 且界面已通过 `netdiag_egress_disclosures` 披露过接收方。
+#[tauri::command]
+#[specta::specta]
+pub async fn netdiag_egress(local: local::LocalDiagnostics) -> AppResult<Vec<types::DiagnosticItem>> {
+    Ok(egress::observe(&local.items, CHECK_TIMEOUT).await)
 }

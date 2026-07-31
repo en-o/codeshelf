@@ -96,6 +96,27 @@ pub fn parse_json_or_backup<T: serde::de::DeserializeOwned + Default>(
     }
 }
 
+/// 测试专用：生成**保证唯一**的临时目录名。
+///
+/// 不能用 `temp_dir().join(format!("prefix-{}", process::id()))` ——
+/// 同一个测试二进制里所有测试的 PID 都一样，唯一性完全依赖前缀字符串。
+/// 一旦两个测试不小心用了同一个前缀（`codeshelf-legacy-` 就撞过），
+/// 并行执行时一个正在写、另一个 `remove_dir_all`，表现为**偶发**失败，
+/// 串行跑又完全正常，极难定位。
+///
+/// 这里叠加一个进程内自增计数，从根上排除这类碰撞。
+#[cfg(test)]
+pub fn unique_test_dir(prefix: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    std::env::temp_dir().join(format!(
+        "{}-{}-{}",
+        prefix,
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

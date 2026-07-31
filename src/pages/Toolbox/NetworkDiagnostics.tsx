@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, RefreshCw, Loader2, Play, Trash2, Save, ExternalLink, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, Loader2, Play, Trash2, Save, ExternalLink, Plus, X, Globe, AlertTriangle, HelpCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "@/components/ui";
 import { errMsg } from "@/utils/errMsg";
 import type {
   DiagnosticItem,
+  EgressEndpointDisclosure,
   LocalDiagnostics,
   NetDiagSnapshotSummary,
   ServiceCheck,
@@ -63,6 +64,183 @@ function fmtTime(iso: string): string {
 }
 
 /** 值太长或带换行时单独占一行，短值与标题同行 —— 大多数值只有十几个字符。 */
+const DOT: Record<string, string> = {
+  normal: "bg-green-500",
+  warning: "bg-amber-500",
+  unknown: "bg-gray-300",
+};
+
+/**
+ * 大盘里的紧凑行：`● 名称 ⋯⋯⋯ 值`。
+ *
+ * 值右对齐是关键 —— 一列对齐的值可以竖着扫，比每项一段说明快得多。
+ * 说明文字移到 title，需要时 hover；结论区已经把要点讲过了。
+ */
+function StatRow({ item }: { item: DiagnosticItem }) {
+  const tip = [item.detail, `来源：${item.source}`, `观测时间：${fmtTime(item.observedAt)}`]
+    .filter(Boolean)
+    .join("\n");
+  const c = item.comparison;
+
+  return (
+    <div className="py-1 text-xs cursor-help" title={tip}>
+      <div className="flex items-baseline gap-2">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[item.verdict] ?? DOT.unknown}`} />
+        <span className="text-gray-600 shrink-0">{item.label}</span>
+        <span className="flex-1 border-b border-dotted border-gray-200 translate-y-[-3px]" />
+        <span className="font-mono text-gray-900 text-right max-w-[55%] truncate">
+          {item.value ??
+            (item.verdict === "unknown" ? EVIDENCE_LABEL[item.evidence] ?? item.evidence : "—")}
+        </span>
+      </div>
+
+      {/* 并排对照：「本机配的是 A ↔ 外面看到的是 B」。
+          一致性类结论的价值全在这一行 —— 两边摆一起才看得出对不对得上，
+          写成一段话就得读完才知道。 */}
+      {c && (
+        <div className="mt-0.5 ml-3.5 flex items-baseline gap-1.5 flex-wrap text-[11px]">
+          <span className="text-gray-400">{c.leftLabel}</span>
+          <span className="font-mono text-gray-700">{c.left}</span>
+          <span className={c.matched ? "text-gray-300" : "text-amber-500"}>↔</span>
+          <span className="text-gray-400">{c.rightLabel}</span>
+          <span className={`font-mono ${c.matched ? "text-gray-700" : "text-amber-700"}`}>
+            {c.right}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 大盘卡片：标题 + 状态点 + 一列紧凑行 */
+function StatCard({
+  title,
+  items,
+  action,
+}: {
+  title: string;
+  items: DiagnosticItem[];
+  action?: React.ReactNode;
+}) {
+  const worst = items.some((i) => i.verdict === "warning")
+    ? "warning"
+    : items.some((i) => i.verdict === "unknown")
+      ? "unknown"
+      : "normal";
+  return (
+    <div className="border border-gray-200 rounded-lg bg-white p-3 flex flex-col">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-xs font-semibold text-gray-800">{title}</span>
+        <span className={`w-2 h-2 rounded-full ${DOT[worst]}`} />
+        <div className="ml-auto">{action}</div>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-xs text-gray-400 py-1">未检测</p>
+      ) : (
+        <div className="divide-y divide-gray-50">
+          {items.map((it, i) => (
+            <StatRow key={`${it.id}-${i}`} item={it} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 四维覆盖雷达。
+ *
+ * **轴的含义是「该维度的检测完成度」，不是风险分。**
+ * spec 明令首版不提供「纯净度 / 欺诈风险 / 账号安全」总分，理由是那些权重
+ * 手写、无样本校准，叫「安全分」属于过度承诺。所以这里的轴画的是事实：
+ * 这个维度有多少项拿到了新鲜证据。未知项**不会**贡献满分 —— 它们直接把轴拉低，
+ * 正好对上 spec「未知项不能贡献满分」那条。
+ *
+ * 也因此**不显示综合分**：只标出每维的「已观测/总数」和问题数。
+ */
+export interface RadarAxis {
+  key: string;
+  label: string;
+  total: number;
+  observed: number;
+  problems: number;
+}
+
+export function CoverageRadar({ axes }: { axes: RadarAxis[] }) {
+  const C = 130;
+  const CY = 118;
+  const R = 74;
+  const n = axes.length || 1;
+  const angleFor = (i: number) => (-90 + (i * 360) / n) * (Math.PI / 180);
+  const pt = (i: number, r: number) => ({
+    x: C + r * Math.cos(angleFor(i)),
+    y: CY + r * Math.sin(angleFor(i)),
+  });
+
+  // 轴长 = 覆盖率；一项都没测的维度收在中心（视觉上就是"这块是空的"）
+  const ratio = (a: RadarAxis) => (a.total === 0 ? 0 : a.observed / a.total);
+  const verts = axes.map((a, i) => pt(i, Math.max(4, ratio(a) * R)));
+  const polygon = verts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const anyProblem = axes.some((a) => a.problems > 0);
+
+  return (
+    <svg viewBox="0 0 260 250" className="w-full h-auto overflow-visible" role="img" aria-label="检测覆盖雷达">
+      {[0.33, 0.66, 1].map((r) => (
+        <circle key={r} cx={C} cy={CY} r={R * r} fill="none" stroke="#e5e7eb" strokeWidth="1" />
+      ))}
+      {axes.map((a, i) => {
+        const e = pt(i, R);
+        return <line key={a.key} x1={C} y1={CY} x2={e.x} y2={e.y} stroke="#e5e7eb" strokeWidth="1" />;
+      })}
+      <polygon
+        points={polygon}
+        fill={anyProblem ? "rgba(245,158,11,0.16)" : "rgba(34,197,94,0.16)"}
+        stroke={anyProblem ? "#f59e0b" : "#22c55e"}
+        strokeWidth="1.5"
+      />
+      {axes.map((a, i) => {
+        const v = verts[i];
+        return (
+          <circle
+            key={a.key}
+            cx={v.x}
+            cy={v.y}
+            r="3"
+            fill={a.problems > 0 ? "#f59e0b" : a.total === 0 ? "#d1d5db" : "#22c55e"}
+          />
+        );
+      })}
+      {axes.map((a, i) => {
+        const l = pt(i, R + 30);
+        const anchor = i === 1 ? "start" : i === 3 ? "end" : "middle";
+        return (
+          <g key={a.key}>
+            <text
+              x={l.x}
+              y={l.y}
+              textAnchor={anchor}
+              className={a.problems > 0 ? "fill-amber-700" : "fill-gray-600"}
+              fontSize="11"
+            >
+              {a.label}
+            </text>
+            <text
+              x={l.x}
+              y={l.y + 13}
+              textAnchor={anchor}
+              className={a.problems > 0 ? "fill-amber-600" : "fill-gray-400"}
+              fontSize="10"
+            >
+              {a.total === 0 ? "未检测" : `${a.observed}/${a.total}`}
+              {a.problems > 0 ? ` · ${a.problems} 待核` : ""}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function valueNeedsOwnLine(v: string): boolean {
   return v.includes("\n") || v.length > 48;
 }
@@ -118,6 +296,45 @@ function ItemRow({ item, nested = false }: { item: DiagnosticItem; nested?: bool
   );
 }
 
+/**
+ * 可折叠分区。明细默认收起 —— 结论已经在顶部给了，
+ * 展开是为了「我想自己核对一下依据」，不是首屏必读。
+ */
+function Section({
+  title,
+  count,
+  action,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  count?: number;
+  action?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-800 hover:text-gray-900"
+        >
+          <ChevronRight
+            size={14}
+            className={`text-gray-400 transition-transform ${open ? "rotate-90" : ""}`}
+          />
+          {title}
+          {count !== undefined && <span className="text-xs text-gray-400">{count}</span>}
+        </button>
+        <div className="ml-auto flex items-center gap-2">{action}</div>
+      </div>
+      {open && <div className="p-3 space-y-2">{children}</div>}
+    </section>
+  );
+}
+
 export function NetworkDiagnostics({ onBack }: Props) {
   const [local, setLocal] = useState<LocalDiagnostics | null>(null);
   const [localLoading, setLocalLoading] = useState(false);
@@ -125,6 +342,9 @@ export function NetworkDiagnostics({ onBack }: Props) {
   const [checks, setChecks] = useState<ServiceCheck[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [snapshots, setSnapshots] = useState<NetDiagSnapshotSummary[]>([]);
+  const [egress, setEgress] = useState<DiagnosticItem[] | null>(null);
+  const [egressLoading, setEgressLoading] = useState(false);
+  const [disclosures, setDisclosures] = useState<EgressEndpointDisclosure[]>([]);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
 
@@ -152,8 +372,22 @@ export function NetworkDiagnostics({ onBack }: Props) {
     // 联网的服务连通性检测必须由用户点按钮 —— spec：进入工具页不自动访问第三方服务。
     runLocal();
     invoke<ServiceTarget[]>("netdiag_default_targets").then(setTargets).catch(() => {});
+    // 只是取「会访问哪些域名」的清单，本身不发任何外部请求
+    invoke<EgressEndpointDisclosure[]>("netdiag_egress_disclosures").then(setDisclosures).catch(() => {});
     loadSnapshots();
   }, [runLocal, loadSnapshots]);
+
+  async function runEgress() {
+    if (!local) return;
+    setEgressLoading(true);
+    try {
+      setEgress(await invoke<DiagnosticItem[]>("netdiag_egress", { local }));
+    } catch (e) {
+      showToast("error", "出口观测失败", errMsg(e, "未知原因"));
+    } finally {
+      setEgressLoading(false);
+    }
+  }
 
   async function runChecks() {
     if (targets.length === 0) return;
@@ -174,7 +408,7 @@ export function NetworkDiagnostics({ onBack }: Props) {
     try {
       await invoke("netdiag_save_snapshot", {
         label: label.trim() || fmtTime(local.collectedAt),
-        payload: JSON.stringify({ local, checks }),
+        payload: JSON.stringify({ local, egress, checks }),
       });
       showToast("success", "已保存快照", "可在下方历史里对比切换网络前后的差异");
       loadSnapshots();
@@ -196,10 +430,118 @@ export function NetworkDiagnostics({ onBack }: Props) {
     setNewUrl("");
   }
 
+  /** 一键跑完三段：用户要的是"现在到底怎么样"，不是分三次点。 */
+  async function runAll() {
+    await runLocal();
+    // runLocal 里 setLocal 是异步的，这里直接取一份新的传给出口观测
+    let fresh: LocalDiagnostics | null = null;
+    try {
+      fresh = await invoke<LocalDiagnostics>("netdiag_local");
+      setLocal(fresh);
+    } catch {
+      /* runLocal 已经提示过了 */
+    }
+    if (fresh) {
+      setEgressLoading(true);
+      try {
+        setEgress(await invoke<DiagnosticItem[]>("netdiag_egress", { local: fresh }));
+      } catch (e) {
+        showToast("error", "出口观测失败", errMsg(e, "未知原因"));
+      } finally {
+        setEgressLoading(false);
+      }
+    }
+    await runChecks();
+  }
+
+  const busy = localLoading || egressLoading || checking;
+
+  /** 出口摘要：打开这个工具最想先看到的东西。 */
+  const egressSummary = useMemo(() => {
+    const pick = (id: string) => egress?.find((i) => i.id === id);
+    return { v4: pick("egress.ipv4"), v6: pick("egress.ipv6"), geo: pick("egress.geo") };
+  }, [egress]);
+
+  /** 从 IPv4 那条的说明里取 Cloudflare 接入机房代码，粗略反映出口地理位置。 */
+  const colo = useMemo(() => {
+    const d = egressSummary.v4?.detail ?? "";
+    const m = d.match(/接入机房：([A-Z]{3})/);
+    return m ? m[1] : null;
+  }, [egressSummary]);
+
+  /**
+   * 四个维度。按**用户关心的问题**分，不是按数据来源分 ——
+   * 「本机 / 出口 / 连通性」是实现视角，用户想的是「出口是谁、链路怎么配的、
+   * 两边对不对得上、服务通不通」。
+   */
+  const dims = useMemo(() => {
+    const eg = egress ?? [];
+    const svc = (checks ?? []).flatMap((c) => c.items);
+    return {
+      // egress.ipv4 / geo 已在上方大卡里以主视觉展示，明细卡不再重复
+      egress: eg.filter((i) => i.id.startsWith("egress.")),
+      local: local?.items ?? [],
+      cross: eg.filter((i) => i.id.startsWith("cross.")),
+      service: svc,
+    };
+  }, [local, egress, checks]);
+
+  const axes: RadarAxis[] = useMemo(() => {
+    const mk = (key: string, label: string, items: DiagnosticItem[]) => ({
+      key,
+      label,
+      total: items.length,
+      observed: items.filter((i) => i.evidence === "observed" || i.evidence === "no_hit").length,
+      problems: items.filter((i) => i.verdict === "warning" || i.verdict === "unknown").length,
+    });
+    return [
+      mk("egress", "公网出口", dims.egress),
+      mk("cross", "一致性核对", dims.cross),
+      mk("service", "开发服务", dims.service),
+      mk("local", "本机链路", dims.local),
+    ];
+  }, [dims]);
+
+  /**
+   * 结论标题：**点出是哪个维度出了问题**，而不是只报一个数量。
+   *
+   * 「发现 2 处需要核对」等于把定位工作又推回给用户；
+   * 「出口一致性存在矛盾」才是一句有信息量的结论。
+   * 取问题最集中的那个维度命名，与雷达图上塌陷的轴对应得上。
+   */
+  const headline = useMemo(() => {
+    const withProblems = axes.filter((a) => a.problems > 0);
+    if (withProblems.length === 0) return null;
+    const worst = withProblems.reduce((a, b) => (b.problems > a.problems ? b : a));
+    const others = withProblems.length - 1;
+    return {
+      title: others > 0 ? `${worst.label}等 ${withProblems.length} 个维度存在矛盾` : `${worst.label}存在矛盾`,
+      sub:
+        worst.key === "cross"
+          ? "本机配置与外部实际观测到的出口对不上"
+          : worst.key === "egress"
+            ? "公网出口未能完整确认"
+            : worst.key === "service"
+              ? "部分开发服务的网络路径存在问题"
+              : "本机链路配置存在需要核对的项",
+    };
+  }, [axes]);
+
+  /** 所有需要核对 / 未知的项，聚到顶部 —— 这才是用户要找的东西。 */
+  const problems = useMemo(() => {
+    const all: DiagnosticItem[] = [
+      ...(local?.items ?? []),
+      ...(egress ?? []),
+      ...(checks ?? []).flatMap((c) => c.items),
+    ];
+    return all.filter((i) => i.verdict === "warning" || i.verdict === "unknown");
+  }, [local, egress, checks]);
+
   // 覆盖率：spec 要求首版用「问题清单 + 状态 + 检测覆盖率」代替总分
   const coverage = useMemo(() => {
     const all: DiagnosticItem[] = [
       ...(local?.items ?? []),
+      ...(egress ?? []),
       ...(checks ?? []).flatMap((c) => c.items),
     ];
     const total = all.length;
@@ -207,7 +549,7 @@ export function NetworkDiagnostics({ onBack }: Props) {
     const warning = all.filter((i) => i.verdict === "warning").length;
     const unknown = all.filter((i) => i.verdict === "unknown").length;
     return { total, observed, warning, unknown };
-  }, [local, checks]);
+  }, [local, egress, checks]);
 
   return (
     <div className="flex flex-col h-full">
@@ -218,72 +560,228 @@ export function NetworkDiagnostics({ onBack }: Props) {
         <div className="flex-1 min-w-0">
           <h2 className="text-base font-semibold text-gray-900">网络环境诊断</h2>
           <p className="text-xs text-gray-500">
-            本机网络配置与开发服务连通性排查。所有检测均为只读，不会修改任何系统设置。
+            切换代理 / VPN 后，核对本机配置与外部实际看到的出口是否一致。检测均为只读。
           </p>
         </div>
+        {/* 主操作：绝大多数场景就是"跑一遍看看现在怎么样"，
+            不该逼用户分三次点三个分区的按钮 */}
+        <button
+          onClick={saveSnapshot}
+          disabled={!local}
+          title="保存当前结果，用于对比切换网络前后的差异"
+          className="shrink-0 inline-flex items-center px-2.5 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+        >
+          <Save size={13} />
+          <span className="ml-1">存快照</span>
+        </button>
+        <button
+          onClick={runAll}
+          disabled={busy}
+          className="shrink-0 inline-flex items-center px-3 py-2 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50 transition-colors"
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+          <span className="ml-1.5">完整检测</span>
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-5">
-        {/* 覆盖率概览：刻意不给总分 */}
-        {coverage.total > 0 && (
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            <span className="px-2 py-1 rounded bg-gray-100 text-gray-700">
-              已观测 {coverage.observed}/{coverage.total}
-            </span>
-            {coverage.warning > 0 && (
-              <span className="px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">
-                需核对 {coverage.warning}
-              </span>
-            )}
-            {coverage.unknown > 0 && (
-              <span className="px-2 py-1 rounded bg-gray-100 text-gray-600 border border-gray-200">
-                未知 {coverage.unknown}
-              </span>
-            )}
-            {/* 独立成句而不是和徽章挤一行 —— 它是一条说明，不是一个指标 */}
-            <span className="w-full sm:w-auto sm:ml-2 text-[11px] text-gray-400">
-              不提供总风险分：本地检测覆盖不到公网出口与 DNS 递归路径
-            </span>
+        {/* ══ 第一行：雷达概览 + 结论 ══ */}
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-3">
+          <div className="border border-gray-200 rounded-lg bg-white p-3 flex items-center justify-center">
+            <CoverageRadar axes={axes} />
           </div>
-        )}
 
-        {/* 本机诊断 */}
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-sm font-semibold text-gray-800">本机网络</h3>
-              {/* 同一次检测里每项时间都一样，放这里一次即可 */}
-              {local && (
-                <span className="text-[11px] text-gray-400">
-                  检测于 {fmtTime(local.collectedAt)}
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button onClick={runLocal} disabled={localLoading} className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
-                {localLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                <span className="ml-1">重新检测</span>
-              </button>
-              <button onClick={saveSnapshot} disabled={!local} className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
-                <Save size={13} />
-                <span className="ml-1">保存快照</span>
-              </button>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            {local?.items.map((it) => <ItemRow key={it.id} item={it} />)}
-          </div>
-        </section>
+          <div className="border border-gray-200 rounded-lg bg-white p-4 flex flex-col">
+            {coverage.total === 0 ? (
+              <div className="m-auto text-center">
+                <p className="text-sm text-gray-500">尚未检测</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  点右上角「完整检测」，核对本机配置与外部实际看到的出口
+                </p>
+              </div>
+            ) : problems.length > 0 ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {headline?.title ?? "存在需要核对的项"}
+                  </h3>
+                </div>
+                <p className="text-xs text-gray-500 mt-1 ml-[18px]">{headline?.sub}</p>
 
-        {/* 开发服务连通性 */}
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800">开发服务连通性</h3>
-            <button onClick={runChecks} disabled={checking} className="inline-flex items-center px-3 py-1.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50 transition-colors">
-              {checking ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-              <span className="ml-1">开始检测</span>
+                <div className="flex items-baseline justify-between mt-3 pt-3 border-t border-gray-100">
+                  <span className="text-[11px] text-gray-400">核对项</span>
+                  <span className="text-[11px] text-gray-300">{problems.length}</span>
+                </div>
+
+                <div className="mt-2 space-y-2.5 overflow-y-auto">
+                  {problems.map((it) => {
+                    // 两级：有对照且明确不一致 = 确证的矛盾；其余是证据不足
+                    const solid = it.verdict === "warning";
+                    return (
+                      <div key={`p-${it.id}`} className="flex gap-2.5">
+                        <span
+                          className={`shrink-0 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded h-fit mt-0.5 ${
+                            solid
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-gray-100 text-gray-500"
+                          }`}
+                        >
+                          {solid ? <AlertTriangle size={9} /> : <HelpCircle size={9} />}
+                          {solid ? "不一致" : "未知"}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-sm text-gray-800">{it.label}</div>
+                          {/* 具体、可核对的事实优先；解释性文字放 hover */}
+                          <div
+                            className="text-xs text-gray-500 mt-0.5"
+                            title={it.detail ?? undefined}
+                          >
+                            {it.evidenceNote ??
+                              (it.comparison
+                                ? `${it.comparison.leftLabel} ${it.comparison.left} ↔ ${it.comparison.rightLabel} ${it.comparison.right}`
+                                : it.detail)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="m-auto text-center">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                  <h3 className="text-base font-semibold text-gray-900">未发现异常</h3>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  已检测 {coverage.total} 项。这只代表本次没有命中已知问题
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ══ 第二行：公网出口（核心事实，字号最大）══ */}
+        <div className="border border-gray-200 rounded-lg bg-white p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Globe size={14} className="text-gray-500" />
+            <span className="text-xs font-semibold text-gray-800">公网出口</span>
+            <span className="text-[11px] text-gray-400">外部服务实际看到的你</span>
+            <button
+              onClick={runEgress}
+              disabled={egressLoading || !local}
+              className={`ml-auto ${"inline-flex items-center px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"}`}
+            >
+              {egressLoading ? <Loader2 size={12} className="animate-spin" /> : <Globe size={12} />}
+              <span className="ml-1">观测</span>
             </button>
           </div>
+
+          {egressSummary.v4?.value || egressSummary.v6?.value ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-4">
+              {/* 出口 IP 是这张卡的主角，字号明显大于其余 */}
+              <div>
+                <div className="text-[11px] text-gray-400 mb-0.5">出口 IP</div>
+                <div className="text-2xl font-mono font-semibold text-gray-900 leading-tight break-all">
+                  {egressSummary.v4?.value ?? "—"}
+                </div>
+                {colo && (
+                  <span className="inline-block mt-1.5 text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                    接入机房 {colo}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <div className="text-[11px] text-gray-400">归属地</div>
+                  <div className="text-sm text-gray-800">
+                    {egressSummary.geo?.value ?? "—"}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] text-gray-400">出口 IPv6</div>
+                  <div className="text-sm font-mono text-gray-800 break-all">
+                    {egressSummary.v6?.value ?? "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 min-w-0">
+                <div>
+                  <div className="text-[11px] text-gray-400">本机代理</div>
+                  <div className="text-sm text-gray-800 break-all">
+                    {local?.items.find((i) => i.id === "local.system_proxy")?.value ?? "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-gray-400">系统 DNS</div>
+                  <div className="text-sm font-mono text-gray-800 break-all">
+                    {local?.items.find((i) => i.id === "local.dns")?.value ?? "—"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">尚未观测</p>
+          )}
+
+          {/* 逐项披露接收方。spec：不能只笼统提示「需要联网」。
+              放在触发按钮同一张卡里，保证用户点之前一定看得到。 */}
+          <details className="mt-3 group">
+            <summary className="text-[11px] text-gray-400 cursor-pointer hover:text-gray-600 list-none">
+              ▸ 观测会访问 {disclosures.length} 个第三方端点，它们会看到你的公网 IP
+            </summary>
+            <ul className="mt-1.5 space-y-0.5 text-[11px] text-gray-500 pl-3">
+              {disclosures.map((d) => (
+                <li key={d.host} className="flex gap-2">
+                  <span className="font-mono text-gray-600 shrink-0">{d.host}</span>
+                  <span className="text-gray-300">·</span>
+                  <span>{d.purpose}（{d.operator}）</span>
+                </li>
+              ))}
+              <li className="text-gray-400 pt-0.5">
+                只做地址回显，不查询商业 IP 情报库；导出报告时公网 IP 默认脱敏。
+              </li>
+            </ul>
+          </details>
+        </div>
+
+        {/* ══ 第三行：四维明细网格 ══ */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <StatCard title="一致性核对" items={dims.cross} />
+          <StatCard
+            title="本机链路"
+            items={dims.local}
+            action={
+              <button onClick={runLocal} disabled={localLoading} className="inline-flex items-center px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
+                {localLoading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              </button>
+            }
+          />
+          <StatCard
+            title="开发服务连通性"
+            items={dims.service}
+            action={
+              <button onClick={runChecks} disabled={checking} className="inline-flex items-center px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
+                {checking ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+              </button>
+            }
+          />
+        </div>
+
+        {/* 开发服务连通性 */}
+        <Section
+          title="开发服务连通性 · 分层明细与目标配置"
+          count={checks?.length ?? targets.length}
+          action={
+            <button onClick={runChecks} disabled={checking} className="inline-flex items-center px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-50 transition-colors">
+              {checking ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              <span className="ml-1">检测</span>
+            </button>
+          }
+        >
           <p className="text-xs text-gray-500 max-w-3xl leading-relaxed">
             会向下列地址发起真实 HTTPS 请求，并<strong className="font-medium text-gray-700">遵循</strong>
             当前系统与环境变量代理 —— 测出来的就是 npm / cargo / git 会遇到的情况，不会自动绕过代理。
@@ -319,8 +817,8 @@ export function NetworkDiagnostics({ onBack }: Props) {
               placeholder="https://..."
               className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 flex-[2]"
             />
-            <button onClick={addTarget} className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
-              <Plus size={13} />
+            <button onClick={addTarget} className="inline-flex items-center px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-50 transition-colors">
+              <Plus size={12} />
             </button>
           </div>
 
@@ -331,15 +829,12 @@ export function NetworkDiagnostics({ onBack }: Props) {
                 <span className="text-[11px] text-gray-400 font-mono truncate flex-1 text-right">
                   {c.url}
                 </span>
-                {/* 各目标的检测时间不同，这里显示有信息量（本机那组则完全相同，提到分区标题） */}
                 {c.items[0] && (
                   <span className="text-[11px] text-gray-400 shrink-0">
                     {fmtTime(c.items[0].observedAt)}
                   </span>
                 )}
               </div>
-              {/* 三层结果用分隔线而不是各自描边：它们属于同一个目标，
-                  嵌套边框会让层级看起来比实际更深 */}
               <div className="divide-y divide-gray-100">
                 {c.items.map((it, i) => (
                   <ItemRow key={`${c.url}-${it.id}-${i}`} item={it} nested />
@@ -347,38 +842,40 @@ export function NetworkDiagnostics({ onBack }: Props) {
               </div>
             </div>
           ))}
-        </section>
+        </Section>
 
         {/* 浏览器深度检测入口：固定 HTTPS 地址 */}
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold text-gray-800">浏览器环境检测</h3>
+        <Section title="浏览器环境检测">
           <p className="text-xs text-gray-500 leading-relaxed max-w-3xl">
-            公网出口 IP、WebRTC、双栈出口这类检测必须在你<strong>真正使用的浏览器</strong>里做。
-            CodeShelf 内嵌的 WebView 有自己的 User-Agent 和渲染环境，
-            在这里测出来的结果不能代表你的 Chrome / Firefox / Edge。
+            Canvas / WebGL / WebRTC 这类<strong className="font-medium text-gray-700">浏览器指纹</strong>信号必须在你
+            <strong className="font-medium text-gray-700">真正使用的浏览器</strong>里采集。
+            CodeShelf 内嵌 WebView 有自己的 UA 和渲染环境，在这里测出来的不能代表你的
+            Chrome / Firefox / Edge。
             <br />
-            CodeShelf 自有探针尚未建设，因此这一项当前为「不支持」，而不是「正常」。
+            注意：出口 IP 和双栈这类<strong className="font-medium text-gray-700">网络层事实</strong>不受此限制，上面的「公网出口」分区
+            已经从 Rust 侧直接验证过了，比浏览器里用 WebRTC 推断更准。
           </p>
           <button
             onClick={async () => {
               try {
-                await invoke("open_url", { url: "https://ipinfo.io/json" });
+                await invoke("open_url", { url: "https://1.1.1.1/cdn-cgi/trace" });
               } catch (e) {
                 showToast("error", "打开失败", errMsg(e, "未知原因"));
               }
             }}
-            className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            className="inline-flex items-center px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-50 transition-colors"
           >
-            <ExternalLink size={13} />
-            <span className="ml-1">在默认浏览器中查看出口 IP</span>
+            <ExternalLink size={12} />
+            <span className="ml-1">在默认浏览器中打开</span>
           </button>
-        </section>
+        </Section>
 
         {/* 历史 */}
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800">诊断历史</h3>
-            {snapshots.length > 0 && (
+        <Section
+          title="诊断历史"
+          count={snapshots.length}
+          action={
+            snapshots.length > 0 ? (
               <button
                 onClick={async () => {
                   if (!window.confirm("清空全部诊断历史？")) return;
@@ -389,13 +886,14 @@ export function NetworkDiagnostics({ onBack }: Props) {
                     showToast("error", "清空失败", errMsg(e, "未知原因"));
                   }
                 }}
-                className="inline-flex items-center px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                className="inline-flex items-center px-2.5 py-1 text-xs border border-gray-200 rounded-lg hover:bg-white disabled:opacity-50 transition-colors"
               >
-                <Trash2 size={13} />
-                <span className="ml-1">全部清除</span>
+                <Trash2 size={12} />
+                <span className="ml-1">清空</span>
               </button>
-            )}
-          </div>
+            ) : undefined
+          }
+        >
           <p className="text-xs text-gray-500 max-w-3xl">
             仅保存在本机，最多保留 20 条。切换 VPN / 网络前后各存一次，可对比变化。
           </p>
@@ -403,18 +901,18 @@ export function NetworkDiagnostics({ onBack }: Props) {
             <p className="text-xs text-gray-400">暂无历史</p>
           ) : (
             <div className="space-y-1">
-              {snapshots.map((s) => (
+              {snapshots.map((sn) => (
                 <div
-                  key={s.id}
+                  key={sn.id}
                   className="flex items-center justify-between px-3 py-2 border border-gray-200 rounded-lg text-xs"
                 >
-                  <span className="text-gray-800">{s.label}</span>
+                  <span className="text-gray-800">{sn.label}</span>
                   <div className="flex items-center gap-3">
-                    <span className="text-gray-400">{fmtTime(s.createdAt)}</span>
+                    <span className="text-gray-400">{fmtTime(sn.createdAt)}</span>
                     <button
                       onClick={async () => {
                         try {
-                          await invoke("netdiag_delete_snapshot", { id: s.id });
+                          await invoke("netdiag_delete_snapshot", { id: sn.id });
                           loadSnapshots();
                         } catch (e) {
                           showToast("error", "删除失败", errMsg(e, "未知原因"));
@@ -430,7 +928,7 @@ export function NetworkDiagnostics({ onBack }: Props) {
               ))}
             </div>
           )}
-        </section>
+        </Section>
       </div>
     </div>
   );
