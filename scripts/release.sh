@@ -34,8 +34,10 @@ fi
 
 VERSION=$1
 
-# 验证版本号格式 (x.y.z)
-if ! [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+# 验证版本号格式 (x.y.z)。
+# 用 grep -E 而不是 `[[ =~ ]]`：后者是 bashism，`sh scripts/release.sh` 会解析失败。
+# 规则与 scripts/release.bat 保持一致。
+if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     error "版本号格式无效: $VERSION (应为 x.y.z 格式，如 0.2.0)"
 fi
 
@@ -146,13 +148,17 @@ fi
 info "更新 src-tauri/Cargo.toml..."
 if [ -f "src-tauri/Cargo.toml" ]; then
     # 使用 sed 更新 version（只更新 [package] 下的第一个 version）
-    if [[ "$OSTYPE" == "darwin"* ]]; then
+    # `case` 而不是 `[[ == pattern ]]`：同样是为了能被 POSIX sh 解析
+    case "$(uname -s)" in
+      Darwin)
         # macOS 的 sed 需要 -i ''
         sed -i '' "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-    else
+        ;;
+      *)
         # Linux/WSL 的 sed
         sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-    fi
+        ;;
+    esac
     success "src-tauri/Cargo.toml -> $VERSION"
 else
     error "找不到 src-tauri/Cargo.toml"
@@ -173,15 +179,27 @@ echo ""
 info "版本号更新完成，开始 Git 操作..."
 
 # 6. Git add —— 只有这五个版本文件
-VERSION_FILES=(package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock)
+# 换行分隔的普通变量，不用数组 —— 数组赋值 `X=(a b)` 也是 bashism
+VERSION_FILES='package.json
+package-lock.json
+src-tauri/tauri.conf.json
+src-tauri/Cargo.toml
+src-tauri/Cargo.lock'
+
 info "暂存更改..."
-git add "${VERSION_FILES[@]}"
+# shellcheck disable=SC2086  # 这里正是要按换行/空白拆成多个参数
+git add $VERSION_FILES
 
 # 提交内容必须**可预测**：因为开工前已确认工作树干净，此刻 staged 的应当
 # 恰好是这五个文件。多出任何一个都说明中途有别的东西混进来了，停下来。
 STAGED=$(git diff --cached --name-only | sort)
-EXPECTED=$(printf '%s\n' "${VERSION_FILES[@]}" | sort)
-UNEXPECTED=$(comm -23 <(echo "$STAGED") <(echo "$EXPECTED"))
+EXPECTED=$(printf '%s\n' "$VERSION_FILES" | sort)
+# 用 grep 而不是 `comm <(…) <(…)`：进程替换是 bashism，
+# 脚本一旦被 `sh scripts/release.sh` 这样调用就会在**解析期**报
+# 「syntax error near unexpected token `('」，连第一行都跑不到。
+# `grep -vxF` 的语义等价：取 STAGED 中不与 EXPECTED 任何一行完全相同的行。
+# grep 无匹配时返回 1，配合 set -e 会误退出，所以补 `|| true`。
+UNEXPECTED=$(printf '%s\n' "$STAGED" | grep -vxF "$EXPECTED" || true)
 if [ -n "$UNEXPECTED" ]; then
     echo ""
     echo "$UNEXPECTED"
