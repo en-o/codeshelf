@@ -415,6 +415,77 @@ async takePendingExternalProjects() : Promise<ExternalAddEvent[]> {
     return await TAURI_INVOKE("take_pending_external_projects");
 },
 /**
+ * 跑一次本机诊断。
+ * 
+ * 纯本地操作，**不产生任何远程请求** —— 用户点开工具页时可以先跑这个，
+ * 需要联网的检测由 `netdiag_check_services` 单独触发（spec：进入工具页不自动访问第三方服务）。
+ */
+async netdiagLocal() : Promise<Result<LocalDiagnostics, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_local") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 内置的开发服务列表，供前端展示与合并用户自定义项。
+ */
+async netdiagDefaultTargets() : Promise<ServiceTarget[]> {
+    return await TAURI_INVOKE("netdiag_default_targets");
+},
+/**
+ * 检查开发服务连通性。**会产生真实网络请求**，必须由用户主动触发。
+ */
+async netdiagCheckServices(targets: ServiceTarget[]) : Promise<Result<ServiceCheck[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_check_services", { targets }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async netdiagSaveSnapshot(label: string, payload: string) : Promise<Result<NetDiagSnapshot, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_save_snapshot", { label, payload }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async netdiagListSnapshots() : Promise<Result<NetDiagSnapshotSummary[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_list_snapshots") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async netdiagGetSnapshot(id: string) : Promise<Result<NetDiagSnapshot, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_get_snapshot", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async netdiagDeleteSnapshot(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_delete_snapshot", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async netdiagClearSnapshots() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("netdiag_clear_snapshots") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * 扫描已知的历史嵌套层级，返回**确实有数据**的候选目录。
  * 
  * 只在 Windows 上有意义；其它平台返回空列表（macOS 用系统数据目录，
@@ -3216,6 +3287,49 @@ export type DashboardStats = { total_projects: number; today_commits: number; we
  */
 export type DataFormat = "text" | "hex" | "base64"
 /**
+ * 一条诊断结论。
+ * 
+ * 每项都带**数据来源**和**观测时间**，对应 spec「每个结论展示数据来源、
+ * 检测时间和判断依据，避免只给一个不可解释的分数」。
+ */
+export type DiagnosticItem = { 
+/**
+ * 稳定标识，前端据此做差异对比
+ */
+id: string; 
+/**
+ * 展示名
+ */
+label: string; 
+/**
+ * 采集状态
+ */
+evidence: EvidenceStatus; 
+/**
+ * 解释状态（必须由 `Verdict::from_evidence` 得出）
+ */
+verdict: Verdict; 
+/**
+ * 观测到的值；未观测到时为 None（**不要**用空串冒充成功）
+ */
+value: string | null; 
+/**
+ * 判断依据 / 补充说明
+ */
+detail: string | null; 
+/**
+ * 数据来源，例如 "本机路由表"、"系统 DNS 配置"
+ */
+source: string; 
+/**
+ * 观测时间 RFC3339
+ */
+observedAt: string; 
+/**
+ * 失败时的分类
+ */
+failure: FailureKind | null }
+/**
  * 局域网中主动发现到的其它桌面端服务
  */
 export type DiscoveredDevice = { deviceId: string; displayName: string; host: string; port: number; url: string; lastSeenAt: number }
@@ -3253,6 +3367,38 @@ export type EditorInput = { name: string; path: string; icon: string | null; is_
  */
 export type EnvType = "host" | "wsl"
 /**
+ * 执行与证据状态：这次**采集**发生了什么。
+ */
+export type EvidenceStatus = 
+/**
+ * 用户尚未开始，或该项尚未执行
+ */
+"not_checked" | 
+/**
+ * 本次成功获得可解释的新数据
+ */
+"observed" | 
+/**
+ * 名单类数据源查询成功且明确未命中
+ */
+"no_hit" | 
+/**
+ * 只有超过有效期的缓存数据
+ */
+"stale" | 
+/**
+ * 当前平台/部署没有这项能力（例如未建设 DNS 探针）
+ */
+"unsupported" | 
+/**
+ * 已配置的外部数据源暂时不可用
+ */
+"unavailable" | 
+/**
+ * 本应可执行，但网络、权限、解析或协议失败
+ */
+"failed"
+/**
  * 「外部添加项目」的结果事件。
  * 
  * 冷启动时后端在 setup 阶段就可能把项目加完并发事件，而前端 React 的
@@ -3261,6 +3407,38 @@ export type EnvType = "host" | "wsl"
  * 所以：前端就绪之前**只入队不发事件**，就绪时由前端一次性取走。
  */
 export type ExternalAddEvent = { kind: "added"; payload: AddProjectByPathResult } | { kind: "failed"; payload: string }
+/**
+ * 失败原因分类。spec 要求区分离线、DNS 失败、TLS 失败、代理拒绝、超时。
+ */
+export type FailureKind = 
+/**
+ * 完全离线 / 网络不可达
+ */
+"offline" | 
+/**
+ * 域名解析失败
+ */
+"dns_failure" | 
+/**
+ * TCP 连接被拒绝或不可达
+ */
+"connection_refused" | 
+/**
+ * TLS 握手失败（证书过期、主机名不匹配、协议不兼容等）
+ */
+"tls_failure" | 
+/**
+ * 代理拒绝或代理本身不可用
+ */
+"proxy_rejected" | 
+/**
+ * 超时
+ */
+"timeout" | 
+/**
+ * 其它（原因见 detail）
+ */
+"other"
 /**
  * 转发规则
  */
@@ -3336,6 +3514,18 @@ export type LlmProxyHeader = { name: string; value: string }
 export type LlmProxyRequest = { method: string; url: string; headers: LlmProxyHeader[]; body: string | null }
 export type LlmProxyResponse = { status: number; status_text: string; headers: LlmProxyHeader[]; body: string }
 /**
+ * 本机诊断结果。
+ */
+export type LocalDiagnostics = { items: DiagnosticItem[]; 
+/**
+ * 采集时间 RFC3339
+ */
+collectedAt: string; 
+/**
+ * 平台标识，用于历史对比时提示"换了机器"
+ */
+platform: string }
+/**
  * 供前端"以 MCP 客户端身份"调用本地网关时使用：
  * - url：HTTP 端点（含 scheme/host/port），如果网关未运行则不返回
  * - api_key：从 mcp_gateway_keys 里挑第一个有效 key。若 keys 为空（网关无鉴权）则为 None
@@ -3348,6 +3538,22 @@ export type MentionFileEntry = { path: string; isDir: boolean }
  * 消息方向
  */
 export type MessageDirection = "sent" | "received"
+/**
+ * 一次完整诊断的快照。
+ */
+export type NetDiagSnapshot = { id: string; 
+/**
+ * 用户可编辑的备注，例如「开 VPN 前」
+ */
+label: string; createdAt: string; 
+/**
+ * 完整结果的 JSON（LocalDiagnostics + Vec<ServiceCheck>）
+ */
+payload: string }
+/**
+ * 列表项：不带 payload，避免列表页把所有快照全量读出来。
+ */
+export type NetDiagSnapshotSummary = { id: string; label: string; createdAt: string }
 /**
  * 消息记录
  */
@@ -3574,9 +3780,25 @@ proxies: ProxyConfig[] | null;
  */
 exposeLan?: boolean | null }
 /**
+ * 单个目标的检查结果：四层各一条，便于定位卡在哪一步。
+ */
+export type ServiceCheck = { name: string; url: string; items: DiagnosticItem[] }
+/**
  * 服务运行状态
  */
 export type ServiceStatus = { running: boolean; port: number; urls: NetworkUrl[]; peerCount: number }
+/**
+ * 一个待检目标。
+ */
+export type ServiceTarget = { 
+/**
+ * 展示名，如 "GitHub API"
+ */
+name: string; 
+/**
+ * 完整 HTTPS URL
+ */
+url: string }
 /**
  * Session 鉴权中 token 如何注入后续请求
  */
@@ -3786,6 +4008,22 @@ export type ToolSchema = { name: string; description: string; parameters: JsonVa
 export type UiState = { recent_detail_project_ids: string[] }
 export type UiStateInput = { recent_detail_project_ids: string[] | null }
 export type UpdateProjectInput = { id: string; name: string | null; tags: string[] | null; labels: string[] | null }
+/**
+ * 解释状态：对用户意味着什么。
+ */
+export type Verdict = 
+/**
+ * 有新鲜、完整证据，且符合当前明确规则
+ */
+"normal" | 
+/**
+ * 有新鲜、完整证据，发现需要核对的差异
+ */
+"warning" | 
+/**
+ * 证据不足、过期、冲突，或当前规则不能给出结论
+ */
+"unknown"
 export type Workflow = { id: string; name: string; cron: string; enabled?: boolean; nodes: WorkflowNode[]; lastRun?: WorkflowRun | null; createdAt: string; updatedAt: string }
 export type WorkflowNode = { id: string; nodeType: string; config: JsonValue; dependsOn?: string[] }
 export type WorkflowRun = { startedAt: string; finishedAt: string; status: string; outputs: Partial<{ [key in string]: string }>; error: string | null }

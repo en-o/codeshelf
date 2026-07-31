@@ -6,6 +6,7 @@ pub mod docker;
 pub mod downloader;
 pub mod forwarder;
 pub mod netcat;
+pub mod netdiag;
 pub mod pairdrop;
 pub mod process;
 pub mod reverse_tunnel;
