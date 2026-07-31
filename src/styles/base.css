@@ -50,51 +50,63 @@ body {
   stroke-width: 2.5px;
 }
 
-.mac-window-controls:hover .mac-btn svg {
+.mac-window-controls:hover .mac-btn svg,
+.mac-window-controls.is-hovered .mac-btn svg {
   opacity: 1;
 }
 
-.mac-btn-close {
-  background-color: #FF5F57;
-}
-.mac-btn-close:hover {
-  background-color: #FF3B30;
-}
-.mac-btn-close svg {
-  color: #4D0000;
-}
+/* `.is-hovered` 与 `:hover` 等价。
+   组件在 7 个页面各渲染一份，切页面就会重建 DOM；而浏览器只在指针移动时
+   重算 :hover，新节点插到静止光标下面不会命中 —— 连续切页时按钮会一直是灰的。
+   组件挂载时用 elementFromPoint 补判并加上这个类。 */
 
-.mac-btn-minimize {
-  background-color: #FEBC2E;
-}
-.mac-btn-minimize:hover {
-  background-color: #F0A500;
-}
-.mac-btn-minimize svg {
-  color: #985600;
-}
-
-.mac-btn-maximize {
-  background-color: #28C840;
-}
-.mac-btn-maximize:hover {
-  background-color: #1AAB29;
-}
-.mac-btn-maximize svg {
-  color: #006500;
-}
-
-/* 非 hover 时显示为灰色小圆点（可选，取消注释启用） */
-/*
+/* 默认灰色，指针移到这一组上才上色 —— 对齐 macOS：
+   窗口未聚焦时三个灯是统一的灰点，聚焦/悬停才显示各自颜色和符号。
+   上色的触发点是整组 `.mac-window-controls:hover`，不是单个按钮：
+   macOS 也是移到任意一个灯上，三个一起亮。 */
 .mac-btn-close,
 .mac-btn-minimize,
 .mac-btn-maximize {
   background-color: #d4d4d4;
 }
-.mac-window-controls:hover .mac-btn-close { background-color: #FF5F57; }
-.mac-window-controls:hover .mac-btn-minimize { background-color: #FEBC2E; }
-.mac-window-controls:hover .mac-btn-maximize { background-color: #28C840; }
-*/
+
+.mac-window-controls:hover .mac-btn-close,
+.mac-window-controls.is-hovered .mac-btn-close {
+  background-color: #ff5f57;
+}
+.mac-window-controls:hover .mac-btn-minimize,
+.mac-window-controls.is-hovered .mac-btn-minimize {
+  background-color: #febc2e;
+}
+.mac-window-controls:hover .mac-btn-maximize,
+.mac-window-controls.is-hovered .mac-btn-maximize {
+  background-color: #28c840;
+}
+
+/* 按下（以及单独悬停在某个灯上）时加深，给出明确的点击反馈 */
+.mac-window-controls:hover .mac-btn-close:hover,
+.mac-window-controls.is-hovered .mac-btn-close:hover {
+  background-color: #ff3b30;
+}
+.mac-window-controls:hover .mac-btn-minimize:hover,
+.mac-window-controls.is-hovered .mac-btn-minimize:hover {
+  background-color: #f0a500;
+}
+.mac-window-controls:hover .mac-btn-maximize:hover,
+.mac-window-controls.is-hovered .mac-btn-maximize:hover {
+  background-color: #1aab29;
+}
+
+/* 符号颜色。整组未悬停时符号本来就是 opacity:0，这里只管上色后的对比度 */
+.mac-btn-close svg {
+  color: #4d0000;
+}
+.mac-btn-minimize svg {
+  color: #985600;
+}
+.mac-btn-maximize svg {
+  color: #006500;
+}
 
 /* ====== 动画 ====== */
 @keyframes shimmer {

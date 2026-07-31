@@ -563,3 +563,16 @@
 .dark .border-gray-200 { border-color: #334155; }
 .dark .border-gray-100 { border-color: #1e293b; }
 
+
+/* ====== 窗口控制按钮（暗色） ====== */
+/* 浅色下的 #d4d4d4 在深色背景上太亮、太抢眼，压暗一档；
+   分隔线同理。悬停上色的规则沿用 base.css，不重复定义。 */
+.dark .mac-window-controls {
+  border-left-color: #374151;
+}
+
+.dark .mac-btn-close,
+.dark .mac-btn-minimize,
+.dark .mac-btn-maximize {
+  background-color: #4b5563;
+}

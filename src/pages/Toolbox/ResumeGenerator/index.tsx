@@ -17,6 +17,8 @@ import {
   ShieldAlert,
   Copy,
   ScrollText,
+  Search,
+  X,
 } from "lucide-react";
 import { useProjectsStore } from "@/stores/projectsStore";
 import { useAiProvidersStore } from "@/stores/aiProvidersStore";
@@ -55,6 +57,18 @@ interface ResumeGeneratorProps {
   onBack: () => void;
 }
 
+/**
+ * 路径只留最后两段。
+ *
+ * 书架里所有项目的前缀几乎都一样（`/Users/xxx/Desktop/tan/code/...`），
+ * 完整显示既占地方又把真正能区分项目的尾部挤掉了。完整路径放 title。
+ */
+function shortPath(full: string): string {
+  const parts = full.split("/").filter(Boolean);
+  if (parts.length <= 2) return full;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
 export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
   const projects = useProjectsStore((s) => s.projects);
   const { aiProviders } = useAiProvidersStore();
@@ -75,6 +89,8 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
   // 编辑已有简历模式：从「我的简历」打开时为 true，隐藏创建向导的步骤条，直接进编辑器。
   const [editingSaved, setEditingSaved] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  /** 项目筛选关键词。十几个项目靠肉眼扫太慢，这是这一步最缺的东西。 */
+  const [projectQuery, setProjectQuery] = useState("");
   const [jobDirection, setJobDirection] = useState<JobDirection>("backend");
   const [resume, setResume] = useState<ResumeV2 | null>(null);
   const [resumeProfile, setResumeProfile] = useState<PersonalInfo>(() => loadResumeProfile());
@@ -178,6 +194,24 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
       return next;
     });
   };
+
+  /**
+   * 按名称 / 路径 / 标签过滤。
+   *
+   * 已选中的项**永远保留**在列表里：否则搜一下就把之前勾的隐藏掉，
+   * 用户会以为选择丢了，还得清空搜索才能确认。
+   */
+  const visibleProjects = useMemo(() => {
+    const q = projectQuery.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(
+      (p) =>
+        selectedIds.has(p.id) ||
+        p.name.toLowerCase().includes(q) ||
+        p.path.toLowerCase().includes(q) ||
+        p.labels.some((l) => l.toLowerCase().includes(q)),
+    );
+  }, [projects, projectQuery, selectedIds]);
 
   const toggleAll = () => {
     invalidateGeneratedResume();
@@ -475,17 +509,46 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
               </h3>
               <div className="mt-1 text-xs text-emerald-700/75">
                 已选择 {selectedIds.size} / {projects.length} 个项目
+                {projectQuery && (
+                  <span className="ml-2 text-emerald-600/70">
+                    · 筛选出 {visibleProjects.length} 个
+                  </span>
+                )}
               </div>
             </div>
-            <button
-              onClick={toggleAll}
-              className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={projects.length === 0}
-            >
-              {selectedIds.size === projects.length && projects.length > 0
-                ? "取消全选"
-                : "全选项目"}
-            </button>
+            <div className="flex items-center gap-2">
+              {/* 十几个项目靠滚动找太慢，搜索是这一步最缺的东西 */}
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+                <input
+                  value={projectQuery}
+                  onChange={(e) => setProjectQuery(e.target.value)}
+                  placeholder="搜索名称 / 路径 / 标签"
+                  className="w-52 rounded-full border border-emerald-200 bg-white py-1.5 pl-7 pr-7 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+                {projectQuery && (
+                  <button
+                    onClick={() => setProjectQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    title="清除"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={toggleAll}
+                className="shrink-0 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={projects.length === 0}
+              >
+                {selectedIds.size === projects.length && projects.length > 0
+                  ? "取消全选"
+                  : "全选项目"}
+              </button>
+            </div>
           </div>
         </div>
         {projects.length === 0 ? (
@@ -498,80 +561,78 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
             />
           </div>
         ) : (
-          <div className="max-h-[520px] overflow-auto p-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {projects.map((p) => {
+          // 不在这里再套一层滚动：外层页面已经能滚，
+          // 嵌套滚动会出现两个滚动条，鼠标停在哪一层就滚哪一层，非常难用。
+          <div className="p-3">
+            {visibleProjects.length === 0 ? (
+              <div className="py-8 text-center text-xs text-gray-400">
+                没有匹配「{projectQuery}」的项目
+              </div>
+            ) : (
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {visibleProjects.map((p) => {
               const checked = selectedIds.has(p.id);
               const hasKnowledge = !!knowledgeDocs[p.id];
               return (
                 <label
                   key={p.id}
-                  className={`group flex min-h-[156px] cursor-pointer flex-col rounded-2xl border p-4 transition-all ${
+                  title={p.path}
+                  className={`group flex cursor-pointer flex-col rounded-xl border p-3 transition-all ${
                     checked
-                      ? "border-emerald-300 bg-emerald-50/70 shadow-sm shadow-emerald-500/10"
+                      ? "border-emerald-400 bg-emerald-50/70 shadow-sm shadow-emerald-500/10"
                       : "border-gray-200 bg-white hover:border-emerald-200 hover:bg-emerald-50/40"
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleProject(p.id)}
-                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-500">
-                          项目
-                        </span>
-                      </div>
-                      <div className="mt-3 font-medium text-gray-900 flex items-center gap-2">
-                      <span className="truncate">{p.name}</span>
-                      {hasKnowledge && (
-                        <span className="rounded-full border border-emerald-200 bg-emerald-100/70 px-1.5 py-0.5 text-[10px] text-emerald-700">
-                          已生成背景知识
-                        </span>
-                      )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex-1">
-                    <div className="line-clamp-2 text-xs leading-5 text-gray-500">{p.path}</div>
-                    {p.labels.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {p.labels.slice(0, 5).map((l) => (
-                          <span
-                            key={l}
-                            className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-600"
-                          >
-                            {l}
-                          </span>
-                        ))}
-                      </div>
+                  {/* 勾选框与项目名同行。原来是徽章、名称、路径各占一行，
+                      外加 min-h-[156px] 固定高 —— 17 个项目要滚 900+px。
+                      「项目」徽章 17 张卡完全一样，零信息量，去掉。 */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleProject(p.id)}
+                      className="h-4 w-4 shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium text-gray-900">
+                      {p.name}
+                    </span>
+                    {hasKnowledge && (
+                      <span
+                        title="已生成背景知识"
+                        className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700"
+                      >
+                        已生成
+                      </span>
                     )}
                   </div>
+
+                  {/* 路径只显示尾部：所有项目前缀都是同一串
+                      `/Users/xxx/Desktop/tan/...`，占两行还把有用的尾部截掉了 */}
+                  <div className="mt-1 truncate pl-6 text-[11px] text-gray-400">
+                    {shortPath(p.path)}
+                  </div>
+
+                  {p.labels.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1 pl-6">
+                      {p.labels.slice(0, 4).map((l) => (
+                        <span
+                          key={l}
+                          className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] text-gray-500"
+                        >
+                          {l}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </label>
               );
             })}
             </div>
+            )}
           </div>
         )}
       </div>
 
-      <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            setActiveTab("knowledge");
-          }}
-          disabled={selectedIds.size === 0}
-          variant="primary"
-          size="md"
-          className="gap-2 bg-emerald-500 hover:bg-emerald-600 focus:ring-emerald-500"
-        >
-          <Database size={16} />
-          下一步：生成 / 查看背景知识
-        </Button>
-      </div>
     </div>
   );
 
@@ -836,13 +897,39 @@ export function ResumeGenerator({ onBack }: ResumeGeneratorProps) {
             />
           </>
         ) : (
-          <div className="flex-1 overflow-auto p-6">
-            <div className="max-w-7xl mx-auto space-y-5">
-              {renderTabs()}
-              {activeTab === "select" && renderSelectTab()}
-              {activeTab === "resume" && renderResumeTab()}
+          <>
+            <div className="flex-1 overflow-auto p-6">
+              <div className="max-w-7xl mx-auto space-y-5">
+                {renderTabs()}
+                {activeTab === "select" && renderSelectTab()}
+                {activeTab === "resume" && renderResumeTab()}
+              </div>
             </div>
-          </div>
+
+            {/* 操作栏放在滚动容器**外面**，是它的兄弟节点。
+                放在里面用 sticky 不行：sticky 只能在自己的容器块内浮动，
+                作为最后一个子元素时根本没有可浮动的空间，会停在内容中间。
+                放外面才是「内容滚动、操作栏不动」，而且只有一个滚动条。 */}
+            {activeTab === "select" && (
+              <div className="shrink-0 border-t border-gray-200 bg-white px-6 py-3">
+                <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-500">
+                    已选 {selectedIds.size} 个项目
+                  </span>
+                  <Button
+                    onClick={() => setActiveTab("knowledge")}
+                    disabled={selectedIds.size === 0}
+                    variant="primary"
+                    size="md"
+                    className="gap-2 bg-emerald-500 hover:bg-emerald-600 focus:ring-emerald-500"
+                  >
+                    <Database size={16} />
+                    下一步：生成 / 查看背景知识
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
