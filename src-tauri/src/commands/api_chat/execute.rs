@@ -83,11 +83,7 @@ fn join_url(base: &str, path: &str) -> String {
 fn extract_json_path(v: &Value, path: &str) -> Option<String> {
     let mut current = v;
     for part in path.split('.').filter(|p| !p.is_empty()) {
-        if let Some(next) = current.get(part) {
-            current = next;
-        } else {
-            return None;
-        }
+        current = current.get(part)?;
     }
     match current {
         Value::String(s) => Some(s.clone()),

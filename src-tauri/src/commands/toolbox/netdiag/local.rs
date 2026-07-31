@@ -27,11 +27,12 @@ pub struct LocalDiagnostics {
 
 /// 跑一次本机诊断。
 pub fn collect() -> LocalDiagnostics {
-    let mut items = Vec::new();
-    items.push(primary_ipv4());
-    items.push(primary_ipv6());
-    items.push(default_route());
-    items.push(system_proxy());
+    let mut items = vec![
+        primary_ipv4(),
+        primary_ipv6(),
+        default_route(),
+        system_proxy(),
+    ];
     items.extend(env_proxies());
     items.push(system_dns());
 

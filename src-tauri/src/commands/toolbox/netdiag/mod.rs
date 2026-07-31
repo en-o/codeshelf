@@ -16,8 +16,6 @@ pub mod local;
 pub mod redact;
 pub mod types;
 
-pub use types::{DiagnosticItem, EvidenceStatus, FailureKind, Verdict};
-
 use crate::error::AppResult;
 use std::time::Duration;
 

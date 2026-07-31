@@ -359,11 +359,10 @@ fn handle_tray_icon_event(tray: &tauri::tray::TrayIcon, event: tauri::tray::Tray
                 focus_main_window(app);
             }
         }
-        tauri::tray::TrayIconEvent::DoubleClick { button, .. } => {
-            if button == tauri::tray::MouseButton::Left {
-                focus_main_window(app);
-            }
-        }
+        tauri::tray::TrayIconEvent::DoubleClick {
+            button: tauri::tray::MouseButton::Left,
+            ..
+        } => focus_main_window(app),
         _ => {}
     }
 }

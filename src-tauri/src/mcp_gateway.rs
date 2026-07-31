@@ -482,10 +482,7 @@ fn extract_mcp_key(headers: &HeaderMap, query: &HashMap<String, String>) -> Opti
 
 fn normalize_mcp_key(value: &str) -> String {
     let mut token = value.trim();
-    loop {
-        let Some((prefix, rest)) = token.split_once(char::is_whitespace) else {
-            break;
-        };
+    while let Some((prefix, rest)) = token.split_once(char::is_whitespace) {
         if prefix.eq_ignore_ascii_case("bearer") {
             token = rest.trim();
         } else {

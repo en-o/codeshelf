@@ -230,7 +230,7 @@ async fn discovered_devices(state: &AppState) -> Vec<DiscoveredDevice> {
     let mut devices = state.discovered.lock().await;
     devices.retain(|_, d| now - d.last_seen_at <= DISCOVERY_TTL_MS);
     let mut list: Vec<DiscoveredDevice> = devices.values().cloned().collect();
-    list.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+    list.sort_by_key(|device| std::cmp::Reverse(device.last_seen_at));
     list
 }
 

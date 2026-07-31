@@ -128,7 +128,7 @@ pub async fn pairdrop_discovered() -> AppResult<Vec<DiscoveredDevice>> {
             let mut devices = svc.state.discovered.lock().await;
             devices.retain(|_, d| now - d.last_seen_at <= 20_000);
             let mut list: Vec<DiscoveredDevice> = devices.values().cloned().collect();
-            list.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+            list.sort_by_key(|device| std::cmp::Reverse(device.last_seen_at));
             Ok(list)
         }
         None => Ok(vec![]),

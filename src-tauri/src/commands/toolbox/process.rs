@@ -190,7 +190,7 @@ async fn get_port_pid_map() -> AppResult<HashMap<u16, Vec<u32>>> {
                         if let Some(users) = parts.get(6) {
                             if let Some(pid_start) = users.find("pid=") {
                                 let pid_part = &users[pid_start + 4..];
-                                if let Some(pid_end) = pid_part.find(|c| c == ',' || c == ')') {
+                                if let Some(pid_end) = pid_part.find([',', ')']) {
                                     if let Ok(pid) = pid_part[..pid_end].parse::<u32>() {
                                         map.entry(port).or_default().push(pid);
                                     }
@@ -540,7 +540,7 @@ async fn get_port_occupation_linux() -> AppResult<Vec<PortOccupation>> {
                         if let Some(users) = parts.get(6) {
                             if let Some(pid_start) = users.find("pid=") {
                                 let pid_part = &users[pid_start + 4..];
-                                if let Some(pid_end) = pid_part.find(|c| c == ',' || c == ')') {
+                                if let Some(pid_end) = pid_part.find([',', ')']) {
                                     if let Ok(p) = pid_part[..pid_end].parse::<u32>() {
                                         pid = p;
                                         process_name = system

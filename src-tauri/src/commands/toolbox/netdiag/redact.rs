@@ -68,6 +68,7 @@ fn mask_user(user: &str) -> String {
 ///
 /// IPv4 保留前两段（`192.168.x.x`），IPv6 保留前两组。
 /// 完整 IP 必须由用户主动选择显示 —— 这是 spec 的展示原则。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn redact_ip(ip: &str) -> String {
     let s = ip.trim();
     if s.is_empty() {
@@ -86,6 +87,7 @@ pub fn redact_ip(ip: &str) -> String {
 }
 
 /// 遮盖主机名 / 网络名（Wi-Fi SSID 常含个人信息）。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn redact_hostname(name: &str) -> String {
     let s = name.trim();
     if s.is_empty() {
