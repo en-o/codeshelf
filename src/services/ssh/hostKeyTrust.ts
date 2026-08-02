@@ -1,5 +1,7 @@
 import { commands } from "@/bindings";
 import { confirmDialog } from "@/components/common/useConfirm";
+import { MarkdownContent } from "@/components/common/MarkdownContent";
+import { createElement } from "react";
 
 /** 后端在「主机密钥未记录」时会把这个标记塞进错误串（见 ssh_hostkey.rs）。 */
 const HOSTKEY_MARKER = "HOSTKEY_NOT_TRUSTED";
@@ -9,6 +11,16 @@ function errText(e: unknown): string {
   if (typeof e === "string") return e;
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/** 把 SSH 协商算法映射到 OpenSSH 服务端默认的主机公钥文件名。 */
+function hostKeyFileName(algorithm: string): string {
+  const normalized = algorithm.toLowerCase();
+  if (normalized.includes("ed25519")) return "ssh_host_ed25519_key.pub";
+  if (normalized.includes("ecdsa")) return "ssh_host_ecdsa_key.pub";
+  if (normalized.includes("rsa")) return "ssh_host_rsa_key.pub";
+  if (normalized.includes("dsa") || normalized.includes("dss")) return "ssh_host_dsa_key.pub";
+  return "ssh_host_ed25519_key.pub";
 }
 
 /**
@@ -41,13 +53,48 @@ export async function startWithHostKeyTrust(
         `这可能是中间人攻击。确认服务端确实换过密钥后，执行 ssh-keygen -R "[${host}]:${port}" 再重试。`;
     }
 
+    const keyFile = hostKeyFileName(info.algorithm);
+    const linuxCommand = `ssh-keygen -lf /etc/ssh/${keyFile} -E sha256`;
+    const windowsCommand = `ssh-keygen -lf "$env:ProgramData\\ssh\\${keyFile}" -E sha256`;
+    const instructions = `
+这是首次连接，应用尚未记录该服务器。
+
+### 当前服务器信息
+
+- **算法：** \`${info.algorithm}\`
+- **待核对指纹：** \`${info.fingerprint}\`
+
+### 核对步骤（可选但建议）
+
+1. 从云厂商网页控制台、VNC 或服务器本地终端登录服务器。不要使用当前这条尚未确认的 SSH 连接。
+2. 根据服务器系统执行命令：
+
+   **Linux**
+
+   \`\`\`bash
+   ${linuxCommand}
+   \`\`\`
+
+   **Windows OpenSSH Server（PowerShell）**
+
+   \`\`\`powershell
+   ${windowsCommand}
+   \`\`\`
+
+3. 找到命令输出中的 \`SHA256:...\`，与上面的“待核对指纹”完整比较。
+4. 完全一致时点击 **信任并连接**；不一致时点击 **取消** 并检查服务器地址。
+
+> 暂时无法核对时也可以直接信任。应用会记录本次密钥，以后自动校验。
+`.trim();
+
     const ok = await confirmDialog({
-      title: `首次连接 ${host}:${port}`,
-      variant: "danger",
-      confirmLabel: "指纹无误，信任并连接",
+      title: `发现新的 SSH 主机 ${host}:${port}`,
+      variant: "warning",
+      confirmLabel: "信任并连接",
       cancelLabel: "取消",
-      description: `该主机不在 ~/.ssh/known_hosts 中。请先登录云厂商控制台或服务器本地终端（不要通过当前这条待确认的 SSH 连接），执行：\n\nssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\n\n将命令输出中的 SHA256 指纹与下方指纹逐字核对：\n\n算法：${info.algorithm}\n指纹：${info.fingerprint}\n\n如果服务器使用的不是 ED25519 主机密钥，请把命令中的文件名换成对应算法，例如 ssh_host_rsa_key.pub。`,
-      notice: "指纹不符说明连接可能被劫持，此时继续会把密码和隧道流量交给攻击者。",
+      description: createElement(MarkdownContent, { content: instructions }),
+      notice: "密码或私钥验证的是你的身份；主机指纹识别的是服务器。已保存的指纹如果以后发生变化，应用仍会阻止连接并提醒你。",
+      size: "lg",
     });
     if (!ok) throw e;
 

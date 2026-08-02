@@ -36,5 +36,6 @@
   ; 避免 command 永久指向已被删除的 CodeShelf.exe。
   DeleteRegKey HKCU "Software\Classes\Directory\shell\CodeShelf"
   DeleteRegKey HKCU "Software\Classes\Directory\Background\shell\CodeShelf"
+  DeleteRegKey HKCU "Software\CodeShelf\ShellIntegrationDisabled"
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x0000, p 0, p 0)'
 !macroend

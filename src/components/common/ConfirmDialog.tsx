@@ -1,7 +1,7 @@
 import { AlertCircle, Loader2, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui";
-import { Modal } from "./Modal";
+import { Modal, type ModalSize } from "./Modal";
 
 export type ConfirmVariant = "danger" | "primary" | "warning";
 
@@ -21,6 +21,8 @@ interface ConfirmDialogProps {
   loading?: boolean;
   /** 额外提示（黄色高亮块，常用于"修改后需重启"等说明） */
   notice?: ReactNode;
+  /** 弹窗宽度，长说明可使用 md/lg。 */
+  size?: ModalSize;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -62,6 +64,7 @@ export function ConfirmDialog({
   cancelLabel = "取消",
   loading = false,
   notice,
+  size = "sm",
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -69,8 +72,8 @@ export function ConfirmDialog({
   const Icon = IconProp ?? AlertCircle;
 
   return (
-    <Modal open={open} onClose={loading ? () => {} : onCancel} size="sm" closeOnOverlayClick={!loading}>
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6">
+    <Modal open={open} onClose={loading ? () => {} : onCancel} size={size} closeOnOverlayClick={!loading}>
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 max-h-[calc(100vh-4rem)] overflow-y-auto">
         <div className="flex items-center gap-3 mb-4">
           <div className={`p-2 rounded-full ${styles.iconBg}`}>
             <Icon size={20} className={styles.iconColor} />
@@ -79,7 +82,7 @@ export function ConfirmDialog({
         </div>
 
         {description && (
-          <div className="text-gray-600 dark:text-gray-400 mb-4 text-sm leading-relaxed whitespace-pre-wrap break-all">
+          <div className={`text-gray-600 dark:text-gray-400 mb-4 text-sm leading-relaxed min-w-0 ${typeof description === "string" ? "whitespace-pre-wrap break-words" : ""}`}>
             {description}
           </div>
         )}

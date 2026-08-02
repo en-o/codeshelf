@@ -37,6 +37,19 @@ export function ShellIntegrationSettings({ onClose }: ShellIntegrationSettingsPr
     }
   }
 
+  async function repair() {
+    setBusy(true);
+    try {
+      await invoke("set_shell_context_menu", { enabled: true });
+      setState((s) => (s ? { ...s, registered: true } : s));
+      showToast("success", "右键菜单已重新注册");
+    } catch (e) {
+      showToast("error", typeof e === "string" && e ? e : e instanceof Error ? e.message : "修复失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between pb-3 border-b border-gray-200">
@@ -52,27 +65,38 @@ export function ShellIntegrationSettings({ onClose }: ShellIntegrationSettingsPr
       </div>
 
       {state?.supported ? (
-        <div className="flex items-center justify-between p-3 bg-gray-100 rounded-lg">
+        <div className="flex items-center justify-between gap-3 p-3 bg-gray-100 rounded-lg">
           <div className="flex items-center gap-2">
             <MousePointerClick className="w-4 h-4 text-gray-500" />
             <div>
               <div className="text-sm text-gray-900">在资源管理器中显示「添加到 CodeShelf」</div>
               <div className="text-xs text-gray-500 mt-0.5">
-                右键文件夹、或在文件夹空白处右键即可添加
+                {state.registered ? "已注册：右键文件夹或文件夹空白处即可添加" : "未注册或已被移除"}
               </div>
             </div>
           </div>
-          <button
-            disabled={busy}
-            onClick={() => toggle(!state.registered)}
-            className={`py-1.5 px-3 rounded-lg text-sm font-medium transition-all disabled:opacity-50 ${
-              state.registered
-                ? "bg-gray-200 text-gray-900 hover:bg-gray-300"
-                : "bg-blue-500 text-white hover:bg-blue-600"
-            }`}
-          >
-            {state.registered ? "移除" : "添加"}
-          </button>
+          <div className="flex flex-shrink-0 gap-2">
+            {state.registered && (
+              <button
+                disabled={busy}
+                onClick={repair}
+                className="py-1.5 px-3 rounded-lg text-sm font-medium bg-white text-gray-700 hover:bg-gray-50 border border-gray-200 transition-all disabled:opacity-50"
+              >
+                重新注册
+              </button>
+            )}
+            <button
+              disabled={busy}
+              onClick={() => toggle(!state.registered)}
+              className={`py-1.5 px-3 rounded-lg text-sm font-medium transition-all disabled:opacity-50 ${
+                state.registered
+                  ? "bg-gray-200 text-gray-900 hover:bg-gray-300"
+                  : "bg-blue-500 text-white hover:bg-blue-600"
+              }`}
+            >
+              {state.registered ? "移除" : "添加"}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="flex items-start gap-2 p-3 bg-gray-100 rounded-lg">
@@ -84,7 +108,9 @@ export function ShellIntegrationSettings({ onClose }: ShellIntegrationSettingsPr
       <div className="flex items-start gap-2 p-3 bg-gray-100 rounded-lg">
         <Info className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-gray-500 space-y-1">
-          <p>Windows 11：添加后在「显示更多选项」中显示，不需要管理员权限。</p>
+          <p>Windows 11：右键文件夹 →「显示更多选项」→「添加到 CodeShelf」。</p>
+          <p>Windows 10：右键文件夹后直接显示。注册不需要管理员权限。</p>
+          <p>若菜单未出现，请点击上方「重新注册」，然后重新打开资源管理器窗口。</p>
           <p>macOS：安装版启动一次后，在 Finder 的「快速操作」或「服务」中显示。</p>
         </div>
       </div>

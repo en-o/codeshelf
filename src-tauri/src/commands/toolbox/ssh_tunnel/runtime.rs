@@ -332,6 +332,11 @@ pub(super) async fn run_reconnect_supervisor(
             }
             Err(e) => {
                 set_last_error(&tunnel_id, e.to_string()).await;
+                // 未知主机密钥需要用户在界面作出选择，后台重试无法自行恢复。
+                if crate::commands::toolbox::ssh_hostkey::needs_user_confirmation(&e.to_string()) {
+                    controller.stop();
+                    break;
+                }
                 log::warn!(
                     "SSH 隧道 {} 重连失败: {}（{}s 后重试）",
                     tunnel_id,

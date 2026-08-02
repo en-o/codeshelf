@@ -3473,7 +3473,7 @@ export type EvidenceStatus =
  * 
  * 所以：前端就绪之前**只入队不发事件**，就绪时由前端一次性取走。
  */
-export type ExternalAddEvent = { kind: "added"; payload: AddProjectByPathResult } | { kind: "failed"; payload: string }
+export type ExternalAddEvent = { kind: "requested"; payload: string } | { kind: "failed"; payload: string }
 /**
  * 失败原因分类。spec 要求区分离线、DNS 失败、TLS 失败、代理拒绝、超时。
  */

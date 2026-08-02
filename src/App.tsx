@@ -211,50 +211,38 @@ function AppContent() {
     return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  // 应用外部添加项目：Windows 右键菜单 / 命令行 / macOS「打开方式」与 Dock 拖放。
-  // 已在书架里的不报错，直接定位过去（后端 created=false）。
+  // 应用外部请求添加项目：只把路径带到原有添加弹窗，不绕过分类、标签等表单。
+  // Windows 右键菜单 / 命令行 / macOS Finder 服务与 Dock 拖放共用此流程。
   useEffect(() => {
-    function applyAdded(payload: { project: Project; created: boolean }) {
-      const { project, created } = payload;
-      const store = useProjectsStore.getState();
-      if (created) {
-        store.addProject(project);
-        store.markProjectDirty(project.path);
-      }
-      store.setSelectedProjectId(project.id);
-      useUiStore.getState().setCurrentPage("shelf");
-      showToast(
-        created ? "success" : "info",
-        created ? "已添加到书架" : "该项目已在书架中",
-        project.name
-      );
+    function applyRequest(path: string) {
+      const ui = useUiStore.getState();
+      ui.setCurrentPage("shelf");
+      ui.enqueueExternalAddProjectPath(path);
     }
 
-    const added = listen<{ project: Project; created: boolean }>(
-      "project-added-externally",
-      (event) => applyAdded(event.payload)
+    const requested = listen<string>(
+      "project-add-requested",
+      (event) => applyRequest(event.payload)
     );
     const failed = listen<string>("project-add-failed", (event) => {
       showToast("error", "添加项目失败", event.payload);
     });
 
-    // 冷启动补齐：后端在 setup 阶段就可能把项目加完，那时这两个 listener 还没注册，
-    // 事件直接掉地上（用户点了右键菜单却什么都没发生）。
+    // 冷启动补齐：后端在 setup 阶段就可能收到外部路径，那时 listener 还没注册，
+    // 请求直接掉地上会表现为“右键菜单点了没反应”。
     // 后端在「前端就绪」之前只入队不发事件，这里注册完再一次性取走。
-    Promise.all([added, failed])
+    Promise.all([requested, failed])
       .then(() => invoke<ExternalAddEvent[]>("take_pending_external_projects"))
       .then((pending) => {
         for (const evt of pending) {
-          // bindings 生成的 Project 用 `string | null`，手写的 @/types 用 `string | undefined`，
-          // 运行时是同一份 JSON，只是这两套类型定义对「缺省」的表达不同。
-          if (evt.kind === "added") applyAdded(evt.payload as unknown as { project: Project; created: boolean });
+          if (evt.kind === "requested") applyRequest(evt.payload);
           else showToast("error", "添加项目失败", evt.payload);
         }
       })
       .catch((err) => console.error("读取冷启动待处理项目失败:", err));
 
     return () => {
-      added.then((fn) => fn());
+      requested.then((fn) => fn());
       failed.then((fn) => fn());
     };
   }, []);

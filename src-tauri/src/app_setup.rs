@@ -39,7 +39,7 @@ pub fn run_setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
 /// 处理 `--add-project <路径>`：文件管理器右键菜单和命令行共用的入口。
 ///
 /// 冷启动（run_setup）和热启动（单实例回调）都调这里，两条路径行为一致。
-/// 添加是异步的，结果通过事件通知前端，失败也发事件——右键菜单点了没反应最难排查。
+/// 这里只把路径交给前端打开完整的「添加项目」表单，不直接写入书架。
 pub fn handle_add_project_args(app: &AppHandle, args: &[String]) {
     if let Some(path) = parse_add_project_arg(args) {
         add_projects_by_paths(app, vec![path]);
@@ -48,39 +48,34 @@ pub fn handle_add_project_args(app: &AppHandle, args: &[String]) {
 
 /// 应用外部触发的添加：Windows 右键菜单 / 命令行 / macOS「打开方式」与 Dock 拖放。
 ///
-/// 结果通过事件通知前端，失败也发事件——右键菜单点了没反应最难排查。
+/// 后端只做路径安全校验和规范化；分类、标签等信息仍由用户在原添加弹窗中选择。
 pub fn add_projects_by_paths(app: &AppHandle, paths: Vec<String>) {
     if paths.is_empty() {
         return;
     }
 
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        focus_main_window(&app);
-        for path in paths {
-            match commands::project::add_project_by_path(path.clone()).await {
-                Ok(result) => emit_or_buffer(&app, ExternalAddEvent::Added(Box::new(result))),
-                Err(e) => {
-                    log::error!("外部添加项目失败 ({}): {}", path, e);
-                    emit_or_buffer(&app, ExternalAddEvent::Failed(e.to_string()));
-                }
+    focus_main_window(app);
+    for path in paths {
+        match commands::project::normalize_project_path(&path) {
+            Ok(path) => emit_or_buffer(app, ExternalAddEvent::Requested(path)),
+            Err(e) => {
+                log::error!("外部添加项目路径无效 ({}): {}", path, e);
+                emit_or_buffer(app, ExternalAddEvent::Failed(e.to_string()));
             }
         }
-    });
+    }
 }
 
 /// 「外部添加项目」的结果事件。
 ///
-/// 冷启动时后端在 setup 阶段就可能把项目加完并发事件，而前端 React 的
+/// 冷启动时后端在 setup 阶段就可能收到路径并发事件，而前端 React 的
 /// `listen()` 还没注册 —— 事件直接掉地上，用户点了右键菜单却什么都没发生。
 ///
 /// 所以：前端就绪之前**只入队不发事件**，就绪时由前端一次性取走。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "payload")]
 pub enum ExternalAddEvent {
-    // Box：Added 携带整个 Project，与 Failed(String) 体量差距很大。
-    // 不装箱的话每个 enum 值都按最大变体分配，队列里全是浪费。
-    Added(Box<commands::project::AddProjectByPathResult>),
+    Requested(String),
     Failed(String),
 }
 
@@ -106,8 +101,8 @@ fn emit_or_buffer(app: &AppHandle, event: ExternalAddEvent) {
 
 fn emit_external_event(app: &AppHandle, event: &ExternalAddEvent) {
     match event {
-        ExternalAddEvent::Added(result) => {
-            let _ = app.emit("project-added-externally", result.as_ref());
+        ExternalAddEvent::Requested(path) => {
+            let _ = app.emit("project-add-requested", path);
         }
         ExternalAddEvent::Failed(msg) => {
             let _ = app.emit("project-add-failed", msg.clone());

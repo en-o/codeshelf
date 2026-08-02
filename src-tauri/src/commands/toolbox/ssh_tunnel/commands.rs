@@ -224,7 +224,11 @@ pub async fn start_ssh_tunnel(tunnel_id: String) -> AppResult<()> {
             }
         }
         Err(e) => {
-            if tunnel.auto_reconnect {
+            // 未知主机密钥需要回到前端让用户选择是否信任；不能吞进自动重连，
+            // 否则界面只会显示 HOSTKEY_NOT_TRUSTED，却没有继续连接的入口。
+            if tunnel.auto_reconnect
+                && !crate::commands::toolbox::ssh_hostkey::needs_user_confirmation(&e.to_string())
+            {
                 let mut tunnels = SSH_TUNNELS.lock().await;
                 if let Some(t) = tunnels.get_mut(&tunnel_id) {
                     t.status = "reconnecting".to_string();

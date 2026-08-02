@@ -33,6 +33,7 @@ export function ShelfPage() {
   const [onlyStarred, setOnlyStarred] = useState(false);
   const [onlyModified, setOnlyModified] = useState(false);
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
+  const [addProjectInitialPath, setAddProjectInitialPath] = useState<string | null>(null);
   const [showAddCategoryDialog, setShowAddCategoryDialog] = useState(false);
   const [showFloatingBall, setShowFloatingBall] = useState(false);
   const { sidebarCollapsed, setSidebarCollapsed } = useSettingsStore();
@@ -45,6 +46,18 @@ export function ShelfPage() {
   // 只有一个 map 的话，「git 不存在 / 不是仓库 / 目录不可访问」会和「加载中」混在一起，
   // 筛选时被静默归类，用户不知道有项目根本没读到状态。
   const [gitErrorIds, setGitErrorIds] = useState<Set<string>>(new Set());
+  const externalAddProjectPaths = useUiStore((s) => s.externalAddProjectPaths);
+  const takeExternalAddProjectPath = useUiStore((s) => s.takeExternalAddProjectPath);
+
+  // 系统文件管理器传入的路径只负责调起现有添加表单；多个路径按顺序逐个处理。
+  useEffect(() => {
+    if (showAddProjectDialog || externalAddProjectPaths.length === 0) return;
+    const path = takeExternalAddProjectPath();
+    if (!path) return;
+    setSelectedProject(null);
+    setAddProjectInitialPath(path);
+    setShowAddProjectDialog(true);
+  }, [externalAddProjectPaths, showAddProjectDialog, takeExternalAddProjectPath]);
 
   // 批量操作状态
   const [batchMode, setBatchMode] = useState(false);
@@ -566,7 +579,13 @@ export function ShelfPage() {
           />
 
           {/* Primary Action */}
-          <button className="re-btn re-btn-primary flex items-center gap-2" onClick={() => setShowAddProjectDialog(true)}>
+          <button
+            className="re-btn re-btn-primary flex items-center gap-2"
+            onClick={() => {
+              setAddProjectInitialPath(null);
+              setShowAddProjectDialog(true);
+            }}
+          >
             <Plus size={16} />
             <span>项目</span>
           </button>
@@ -726,12 +745,17 @@ export function ShelfPage() {
       {/* Add Project Dialog */}
       {showAddProjectDialog && (
         <AddProjectDialog
+          initialPath={addProjectInitialPath}
           onConfirm={(project) => {
             setProjects([...projects, project]);
             setShowAddProjectDialog(false);
+            setAddProjectInitialPath(null);
             markProjectDirty(project.path); // Mark for stats refresh
           }}
-          onCancel={() => setShowAddProjectDialog(false)}
+          onCancel={() => {
+            setShowAddProjectDialog(false);
+            setAddProjectInitialPath(null);
+          }}
         />
       )}
 

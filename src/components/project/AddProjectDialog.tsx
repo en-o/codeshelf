@@ -10,9 +10,11 @@ import type { Project } from "@/types";
 interface AddProjectDialogProps {
   onConfirm: (project: Project) => void;
   onCancel: () => void;
+  /** 文件管理器右键 / Finder 服务传入时，复用本表单并预填本地目录。 */
+  initialPath?: string | null;
 }
 
-export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps) {
+export function AddProjectDialog({ onConfirm, onCancel, initialPath }: AddProjectDialogProps) {
   const { categories: storeCategories, addCategory, labels: storeLabels, addLabel } = useProjectsStore();
   const [mode, setMode] = useState<"local" | "git">("local");
   const [localPath, setLocalPath] = useState("");
@@ -96,28 +98,33 @@ export function AddProjectDialog({ onConfirm, onCancel }: AddProjectDialogProps)
       });
 
       if (selected) {
-        const path = selected as string;
-        setLocalPath(path);
-        if (!projectName) {
-          const name = path.split(/[\\/]/).pop() || "";
-          setProjectName(name);
-        }
-        setError("");
-
-        // Check if it's a git repository
-        try {
-          const isRepo = await isGitRepo(path);
-          setIsGitRepository(isRepo);
-          setShouldInitGit(!isRepo); // Default to init if not a repo
-        } catch {
-          setIsGitRepository(false);
-          setShouldInitGit(true);
-        }
+        await applyLocalPath(selected as string);
       }
     } catch (err) {
       setError("选择文件夹失败");
     }
   }
+
+  async function applyLocalPath(path: string) {
+    setMode("local");
+    setLocalPath(path);
+    setProjectName((name) => name || path.split(/[\\/]/).filter(Boolean).pop() || "");
+    setError("");
+    setIsGitRepository(null);
+
+    try {
+      const isRepo = await isGitRepo(path);
+      setIsGitRepository(isRepo);
+      setShouldInitGit(!isRepo);
+    } catch {
+      setIsGitRepository(false);
+      setShouldInitGit(true);
+    }
+  }
+
+  useEffect(() => {
+    if (initialPath) void applyLocalPath(initialPath);
+  }, [initialPath]);
 
   async function handleSelectGitTargetPath() {
     try {

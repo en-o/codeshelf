@@ -85,13 +85,14 @@ pub fn set_shell_context_menu(enabled: bool) -> AppResult<()> {
     }
 }
 
-/// 启动时调用：已注册的话用当前 exe 路径重写一遍。
-/// 应用被移动或升级后 exe 路径可能变了，旧的 command 指向不存在的文件，
-/// 表现为「右键菜单点了没反应」——这种问题最难被用户描述清楚。
+/// 启动时调用：Windows 默认启用右键菜单，并用当前 exe 路径重写命令。
+/// 用户在设置中明确移除后会留下 opt-out 标记，后续启动不会擅自加回来。
+/// 应用被移动或升级后 exe 路径可能变了，旧 command 指向不存在的文件时，
+/// 表现为「右键菜单点了没反应」——因此每次启动都刷新已启用的注册项。
 pub fn refresh_registration_on_startup() {
     #[cfg(target_os = "windows")]
     {
-        if win::is_registered() {
+        if !win::is_opted_out() {
             if let Err(e) = win::register() {
                 log::error!("刷新右键菜单注册失败: {}", e);
             }
@@ -132,6 +133,8 @@ mod win {
     ];
 
     const MENU_LABEL: &str = "添加到 CodeShelf";
+    /// 只有用户主动点过“移除”才创建；缺省即启用，和 macOS 安装后可用的体验一致。
+    const OPT_OUT_KEY: &str = r"Software\CodeShelf\ShellIntegrationDisabled";
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -219,6 +222,22 @@ mod win {
             .all(|(base, _)| key_exists(&format!("{}\\command", base)))
     }
 
+    pub fn is_opted_out() -> bool {
+        key_exists(OPT_OUT_KEY)
+    }
+
+    fn delete_tree(subkey: &str) -> AppResult<()> {
+        let status = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(wide(subkey).as_ptr())) };
+        // 本来就不存在不算失败（ERROR_FILE_NOT_FOUND = 2）
+        if status != ERROR_SUCCESS && status.0 != 2 {
+            return Err(AppError::from(format!(
+                "删除注册表项失败 {}: {:?}",
+                subkey, status
+            )));
+        }
+        Ok(())
+    }
+
     #[link(name = "shell32")]
     extern "system" {
         fn SHChangeNotify(event_id: i32, flags: u32, item1: *const c_void, item2: *const c_void);
@@ -250,6 +269,8 @@ mod win {
             set_string(&key, Some("Icon"), &format!("\"{}\",0", exe))?;
             // 明确单选语义，避免 Explorer 将多选路径拼成无法解析的单个参数。
             set_string(&key, Some("MultiSelectModel"), "Single")?;
+            // 在 Windows 10 / Windows 11 经典菜单中尽量靠前显示。
+            set_string(&key, Some("Position"), "Top")?;
 
             let cmd_key = create_key(&format!("{}\\command", base))?;
             // 两侧引号必须写进值里，否则带空格的路径会被拆成多个参数。
@@ -257,21 +278,18 @@ mod win {
             set_string(&cmd_key, None, &command)?;
         }
 
+        // 所有菜单项写入成功后才清除用户的禁用标记。
+        delete_tree(OPT_OUT_KEY)?;
         notify_explorer();
         Ok(())
     }
 
     pub fn unregister() -> AppResult<()> {
         for (base, _) in MENU_KEYS {
-            let status = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(wide(base).as_ptr())) };
-            // 本来就不存在不算失败（ERROR_FILE_NOT_FOUND = 2）
-            if status != ERROR_SUCCESS && status.0 != 2 {
-                return Err(AppError::from(format!(
-                    "删除注册表项失败 {}: {:?}",
-                    base, status
-                )));
-            }
+            delete_tree(base)?;
         }
+        // 记住用户的明确选择，避免下次启动又自动恢复菜单。
+        let _ = create_key(OPT_OUT_KEY)?;
         notify_explorer();
         Ok(())
     }

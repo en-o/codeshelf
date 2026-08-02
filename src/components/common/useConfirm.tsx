@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
 import { ConfirmDialog, type ConfirmVariant } from "./ConfirmDialog";
+import type { ModalSize } from "./Modal";
 
 export interface ConfirmOptions {
   title: string;
@@ -11,6 +12,7 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   notice?: ReactNode;
+  size?: ModalSize;
 }
 
 /**
@@ -110,6 +112,7 @@ export function ConfirmHost() {
       confirmLabel={pending.options.confirmLabel}
       cancelLabel={pending.options.cancelLabel}
       notice={pending.options.notice}
+      size={pending.options.size}
       onConfirm={handleConfirm}
       onCancel={handleCancel}
     />,

@@ -40,6 +40,7 @@ interface UiState {
   toolboxDockerProjectPath: string | null;
   toolboxDockerProjectName: string | null;
   chatNavigateSessionId: string | null;
+  externalAddProjectPaths: string[];
 
   navigateToTool: (tool: ToolType) => void;
   navigateToDockerTool: (
@@ -50,6 +51,8 @@ interface UiState {
   clearChatNavigateSession: () => void;
   clearToolboxNavigateTarget: () => void;
   clearToolboxDockerProject: () => void;
+  enqueueExternalAddProjectPath: (path: string) => void;
+  takeExternalAddProjectPath: () => string | null;
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -87,6 +90,7 @@ export const useUiStore = create<UiState>()((set) => ({
   toolboxDockerProjectPath: null,
   toolboxDockerProjectName: null,
   chatNavigateSessionId: null,
+  externalAddProjectPaths: [],
 
   navigateToTool: (tool) =>
     set({ currentPage: "toolbox", toolboxNavigateTarget: tool }),
@@ -106,4 +110,19 @@ export const useUiStore = create<UiState>()((set) => ({
       toolboxDockerProjectPath: null,
       toolboxDockerProjectName: null,
     }),
+  enqueueExternalAddProjectPath: (path) =>
+    set((state) => ({
+      externalAddProjectPaths: state.externalAddProjectPaths.includes(path)
+        ? state.externalAddProjectPaths
+        : [...state.externalAddProjectPaths, path],
+    })),
+  takeExternalAddProjectPath: () => {
+    let next: string | null = null;
+    set((state) => {
+      if (state.externalAddProjectPaths.length === 0) return state;
+      next = state.externalAddProjectPaths[0];
+      return { externalAddProjectPaths: state.externalAddProjectPaths.slice(1) };
+    });
+    return next;
+  },
 }));
