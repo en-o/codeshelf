@@ -10,6 +10,7 @@
 | 知道提交信息、分支、代码风格怎么写 | [CONVENTIONS.md](CONVENTIONS.md) |
 | 用 AI 协作开发本项目 | [CLAUDE.md](../CLAUDE.md)（硬约束）+ [AI-CODING.md](AI-CODING.md)（方法论） |
 | 写一份大功能的 Spec | [specs/README.md](specs/README.md) |
+| 查看已通过 Spec 的代码实施顺序 | [plans/README.md](plans/README.md) |
 | 查看当前全局审查问题和整改进度 | [REMEDIATION.md](REMEDIATION.md) |
 
 ## 分层
@@ -18,7 +19,8 @@
 CLAUDE.md            约束层 · 硬性规则，AI 每次会话自动加载
 ├── CONVENTIONS.md   规范层 · 提交/分支/风格/测试/评审
 ├── AI-CODING.md     方法层 · SDD 流程与上下文工程
-└── specs/           需求层 · 大功能的规格说明
+├── specs/           需求层 · 大功能的规格说明
+└── plans/           实施层 · 已批准规格的代码落点与验证顺序
 ```
 
 ## 全部文档
@@ -35,6 +37,7 @@ CLAUDE.md            约束层 · 硬性规则，AI 每次会话自动加载
 - [CLAUDE.md](../CLAUDE.md) — 约束层「宪法」，8 条硬约束 + 验证命令
 - [AI-CODING.md](AI-CODING.md) — SDD 实践：四步流程、Spec 门槛、上下文工程、质量保证
 - [specs/](specs/) — 大功能规格说明与模板
+- [plans/](plans/) — 已通过 Spec 的实施计划；不得扩大对应 Spec 的范围
 
 ### 设计文档
 - [CHAT-DESIGN.md](CHAT-DESIGN.md) — Chat 模块：会话管理、流式渲染、工具调用循环
