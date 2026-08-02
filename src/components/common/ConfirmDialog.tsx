@@ -79,7 +79,7 @@ export function ConfirmDialog({
         </div>
 
         {description && (
-          <div className="text-gray-600 dark:text-gray-400 mb-4 text-sm leading-relaxed">
+          <div className="text-gray-600 dark:text-gray-400 mb-4 text-sm leading-relaxed whitespace-pre-wrap break-all">
             {description}
           </div>
         )}

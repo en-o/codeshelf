@@ -70,6 +70,11 @@ pub fn fingerprint(key: &PublicKey) -> String {
 /// 这里补一句可执行的提示，并带上前端识别用的标记 —— 否则用户只看到"SSH 连接失败"。
 pub const HOSTKEY_ERROR_MARKER: &str = "HOSTKEY_NOT_TRUSTED";
 
+/// 这类错误需要用户先确认，自动重连无法自行恢复，调用方应立即返回给界面。
+pub fn needs_user_confirmation(error: &str) -> bool {
+    error.contains(HOSTKEY_ERROR_MARKER)
+}
+
 pub fn describe_connect_error(host: &str, port: u16, raw: &str) -> String {
     // 握手在 check_server_key 返回 false 后失败；此时 known_hosts 里要么没有记录、要么记录不匹配
     let unverified = match russh::keys::known_hosts::known_host_keys(host, port) {

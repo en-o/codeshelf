@@ -246,6 +246,11 @@ pub(super) async fn run_reconnect_supervisor(
             }
             Err(e) => {
                 set_last_error(&tunnel_id, e.to_string()).await;
+                // 主机密钥未知/变化都需要人工介入，后台无限重试没有意义。
+                if crate::commands::toolbox::ssh_hostkey::needs_user_confirmation(&e.to_string()) {
+                    controller.stop();
+                    break;
+                }
                 log::warn!(
                     "内网穿透 {} 重连失败: {}（{}s 后重试）",
                     tunnel_id,

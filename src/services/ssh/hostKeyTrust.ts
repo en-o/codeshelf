@@ -46,7 +46,7 @@ export async function startWithHostKeyTrust(
       variant: "danger",
       confirmLabel: "指纹无误，信任并连接",
       cancelLabel: "取消",
-      description: `该主机不在 ~/.ssh/known_hosts 中。请通过可信渠道核对指纹后再继续：\n\n${info.algorithm}\n${info.fingerprint}`,
+      description: `该主机不在 ~/.ssh/known_hosts 中。请先登录云厂商控制台或服务器本地终端（不要通过当前这条待确认的 SSH 连接），执行：\n\nssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\n\n将命令输出中的 SHA256 指纹与下方指纹逐字核对：\n\n算法：${info.algorithm}\n指纹：${info.fingerprint}\n\n如果服务器使用的不是 ED25519 主机密钥，请把命令中的文件名换成对应算法，例如 ssh_host_rsa_key.pub。`,
       notice: "指纹不符说明连接可能被劫持，此时继续会把密码和隧道流量交给攻击者。",
     });
     if (!ok) throw e;

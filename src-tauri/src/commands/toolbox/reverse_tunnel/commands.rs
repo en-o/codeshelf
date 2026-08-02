@@ -212,7 +212,11 @@ pub async fn start_reverse_tunnel(tunnel_id: String) -> AppResult<()> {
             }
         }
         Err(e) => {
-            if tunnel.auto_reconnect {
+            // 未知主机密钥必须先回到前端展示指纹；若吞进自动重连，用户只会看到
+            // “Unknown server key”，却永远没有确认入口。
+            if tunnel.auto_reconnect
+                && !crate::commands::toolbox::ssh_hostkey::needs_user_confirmation(&e.to_string())
+            {
                 let mut tunnels = REVERSE_TUNNELS.lock().await;
                 if let Some(t) = tunnels.get_mut(&tunnel_id) {
                     t.status = "reconnecting".to_string();
