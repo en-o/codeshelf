@@ -34,91 +34,21 @@ fi
 
 VERSION=$1
 
-# 验证版本号格式 (x.y.z)。
-# 用 grep -E 而不是 `[[ =~ ]]`：后者是 bashism，`sh scripts/release.sh` 会解析失败。
-# 规则与 scripts/release.bat 保持一致。
-if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    error "版本号格式无效: $VERSION (应为 x.y.z 格式，如 0.2.0)"
-fi
-
-# 获取脚本所在目录的父目录（项目根目录）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 切到项目根：后面所有 git 操作和 precheck 都假设 cwd 是仓库根
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
+cd "$PROJECT_ROOT" || exit 1
+
+# 前置校验全部交给 scripts/release-precheck.mjs：
+# 版本号格式、git 仓库、分支、工作树干净、基线（落后/分叉拦，仅发版提交可领先）、
+# release 分支占用。**与 release.bat 共用同一份实现**，避免两边逻辑漂移。
+BRANCH_NAME="release/$VERSION"
 
 info "项目目录: $PROJECT_ROOT"
 info "目标版本: $VERSION"
 
-# 检查是否在 git 仓库中
-if [ ! -d ".git" ]; then
-    error "当前目录不是 git 仓库"
-fi
-
-# 检查当前是否在 main 分支
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$CURRENT_BRANCH" != "main" ]; then
-    error "当前分支是 $CURRENT_BRANCH，请在 main 分支上运行此脚本"
-fi
-
-# 工作树与暂存区必须干净。
-#
-# 之前这段检查是注释掉的，而脚本只 `git add` 五个版本文件 —— 组合起来有两个坑：
-#   1. 预先 staged 的文件会被 `git commit` 一并带进发版提交（不在那五个文件里，
-#      却出现在 release 分支上）；
-#   2. 未暂存的改动参与了本地构建和校验，却**不会**进入 release，
-#      于是「我本地测过」和「发出去的包」根本不是同一份代码。
-if [ -n "$(git status --porcelain)" ]; then
-    echo ""
-    git status --short
-    echo ""
-    error "工作树/暂存区不干净（见上）。发版必须从确定的源码开始：请先提交或 stash。"
-fi
-
-# 基线校验：**只允许**领先在「发版 commit」上。
-#
-# 为什么不是简单要求与 origin/main 完全一致：本脚本自己就会在 main 上留下
-# 一个 `chore: release vX` 提交（提交后才切分支），下次再发版时 main 天然领先一个。
-# 要求完全一致会逼着你先 `git push origin main`，而那会让 CI 在 main 上再跑一遍 ——
-# 于是同一个 commit 触发两个 workflow。
-#
-# 但**落后**必须拦：那意味着拿的是旧代码，打出来的包不含 origin/main 上的新提交。
-# 分叉同理。
-info "校验基线..."
-git fetch origin main --quiet || error "无法 fetch origin/main，请检查网络或远程配置"
-
-LOCAL_SHA=$(git rev-parse HEAD)
-REMOTE_SHA=$(git rev-parse origin/main)
-BASE_SHA=$(git merge-base HEAD origin/main)
-
-if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
-    if [ "$LOCAL_SHA" = "$BASE_SHA" ]; then
-        error "本地 main 落后于 origin/main，会用旧代码打包。请先 git pull"
-    elif [ "$REMOTE_SHA" = "$BASE_SHA" ]; then
-        # 领先：逐个检查未推送的提交，只有发版提交才放行
-        NON_RELEASE=$(git log --format=%s "origin/main..HEAD" | grep -vE '^chore: release v' || true)
-        if [ -n "$NON_RELEASE" ]; then
-            echo ""
-            echo "$NON_RELEASE"
-            echo ""
-            error "main 上有未推送的非发版提交（见上）。它们不会进入本次 release 分支，请先推送或整理。"
-        fi
-        AHEAD=$(git rev-list --count "origin/main..HEAD")
-        warn "main 领先 origin/main $AHEAD 个提交，均为历史发版提交，继续。"
-    else
-        error "本地 main 与 origin/main 已分叉，请先处理后再发版"
-    fi
-fi
-success "基线校验通过"
-
-# 检查 release 分支是否已存在
-BRANCH_NAME="release/$VERSION"
-if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-    error "本地分支 $BRANCH_NAME 已存在，请先删除: git branch -D $BRANCH_NAME"
-fi
-
-if git ls-remote --exit-code --heads origin "$BRANCH_NAME" &>/dev/null; then
-    error "远程分支 origin/$BRANCH_NAME 已存在，请先删除或使用其他版本号"
-fi
+node scripts/release-precheck.mjs baseline "$VERSION" || exit 1
+success "前置校验通过"
 
 echo ""
 info "开始更新版本号..."
@@ -211,25 +141,8 @@ for f in $VERSION_FILES; do
     [ -f "$f" ] && git add "$f"
 done
 
-# 提交内容必须**可预测**：因为开工前已确认工作树干净，此刻 staged 的应当
-# 恰好是这五个文件。多出任何一个都说明中途有别的东西混进来了，停下来。
-STAGED=$(git diff --cached --name-only | sort)
-EXPECTED=$(printf '%s\n' "$VERSION_FILES" | sort)
-# 用 grep 而不是 `comm <(…) <(…)`：进程替换是 bashism，
-# 脚本一旦被 `sh scripts/release.sh` 这样调用就会在**解析期**报
-# 「syntax error near unexpected token `('」，连第一行都跑不到。
-# `grep -vxF` 的语义等价：取 STAGED 中不与 EXPECTED 任何一行完全相同的行。
-# grep 无匹配时返回 1，配合 set -e 会误退出，所以补 `|| true`。
-UNEXPECTED=$(printf '%s\n' "$STAGED" | grep -vxF "$EXPECTED" || true)
-if [ -n "$UNEXPECTED" ]; then
-    echo ""
-    echo "$UNEXPECTED"
-    echo ""
-    error "暂存区出现了非版本文件（见上），已中止。发版提交只应包含版本号改动。"
-fi
-
-info "本次发版提交将包含："
-echo "$STAGED" | sed 's/^/    /'
+# 暂存区只能含版本文件（同样走共用脚本）
+node scripts/release-precheck.mjs verify-staged || exit 1
 
 # 7. Git commit
 info "提交更改..."

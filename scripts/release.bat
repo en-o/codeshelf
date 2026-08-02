@@ -22,84 +22,19 @@ if "%~1"=="" (
 
 set VERSION=%~1
 
-:: 验证版本号格式。
+:: 前置校验全部交给 scripts\release-precheck.mjs：
+:: 版本号格式、git 仓库、分支、工作树干净、基线（落后/分叉拦，仅发版提交可领先）、
+:: release 分支占用。**与 release.sh 共用同一份实现**。
 ::
-:: 原来只用 `for /f delims=.` 检查「有没有第三段」，`1.2.foo`、`1.2.3.4` 都能通过，
-:: 然后这些非法值会被写进 package.json / tauri.conf.json / Cargo.toml 五个文件。
-:: 改用与 scripts/release.sh **完全相同**的正则，且在改写任何文件之前完成校验。
-node -e "process.exit(/^[0-9]+\.[0-9]+\.[0-9]+$/.test(process.argv[1]) ? 0 : 1)" "%VERSION%"
-if errorlevel 1 (
-    echo [ERROR] 版本号格式无效: %VERSION% ^(应为 x.y.z 格式，如 0.2.0^)
-    exit /b 1
-)
-
-:: 切换到脚本所在目录的父目录（项目根目录）
-cd /d "%~dp0.."
-set PROJECT_ROOT=%cd%
-
-echo [INFO] 项目目录: %PROJECT_ROOT%
-echo [INFO] 目标版本: %VERSION%
-
-:: 检查是否在 git 仓库中
-if not exist ".git" (
-    echo [ERROR] 当前目录不是 git 仓库
-    exit /b 1
-)
-
-:: 检查当前是否在 main 分支
-for /f "tokens=*" %%a in ('git rev-parse --abbrev-ref HEAD') do set CURRENT_BRANCH=%%a
-if not "%CURRENT_BRANCH%"=="main" (
-    echo [ERROR] 当前分支是 %CURRENT_BRANCH%，请在 main 分支上运行此脚本
-    exit /b 1
-)
-
-:: 工作树与暂存区必须干净（与 release.sh 一致）。
-:: 脚本只 git add 五个版本文件，但 git commit 会把**所有** staged 内容一并提交；
-:: 未暂存的改动则参与了本地验证却进不了 release，两边代码对不上。
-for /f "tokens=*" %%a in ('git status --porcelain') do (
-    echo.
-    git status --short
-    echo.
-    echo [ERROR] 工作树/暂存区不干净^(见上^)。发版必须从确定的源码开始：请先提交或 stash。
-    exit /b 1
-)
-
-:: 基线必须与远程一致
-echo [INFO] 校验 main 与 origin/main 是否同步...
-git fetch origin main --quiet
-if errorlevel 1 (
-    echo [ERROR] 无法 fetch origin/main，请检查网络或远程配置
-    exit /b 1
-)
-for /f "tokens=*" %%a in ('git rev-parse HEAD') do set LOCAL_SHA=%%a
-for /f "tokens=*" %%a in ('git rev-parse origin/main') do set REMOTE_SHA=%%a
-for /f "tokens=*" %%a in ('git merge-base HEAD origin/main') do set BASE_SHA=%%a
-if not "%LOCAL_SHA%"=="%REMOTE_SHA%" (
-    if "%LOCAL_SHA%"=="%BASE_SHA%" (
-        echo [ERROR] 本地 main 落后于 origin/main，请先 git pull
-    ) else if "%REMOTE_SHA%"=="%BASE_SHA%" (
-        echo [ERROR] 本地 main 领先于 origin/main^(有未推送的提交^)，请先 git push
-    ) else (
-        echo [ERROR] 本地 main 与 origin/main 已分叉，请先处理后再发版
-    )
-    exit /b 1
-)
-echo [SUCCESS] 基线一致: %LOCAL_SHA%
-
-:: 检查 release 分支是否已存在
+:: 这些判定原先在 .bat 里用 for /f 又写了一遍，结果和 .sh 漂移：
+:: sh 改成「只允许发版提交领先」「只 add 存在的文件」之后 bat 没跟上，
+:: 于是同样的仓库状态在 Windows 上报错、在 macOS 上正常。
+:: batch 的 for /f 处理 git 输出也很脆（引号、特殊字符、延迟展开）。
 set BRANCH_NAME=release/%VERSION%
 
-git show-ref --verify --quiet "refs/heads/%BRANCH_NAME%" 2>nul
-if not errorlevel 1 (
-    echo [ERROR] 本地分支 %BRANCH_NAME% 已存在，请先删除: git branch -D %BRANCH_NAME%
-    exit /b 1
-)
-
-git ls-remote --exit-code --heads origin "%BRANCH_NAME%" >nul 2>&1
-if not errorlevel 1 (
-    echo [ERROR] 远程分支 origin/%BRANCH_NAME% 已存在，请先删除或使用其他版本号
-    exit /b 1
-)
+node scripts\release-precheck.mjs baseline %VERSION%
+if errorlevel 1 exit /b 1
+echo [SUCCESS] 前置校验通过
 
 echo.
 echo [INFO] 开始更新版本号...
@@ -179,18 +114,15 @@ echo [INFO] 版本号更新完成，开始 Git 操作...
 
 :: 6. Git add
 echo [INFO] 暂存更改...
-git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-if errorlevel 1 (
-    echo [ERROR] git add 失败
-    exit /b 1
+:: 只 add **确实存在**的文件：上面对缺失的 lock 文件是「warn 并跳过」，
+:: 无条件 add 一个不存在的路径会让 git add 直接失败，两处行为对不上。
+for %%f in (package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock) do (
+    if exist "%%f" git add "%%f"
 )
 
 :: 提交内容必须可预测：开工前已确认工作树干净，此刻 staged 的应恰好是这五个文件
-node -e "const {execSync}=require('child_process');const expected=['package.json','package-lock.json','src-tauri/tauri.conf.json','src-tauri/Cargo.toml','src-tauri/Cargo.lock'];const staged=execSync('git diff --cached --name-only').toString().split('\n').map(s=>s.trim()).filter(Boolean);const extra=staged.filter(f=>!expected.includes(f));if(extra.length){console.error('非版本文件混入暂存区: '+extra.join(', '));process.exit(1)}console.log('本次发版提交将包含:');staged.forEach(f=>console.log('    '+f));"
-if errorlevel 1 (
-    echo [ERROR] 暂存区出现了非版本文件，已中止。发版提交只应包含版本号改动。
-    exit /b 1
-)
+node scripts\release-precheck.mjs verify-staged
+if errorlevel 1 exit /b 1
 if errorlevel 1 (
     echo [ERROR] git add 失败
     exit /b 1
