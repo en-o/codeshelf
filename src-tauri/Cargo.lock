@@ -918,7 +918,7 @@ checksum = "3f88a43d011fc4a6876cb7344703e297c71dda42494fee094d5f7c76bf13f746"
 
 [[package]]
 name = "codeshelf"
-version = "0.1.43"
+version = "0.1.44"
 dependencies = [
  "arboard",
  "axum",
