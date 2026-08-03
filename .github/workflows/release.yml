@@ -245,9 +245,9 @@ jobs:
           DEVICE=""
           cleanup() {
             if [ -n "$DEVICE" ]; then
-              hdiutil detach "$DEVICE"
+              hdiutil detach "$DEVICE" || true
             fi
-            rmdir "$MOUNT_DIR"
+            rmdir "$MOUNT_DIR" || true
           }
           trap cleanup EXIT
 
@@ -261,17 +261,26 @@ jobs:
           codesign --verify --deep --strict --verbose=4 "$APP_PATH"
           SIGNATURE_INFO=$(codesign --display --verbose=4 "$APP_PATH" 2>&1)
           echo "$SIGNATURE_INFO"
-          if ! echo "$SIGNATURE_INFO" | grep -q 'Sealed Resources'; then
+          if ! echo "$SIGNATURE_INFO" | grep -Eq 'Sealed Resources version=[0-9]+'; then
             echo "::error::app 没有完整的资源封印；这种包下载后可能被 Gatekeeper 判为已损坏"
             exit 1
           fi
 
           EXECUTABLE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")
-          ACTUAL_ARCHS=$(lipo -archs "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME")
-          if [ "$ACTUAL_ARCHS" != "$EXPECTED_MACOS_ARCH" ]; then
-            echo "::error::macOS 产物架构错误：期望 $EXPECTED_MACOS_ARCH，实际 $ACTUAL_ARCHS"
-            exit 1
-          fi
+          for BINARY_PATH in \
+            "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" \
+            "$APP_PATH/Contents/Resources/sidecars/node/node"
+          do
+            if [ ! -f "$BINARY_PATH" ]; then
+              echo "::error::macOS app 缺少必需二进制: $BINARY_PATH"
+              exit 1
+            fi
+            ACTUAL_ARCHS=$(lipo -archs "$BINARY_PATH")
+            if [ "$ACTUAL_ARCHS" != "$EXPECTED_MACOS_ARCH" ]; then
+              echo "::error::macOS 产物架构错误：$BINARY_PATH 期望 $EXPECTED_MACOS_ARCH，实际 $ACTUAL_ARCHS"
+              exit 1
+            fi
+          done
 
       # Windows 便携版（绿色版）
       - name: Create portable version (Windows)
