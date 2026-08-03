@@ -153,9 +153,13 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             config: 'src-tauri/tauri.release.conf.json'
+            macos_target: 'aarch64-apple-darwin'
+            expected_macos_arch: 'arm64'
           - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             config: 'src-tauri/tauri.release.conf.json'
+            macos_target: 'x86_64-apple-darwin'
+            expected_macos_arch: 'x86_64'
           - platform: 'ubuntu-22.04'
             args: ''
             config: 'src-tauri/tauri.release.conf.json'
@@ -216,6 +220,58 @@ jobs:
           releaseBody: ${{ needs.create-release.outputs.release_notes }}
           updaterJsonKeepUniversal: true
           args: ${{ matrix.args }} --config ${{ matrix.config }}
+
+      # 没有 Apple Developer ID 时，release config 至少会用 `-` 给整个 .app 做
+      # ad-hoc 签名。不能只依赖 Rust 链接器给主 Mach-O 留下的 linker signature：
+      # 那种签名没有资源封印，浏览器下载后 Gatekeeper 会把应用判成“已损坏”。
+      - name: Verify macOS bundle signature, architecture and DMG
+        if: startsWith(matrix.platform, 'macos-')
+        shell: bash
+        env:
+          MACOS_TARGET: ${{ matrix.macos_target }}
+          EXPECTED_MACOS_ARCH: ${{ matrix.expected_macos_arch }}
+        run: |
+          DMG_DIR="src-tauri/target/$MACOS_TARGET/release/bundle/dmg"
+          DMG_PATH=$(find "$DMG_DIR" -maxdepth 1 -type f -name '*.dmg' -print -quit)
+          if [ -z "$DMG_PATH" ]; then
+            echo "::error::找不到 DMG: $DMG_DIR"
+            exit 1
+          fi
+          hdiutil verify "$DMG_PATH"
+
+          # Tauri 的 DMG 脚本结束时会清理 bundle/macos 下的临时 .app，必须挂载最终
+          # DMG 再验；这样同时确认上传给用户的那份容器里确实是正确架构和完整签名。
+          MOUNT_DIR=$(mktemp -d)
+          DEVICE=""
+          cleanup() {
+            if [ -n "$DEVICE" ]; then
+              hdiutil detach "$DEVICE"
+            fi
+            rmdir "$MOUNT_DIR"
+          }
+          trap cleanup EXIT
+
+          DEVICE=$(hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_DIR" "$DMG_PATH" | awk '/^\/dev\// { print $1; exit }')
+          APP_PATH=$(find "$MOUNT_DIR" -maxdepth 1 -type d -name '*.app' -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::DMG 内找不到 app bundle: $DMG_PATH"
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=4 "$APP_PATH"
+          SIGNATURE_INFO=$(codesign --display --verbose=4 "$APP_PATH" 2>&1)
+          echo "$SIGNATURE_INFO"
+          if ! echo "$SIGNATURE_INFO" | grep -q 'Sealed Resources'; then
+            echo "::error::app 没有完整的资源封印；这种包下载后可能被 Gatekeeper 判为已损坏"
+            exit 1
+          fi
+
+          EXECUTABLE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")
+          ACTUAL_ARCHS=$(lipo -archs "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME")
+          if [ "$ACTUAL_ARCHS" != "$EXPECTED_MACOS_ARCH" ]; then
+            echo "::error::macOS 产物架构错误：期望 $EXPECTED_MACOS_ARCH，实际 $ACTUAL_ARCHS"
+            exit 1
+          fi
 
       # Windows 便携版（绿色版）
       - name: Create portable version (Windows)

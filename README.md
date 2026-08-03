@@ -27,6 +27,15 @@ CodeShelf 把这些收进**一个桌面窗口**：集中管理本地 Git 项目�
 
 前往 [Releases 页面](https://github.com/en-o/codeshelf/releases) 下载 **Windows / macOS / Linux** 最新安装包，或 Windows 免安装的**便携版**。应用内支持自动检查更新。
 
+macOS 请按处理器选择安装包：
+
+| 设备 | 安装包 |
+|---|---|
+| Apple Silicon（M1 / M2 / M3 / M4 等） | `CodeShelf_<版本>_aarch64.dmg` |
+| Intel Mac | `CodeShelf_<版本>_x64.dmg` |
+
+`.AppImage` 是 Linux 应用格式，不能在 macOS 上安装。
+
 ## 🖼 功能一览
 
 ### 📖 书架

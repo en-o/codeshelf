@@ -36,7 +36,8 @@
    已完成（AUD-007 部分完成）。
 3. ~~**数据、升级与发布 P1**：AUD-010、AUD-021～AUD-025、AUD-051~~ —— 已完成。
 4. ~~**P2/P3 整理**：AUD-012～AUD-015、AUD-026～AUD-043、AUD-052～AUD-060~~ —— 已完成。
-   仅剩 AUD-061（需先采购证书，代码侧无法关闭）。
+   AUD-061 已补上 ad-hoc bundle 签名与 CI 完整性检查；Developer ID/notarization 和
+   Windows Authenticode 仍需证书，尚未关闭。
 
 > 进度：60 / 61 已整改（AUD-001～006、008～060），
 > AUD-007 部分整改。
@@ -1695,7 +1696,8 @@
 
 ### AUD-061 · P2 · 发布包补齐操作系统代码签名与 notarization
 
-- [ ] 状态：待处理
+- [~] 状态：部分整改。macOS release 已启用 ad-hoc bundle 签名，CI 会校验资源封印、
+  CPU 架构与 DMG 完整性；Developer ID/notarization 与 Windows Authenticode 尚未接入。
 - 风险：当前仅配置 Tauri updater 签名，它能验证更新包，却不等于 Apple Developer ID/notarization
   或 Windows Authenticode。直接从 Releases 首次安装时仍可能被 Gatekeeper、Unknown Publisher 或
   SmartScreen 阻止/强警告，用户也无法验证发布者身份。
