@@ -87,7 +87,9 @@ if not exist "src-tauri\Cargo.toml" (
     exit /b 1
 )
 
-node -e "const fs=require('fs');let c=fs.readFileSync('src-tauri/Cargo.toml','utf8');c=c.replace(/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/m,'version = \"%VERSION%\"');fs.writeFileSync('src-tauri/Cargo.toml',c);"
+:: 正则必须允许预览版后缀 `-N`（0.2.0-1），否则匹配不到就**静默不改**，
+:: 一直拖到 CI 的「四处版本号必须一致」才报错。与 release.sh 保持一致。
+node -e "const fs=require('fs');let c=fs.readFileSync('src-tauri/Cargo.toml','utf8');c=c.replace(/^version = \"[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?\"/m,'version = \"%VERSION%\"');fs.writeFileSync('src-tauri/Cargo.toml',c);"
 if errorlevel 1 (
     echo [ERROR] 更新 src-tauri/Cargo.toml 失败
     exit /b 1

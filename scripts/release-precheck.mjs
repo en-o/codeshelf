@@ -55,8 +55,12 @@ function git(args, { allowFail = false } = {}) {
 function baseline(version) {
   // 1) 版本号格式。两个平台必须用**同一条**正则 ——
   //    bat 早先用 `for /f delims=.` 只看有没有第三段，`1.2.foo` 也能过。
-  if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) {
-    fail(`版本号格式无效: ${version} (应为 x.y.z 格式，如 0.2.0)`);
+  //
+  //    `x.y.z` = 正式版；`x.y.z-N` = 预览版（应用据此关掉自动更新，见 services/updater）。
+  //    后缀只允许**纯数字**：MSI 的 ProductVersion 只认 `-<数字>`，
+  //    写成 `-beta.1` / `-rc1` 会让 Windows 出包在 CI 上直接失败。
+  if (!/^\d+\.\d+\.\d+(-\d+)?$/.test(version ?? "")) {
+    fail(`版本号格式无效: ${version} (正式版 x.y.z，如 0.2.0；预览版 x.y.z-N，如 0.2.0-1)`);
   }
 
   // 2) 必须在 git 仓库里

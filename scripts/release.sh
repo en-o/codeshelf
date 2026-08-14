@@ -96,14 +96,17 @@ info "更新 src-tauri/Cargo.toml..."
 if [ -f "src-tauri/Cargo.toml" ]; then
     # 使用 sed 更新 version（只更新 [package] 下的第一个 version）
     # `case` 而不是 `[[ == pattern ]]`：同样是为了能被 POSIX sh 解析
+    #
+    # 模式必须允许预览版后缀 `-N`：旧模式匹配不到 `version = "0.2.0-1"`，
+    # 会**静默不改**，最后在 CI 的「四处版本号必须一致」处才炸。
     case "$(uname -s)" in
       Darwin)
         # macOS 的 sed 需要 -i ''
-        sed -i '' "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+        sed -i '' "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\(-[0-9]*\)\{0,1\}\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
         ;;
       *)
         # Linux/WSL 的 sed
-        sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+        sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\(-[0-9]*\)\{0,1\}\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
         ;;
     esac
     success "src-tauri/Cargo.toml -> $VERSION"
