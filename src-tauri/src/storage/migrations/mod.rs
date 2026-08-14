@@ -33,7 +33,41 @@ pub async fn run_migrations(data_dir: &Path) -> AppResult<()> {
         log::debug!("数据库 schema_version={}，无迁移待执行", current);
     }
 
+    if get_schema_version().await? < 5 {
+        log::info!("开始执行 v5 迁移（chat_sessions.engine）");
+        run_v5().await?;
+        set_schema_version(5).await?;
+        log::info!("v5 迁移完成，schema_version=5");
+    }
+
     Ok(())
+}
+
+/// v5：会话增加 `engine` 列（builtin / dsh）。
+///
+/// **为什么是 5 而不是 2**：2/3/4 这三个号已经被发出去过的版本用掉了
+/// （run profiles / dev scenes / 镜像中心，代码后来被裁掉，但用户库里的
+/// `schema_version` 表已经写着 4）。再用 2 的话 `< 2` 恒为假，这条迁移
+/// 在所有老用户机器上都不会跑，然后每次保存会话都撞 `no such column: engine`。
+/// 新号只能往上取。
+///
+/// 纯加列、可空、无默认值 —— 老会话读出来是 NULL，按 builtin 处理，不需要回填。
+/// 不改 v1_initial.sql：新库同样是「建 v1 表 → 这里加列」，两条路径落到同一个结构，
+/// 免得以后有人只改了其中一处。
+async fn run_v5() -> AppResult<()> {
+    match sqlx::query("ALTER TABLE chat_sessions ADD COLUMN engine TEXT")
+        .execute(pool())
+        .await
+    {
+        Ok(_) => Ok(()),
+        // 列已存在 = 上一次加列成功但写版本号失败（进程刚好在这中间挂掉）。
+        // 迁移失败会**整屏阻断启动**，所以这一步必须可重入，不能让重跑把应用锁死。
+        Err(e) if e.to_string().contains("duplicate column name") => {
+            log::warn!("v5: engine 列已存在，跳过加列");
+            Ok(())
+        }
+        Err(e) => Err(crate::error::AppError::from(format!("v5 加列失败: {}", e))),
+    }
 }
 
 async fn run_v1(data_dir: &Path) -> AppResult<()> {

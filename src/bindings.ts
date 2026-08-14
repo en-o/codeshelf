@@ -3305,7 +3305,12 @@ useMcpGatewayTools?: boolean | null;
 /**
  * 当前生效的上下文压缩版本号（如 "v2"）。None 表示从未压缩
  */
-currentCompactionVersion?: string | null }
+currentCompactionVersion?: string | null; 
+/**
+ * 对话引擎："builtin"（默认，内置 agent 循环）或 "dsh"（DeepSeek Harness 子进程）。
+ * None = builtin，老会话不受影响。
+ */
+engine?: string | null }
 export type ChatSessionSummary = { id: string; title: string; providerId: string; modelId: string; createdAt: string; updatedAt: string; messageCount: number; pinned?: boolean | null }
 export type ChatStreamMessage = { role: string; 
 /**

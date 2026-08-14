@@ -101,11 +101,20 @@ export function ChatHeader({
             >
               {activeSession.allowedCwd ? `📁 ${activeSession.allowedCwd.split("/").pop()}` : "未选目录（普通对话）"}
             </span>
-            {toolsEnabled && (
-              <span className="text-[11px] text-blue-600" title="本地沙箱工具已启用">🛠 本地</span>
-            )}
-            {activeSession.useMcpGatewayTools !== false && (
-              <span className="text-[11px] text-emerald-600" title="MCP gateway 工具：启动后自动可调">🌐 MCP</span>
+            {activeSession.engine === "dsh" ? (
+              // dsh 会话不走本地工具 / MCP，这两个角标显示出来只会误导
+              <span className="text-[11px] text-amber-600" title="由 DeepSeek Harness 接管本会话">
+                🤖 dsh
+              </span>
+            ) : (
+              <>
+                {toolsEnabled && (
+                  <span className="text-[11px] text-blue-600" title="本地沙箱工具已启用">🛠 本地</span>
+                )}
+                {activeSession.useMcpGatewayTools !== false && (
+                  <span className="text-[11px] text-emerald-600" title="MCP gateway 工具：启动后自动可调">🌐 MCP</span>
+                )}
+              </>
             )}
             <div className="relative">
               <button

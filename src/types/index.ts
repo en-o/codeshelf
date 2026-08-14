@@ -214,7 +214,11 @@ export interface ChatSession {
   useMcpGatewayTools?: boolean;
   /** 当前生效的上下文压缩版本号（如 "v2"）；缺省表示从未压缩 */
   currentCompactionVersion?: string;
+  /** 对话引擎；缺省 "builtin"。"dsh" 由 DeepSeek Harness 子进程接管 agent 循环 */
+  engine?: ChatEngine;
 }
+
+export type ChatEngine = "builtin" | "dsh";
 
 export interface ChatSessionSummary {
   id: string;

@@ -1,7 +1,7 @@
 import { Brain, ListChecks, Settings } from "lucide-react";
 import { showToast } from "@/components/ui";
 import type { Project } from "@/types";
-import type { ChatSession } from "@/types";
+import type { ChatEngine, ChatSession } from "@/types";
 import type { ToolSchema } from "@/services/chat";
 
 interface SessionToolsMenuProps {
@@ -41,11 +41,38 @@ export function SessionToolsMenu({
   onOpenConfig,
   onClose,
 }: SessionToolsMenuProps) {
+  const isDsh = session.engine === "dsh";
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div className="absolute right-0 top-full mt-1 w-[320px] bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3 space-y-3 text-xs">
-        {/* 工具 */}
+        {/* 引擎 */}
+        <div>
+          <div className="font-semibold text-gray-700 mb-1">🤖 对话引擎</div>
+          <select
+            className="w-full px-2 py-1 border border-gray-200 rounded"
+            value={session.engine ?? "builtin"}
+            onChange={async (e) => {
+              const engine = e.target.value as ChatEngine;
+              await onPersistSession({ ...session, engine: engine === "builtin" ? undefined : engine });
+            }}
+            disabled={streaming}
+          >
+            <option value="builtin">内置（CodeShelf 的工具与审批）</option>
+            <option value="dsh">dsh（DeepSeek Harness 接管）</option>
+          </select>
+          {isDsh && (
+            <div className="text-[10px] text-amber-700 leading-tight mt-1 space-y-0.5">
+              <p>需要先在下面选工作目录 —— dsh 的文件操作被限制在这个目录内。</p>
+              <p>工具、审批、上下文压缩都由 dsh 自己管，下面的开关对它无效。</p>
+              <p>没有中途取消：点停止等于关掉引擎，重启后 dsh 侧是新上下文。</p>
+              <p>先到 设置 → dsh 引擎 里安装运行时。</p>
+            </div>
+          )}
+        </div>
+
+        {/* 工具（dsh 自带一套，这里的开关只对内置引擎生效） */}
+        {!isDsh && (
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="font-semibold text-gray-700">🛠 工具</span>
@@ -89,8 +116,10 @@ export function SessionToolsMenu({
             </div>
           )}
         </div>
+        )}
 
         {/* MCP gateway 工具 */}
+        {!isDsh && (
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="font-semibold text-gray-700">🌐 MCP 接口工具</span>
@@ -112,10 +141,13 @@ export function SessionToolsMenu({
             启用后，本会话可调用 MCP gateway 暴露的接口工具（来自"接口"中已注册的端点）。需要在设置中先启动 MCP gateway。
           </div>
         </div>
+        )}
 
         {/* 目录 */}
         <div>
-          <div className="font-semibold text-gray-700 mb-1">📁 目录（选了才会把项目上下文注入 system）</div>
+          <div className="font-semibold text-gray-700 mb-1">
+            {isDsh ? "📁 工作目录（dsh 必填，文件操作限制在此）" : "📁 目录（选了才会把项目上下文注入 system）"}
+          </div>
           <select
             className="w-full px-2 py-1 border border-gray-200 rounded"
             value={
@@ -138,7 +170,7 @@ export function SessionToolsMenu({
             }}
             disabled={streaming}
           >
-            <option value="">未选（普通对话）</option>
+            <option value="">{isDsh ? "未选（dsh 无法启动）" : "未选（普通对话）"}</option>
             {projects.length > 0 && (
               <optgroup label="📚 书架项目">
                 {projects.map((p) => (<option key={p.id} value={`project:${p.path}`}>{p.name}</option>))}

@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "verify:release": "bash scripts/verify-release.sh",
+    "dsh:smoke": "node scripts/dsh-smoke.mjs",
     "build:portable": "scripts\\build-portable.bat"
   },
   "repository": {

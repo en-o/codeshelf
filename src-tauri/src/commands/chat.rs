@@ -231,11 +231,12 @@ struct SessionDbRow {
     allowed_cwd: Option<String>,
     use_mcp_gateway_tools: Option<i64>,
     current_compaction_version: Option<String>,
+    engine: Option<String>,
 }
 
 const SESSION_SELECT: &str = "SELECT id, title, provider_id, model_id, created_at, updated_at,
     system_prompt, temperature, max_tokens, top_p, frequency_penalty, presence_penalty,
-    pinned, allowed_cwd, use_mcp_gateway_tools, current_compaction_version FROM chat_sessions";
+    pinned, allowed_cwd, use_mcp_gateway_tools, current_compaction_version, engine FROM chat_sessions";
 
 #[derive(sqlx::FromRow)]
 struct MessageDbRow {
@@ -315,6 +316,7 @@ fn session_from_row(row: SessionDbRow) -> ChatSession {
         allowed_cwd: row.allowed_cwd,
         use_mcp_gateway_tools: row.use_mcp_gateway_tools.map(|x| x != 0),
         current_compaction_version: row.current_compaction_version,
+        engine: row.engine,
     }
 }
 
@@ -396,8 +398,8 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
             id, title, provider_id, model_id, created_at, updated_at,
             system_prompt, temperature, max_tokens, top_p, frequency_penalty,
             presence_penalty, pinned, allowed_cwd, use_mcp_gateway_tools,
-            current_compaction_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            current_compaction_version, engine
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             provider_id = excluded.provider_id,
@@ -412,7 +414,8 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
             pinned = excluded.pinned,
             allowed_cwd = excluded.allowed_cwd,
             use_mcp_gateway_tools = excluded.use_mcp_gateway_tools,
-            current_compaction_version = excluded.current_compaction_version",
+            current_compaction_version = excluded.current_compaction_version,
+            engine = excluded.engine",
     )
     .bind(&session.id)
     .bind(&session.title)
@@ -430,6 +433,7 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
     .bind(&session.allowed_cwd)
     .bind(session.use_mcp_gateway_tools.map(|x| x as i64))
     .bind(&session.current_compaction_version)
+    .bind(&session.engine)
     .execute(&mut *tx)
     .await
     .map_err(|e| crate::error::AppError::from(format!("upsert chat_sessions 失败: {}", e)))?;
@@ -609,6 +613,8 @@ pub async fn create_chat_session(input: CreateChatSessionInput) -> AppResult<Cha
         allowed_cwd: None,
         use_mcp_gateway_tools: None,
         current_compaction_version: None,
+        // 缺省 builtin；用户在会话设置里改成 dsh
+        engine: None,
     };
     write_session_full(&session).await?;
     Ok(session)
