@@ -7,9 +7,12 @@
 //
 // 子模块：
 // - runtime: 环境探测（node/npm）、安装/卸载、profile 落盘
+// - engine:  常驻子进程 + JSON-RPC 协议 + 通知转 Tauri 事件
 //
-// 协议、profile 组成与已知限制见 docs/specs/dsh-engine.md。
+// 协议、profile 组成与已知限制见 docs/specs/20260815-01-dsh引擎接入.md。
 
+mod engine;
 mod runtime;
 
+pub use engine::*;
 pub use runtime::*;

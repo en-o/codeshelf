@@ -71,6 +71,8 @@ pub fn run() {
                 keyboard_hook::stop_hook_from_manager(app);
                 // 杀掉仍在跑的 resume-agent node 子进程，防止孤儿进程继续调用 LLM
                 commands::resume_node_agent::kill_all_runs_on_exit();
+                // dsh 引擎同理：它自己还会拉起 bash / 子 agent，必须整组回收
+                commands::dsh::kill_engine_on_exit();
             }
         });
 }

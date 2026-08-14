@@ -2430,6 +2430,46 @@ async dshUninstall() : Promise<Result<DshEnvStatus, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async dshEngineStatus() : Promise<Result<DshEngineStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 启动引擎（已在跑且配置相同则直接复用）。
+ * 配置变了（换工作目录/换模型/换密钥）必须重启：这些值只在 initialize 和进程环境里出现一次。
+ */
+async dshEngineStart(config: DshEngineConfig) : Promise<Result<DshEngineStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_start", { config }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async dshEngineStop() : Promise<Result<DshEngineStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_stop") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 投递一条用户消息。返回的是**入队回执**（messageId），不是回答 ——
+ * 回答通过 `dsh-event` 事件流出来。
+ */
+async dshEnginePrompt(sessionKey: string, text: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_prompt", { sessionKey, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async chatListTools() : Promise<Result<ToolSchema[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("chat_list_tools") };
@@ -3443,6 +3483,21 @@ export type DownloadTask = { id: string; url: string; savePath: string; fileName
  * 重试次数上限，来自创建时的 DownloadConfig；旧数据无此字段，缺省 3
  */
 maxRetries?: number; createdAt: string; updatedAt: string }
+export type DshEngineConfig = { 
+/**
+ * agent 的工作目录（dsh 的 workspace，沙箱写入被限制在这里面）
+ */
+cwd: string; model: string; 
+/**
+ * OpenAI 兼容端点，注入为 DEEPSEEK_BASE_URL
+ */
+baseUrl: string; apiKey: string | null }
+export type DshEngineStatus = { running: boolean; pid: number | null; config: DshEngineConfig | null; 
+/**
+ * 本次运行的标识。dsh 的 sessionId 是一次性的（换了 runtime 再用同一个 id 会报
+ * 「已有持久化日志与当前会话不一致」），所以每次启动都要换一批会话 id。
+ */
+runId: string | null }
 export type DshEnvStatus = { 
 /**
  * 选中的 node 可执行文件（优先满足最低版本的那个）

@@ -292,6 +292,10 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         dsh::dsh_env_status,
         dsh::dsh_install,
         dsh::dsh_uninstall,
+        dsh::dsh_engine_status,
+        dsh::dsh_engine_start,
+        dsh::dsh_engine_stop,
+        dsh::dsh_engine_prompt,
         // Tools / Tasks
         tools::chat_list_tools,
         tools::chat_execute_tool,
