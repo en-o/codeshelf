@@ -2,6 +2,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { resolveResource } from "@tauri-apps/api/path";
 import { exists } from "@tauri-apps/plugin-fs";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
@@ -12,6 +13,39 @@ export interface UpdateInfo {
   date?: string;
   body?: string;
   isPortable?: boolean;
+  /** 预览版：不检查、不下载、不安装，只能手动下载安装包覆盖安装 */
+  isPreview?: boolean;
+}
+
+export type ReleaseChannel = "stable" | "preview";
+
+/**
+ * 渠道由版本号本身决定：带 semver 预发布后缀（`0.2.0-1`）是预览版，纯 `x.y.z` 是正式版。
+ *
+ * 后缀只允许纯数字 —— MSI 的 ProductVersion 不接受 `-beta.1` 这类标识符，
+ * 用它会让 Windows 出包直接失败（发版脚本里的版本号正则同样只放行 `-<数字>`）。
+ */
+export function isPreviewVersion(version: string): boolean {
+  return version.includes("-");
+}
+
+let cachedChannel: ReleaseChannel | null = null;
+
+export async function getReleaseChannel(): Promise<ReleaseChannel> {
+  if (cachedChannel) return cachedChannel;
+  cachedChannel = isPreviewVersion(await getVersion()) ? "preview" : "stable";
+  return cachedChannel;
+}
+
+/**
+ * 取远端更新的**唯一入口**。预览版在这里断流，返回 null。
+ *
+ * 检查 / 下载 / 下载并安装三条路径都各自调过 `check()`，守卫放在这一层，
+ * 就不用在每个入口各加一处、也不会漏掉以后新增的路径。
+ */
+async function checkUpstream(): Promise<Update | null> {
+  if ((await getReleaseChannel()) === "preview") return null;
+  return check();
 }
 
 // 缓存已检查的更新对象，以及已完成下载、可安装的更新对象
@@ -64,8 +98,17 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
     };
   }
 
+  // 预览版跳过更新检查（渠道说明见 isPreviewVersion）
+  if ((await getReleaseChannel()) === "preview") {
+    return {
+      available: false,
+      currentVersion: await getVersion(),
+      isPreview: true,
+    };
+  }
+
   try {
-    const update = await check();
+    const update = await checkUpstream();
     cachedUpdate = update;
     if (!update || downloadedUpdate?.version !== update.version) {
       downloadedUpdate = null;
@@ -117,7 +160,7 @@ async function doDownloadUpdate(
   onProgress?: (progress: number, total: number) => void
 ): Promise<void> {
   if (!cachedUpdate) {
-    const update = await check();
+    const update = await checkUpstream();
     if (!update) {
       throw new Error("No update available");
     }
@@ -191,7 +234,7 @@ async function doDownloadAndInstall(
 ): Promise<void> {
   let update = cachedUpdate;
   if (!update) {
-    update = await check();
+    update = await checkUpstream();
     if (!update) {
       throw new Error("No update available");
     }

@@ -57,9 +57,20 @@ jobs:
             echo "::error::版本号不一致，拒绝发版。请用 scripts/release.sh 统一改写后重试。"
             exit 1
           fi
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::版本号格式非法: $VERSION"
+          # x.y.z = 正式版；x.y.z-N = 预览版。后缀只允许纯数字 ——
+          # MSI 的 ProductVersion 不认 `-beta.1` 这类标识符，会让 Windows 出包失败。
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$'; then
+            echo "::error::版本号格式非法: $VERSION（正式版 x.y.z，预览版 x.y.z-N）"
             exit 1
+          fi
+
+          # 预览版必须标成 GitHub prerelease：`/releases/latest` 会跳过 prerelease，
+          # 正式版用户的 updater 端点（latest/download/latest.json）才不会被预览版顶掉。
+          if echo "$VERSION" | grep -q -- '-'; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "这是预览版：将发布为 GitHub Pre-release，且应用内不参与自动更新"
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
           fi
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -136,7 +147,7 @@ jobs:
               name: `CodeShelf ${tagName}`,
               body: releaseNotes,
               draft: true,
-              prerelease: false
+              prerelease: ${{ steps.get_version.outputs.prerelease }}
             });
             console.log(`Created new draft release: ${data.id}`);
             return data.id;
