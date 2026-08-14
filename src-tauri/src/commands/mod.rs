@@ -1,6 +1,7 @@
 pub mod api_chat;
 pub mod chat;
 pub mod chat_bridge;
+pub mod dsh;
 pub mod extras;
 pub mod git;
 pub mod project;

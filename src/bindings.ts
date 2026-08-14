@@ -2400,6 +2400,36 @@ async mcpGatewayInternalEndpoint() : Promise<Result<McpGatewayInternalEndpoint |
     else return { status: "error", error: e  as any };
 }
 },
+async dshEnvStatus() : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_env_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 安装/重装 dsh 与 profile。全过程日志按行发 `dsh-install-log` 事件。
+ */
+async dshInstall() : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_install") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 卸载：只删我们自己那一个目录。
+ */
+async dshUninstall() : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_uninstall") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async chatListTools() : Promise<Result<ToolSchema[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("chat_list_tools") };
@@ -3413,6 +3443,23 @@ export type DownloadTask = { id: string; url: string; savePath: string; fileName
  * 重试次数上限，来自创建时的 DownloadConfig；旧数据无此字段，缺省 3
  */
 maxRetries?: number; createdAt: string; updatedAt: string }
+export type DshEnvStatus = { 
+/**
+ * 选中的 node 可执行文件（优先满足最低版本的那个）
+ */
+nodePath: string | null; nodeVersion: string | null; 
+/**
+ * node 存在且主版本号 >= NODE_MIN_MAJOR
+ */
+nodeOk: boolean; nodeMinMajor: number; npmPath: string | null; 
+/**
+ * dsh 已装进数据目录且入口文件存在
+ */
+installed: boolean; installedVersion: string | null; targetVersion: string; 
+/**
+ * profile 的两个文件与其 node_modules 都就绪
+ */
+profileReady: boolean; root: string; home: string; profileDir: string }
 /**
  * 编辑器配置
  */

@@ -70,8 +70,11 @@ pub(super) fn get_augmented_path() -> String {
 }
 
 /// 获取需要额外添加到 PATH 的目录列表（不包含现有 PATH）
+///
+/// `pub(crate)`：dsh 引擎（commands/dsh）找 node/npm 时用的是同一套目录，
+/// 与其抄第二份 nvm 扫描逻辑，不如共用这一份。
 #[cfg(not(target_os = "windows"))]
-pub(super) fn get_extra_path_dirs() -> Vec<String> {
+pub(crate) fn get_extra_path_dirs() -> Vec<String> {
     let current_path = std::env::var("PATH").unwrap_or_default();
     let current_parts: Vec<&str> = current_path.split(':').collect();
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
