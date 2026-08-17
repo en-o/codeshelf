@@ -16,7 +16,7 @@ import {
   saveChatSession,
 } from "@/services/chat";
 import { dshEngineStatus, dshEnvStatus, dshWebOpen, type DshEnvStatus } from "@/services/dsh";
-import type { ChatMessage, ChatSession, ChatSessionSummary } from "@/types";
+import type { AiProviderConfig, ChatMessage, ChatSession, ChatSessionSummary } from "@/types";
 
 import { SessionSidebar } from "../Chat/components/SessionSidebar";
 import { MessageList } from "../Chat/components/MessageList";
@@ -25,6 +25,25 @@ import { RenameDialog } from "../Chat/components/RenameDialog";
 import { useDshRunner } from "./useDshRunner";
 import { exportSessionAsMarkdown } from "../Chat/utils/exportSession";
 import { buildModelOptions, getDefaultOptionKey, makeMessage } from "../Chat/utils/chatHelpers";
+
+/**
+ * 供应商 → dsh 侧的模型路由。
+ *
+ * dsh 的 profile 里声明了四条：deepseek-official（它自带的 DeepSeek 适配器）、
+ * openai / anthropic（pi-ai 自带目录，端点与模型清单都有默认值）、
+ * codeshelf（手工声明的 OpenAI 兼容路由，端点和型号由应用注入）。
+ *
+ * 认不出来的一律走 codeshelf —— 兼容端点是最常见的情况，
+ * 而错进 deepseek-official 会用 DeepSeek 专用适配器去打别人的接口。
+ */
+function dshRouteFor(provider: AiProviderConfig | undefined): string {
+  if (provider?.presetKey === "deepseek") return "deepseek-official";
+  if (provider?.presetKey === "openai") return "openai";
+  // Anthropic 目前没有预设项（内置对话还不会说它的协议），按端点认：
+  // 用「自定义厂商」填了 Anthropic 地址的，在 dsh 这边就该走 anthropic 路由。
+  if (/(^|\.)anthropic\.com/i.test(provider?.baseUrl ?? "")) return "anthropic";
+  return "codeshelf";
+}
 
 /**
  * dsh 页：DeepSeek Harness 自己的一块地方。
@@ -82,8 +101,11 @@ export function DshPage() {
     });
   }
 
+  const providerRoute = dshRouteFor(normalized.find((p) => p.id === selected?.providerId));
+
   const { runDshRequest, stopDsh, dshRunning } = useDshRunner({
     selected,
+    providerRoute,
     activeSessionRef,
     setActiveSession,
     syncSummary,

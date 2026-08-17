@@ -24,6 +24,8 @@ import type { ModelOption } from "../Chat/utils/chatHelpers";
 
 interface DshRunnerDeps {
   selected: ModelOption | null;
+  /** dsh 那边的模型路由名，见 dshRouteFor */
+  providerRoute: string;
   activeSessionRef: React.MutableRefObject<ChatSession | null>;
   setActiveSession: React.Dispatch<React.SetStateAction<ChatSession | null>>;
   syncSummary: (s: ChatSession) => void;
@@ -273,7 +275,7 @@ export function useDshRunner(deps: DshRunnerDeps) {
    */
   const runDshRequest = useCallback(
     async (session: ChatSession) => {
-      const { selected } = depsRef.current;
+      const { selected, providerRoute } = depsRef.current;
       if (!selected) return;
       if (!session.allowedCwd) {
         showToast("warning", "dsh 会话需要先选工作目录", "在会话设置里选一个项目目录");
@@ -293,6 +295,7 @@ export function useDshRunner(deps: DshRunnerDeps) {
           model: selected.model.model,
           baseUrl: selected.baseUrl,
           apiKey: selected.apiKey ?? null,
+          provider: providerRoute,
         });
         await listenerReadyRef.current;
         const done = new Promise<void>((resolve) => {

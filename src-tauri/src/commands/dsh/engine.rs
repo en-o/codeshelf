@@ -38,9 +38,26 @@ pub struct DshEngineConfig {
     /// agent 的工作目录（dsh 的 workspace，沙箱写入被限制在这里面）
     pub cwd: String,
     pub model: String,
-    /// OpenAI 兼容端点，注入为 DEEPSEEK_BASE_URL
+    /// 供应商端点（OpenAI 兼容或 Anthropic 原生，取决于 provider 路由）
     pub base_url: String,
     pub api_key: Option<String>,
+    /// dsh 那边的模型路由名，由前端按供应商类型给：
+    /// `deepseek-official`（dsh 自带的 DeepSeek 适配器）、`openai`、`anthropic`
+    /// （pi-ai 目录路由），其余 OpenAI 兼容端点用 `codeshelf`（profile 里手工声明的路由）。
+    /// 缺省 deepseek-official，兼容老会话。
+    #[serde(default)]
+    pub provider: Option<String>,
+}
+
+/// 路由白名单：profile 里声明了哪几条，这里就只允许哪几条。
+/// 传个没注册的名字，dsh 会在 initialize 阶段失败，错误信息还不直白。
+fn resolve_route(provider: Option<&str>) -> &'static str {
+    match provider {
+        Some("openai") => "openai",
+        Some("anthropic") => "anthropic",
+        Some("codeshelf") => "codeshelf",
+        _ => "deepseek-official",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -200,14 +217,25 @@ async fn start_engine(app: AppHandle, config: DshEngineConfig) -> AppResult<DshE
         )));
     }
 
+    // profile 内容跟着应用代码走（比如新增模型路由），每次启动对齐一次，
+    // 免得老用户装完就再也拿不到新配置。
+    super::runtime::ensure_profile_files()?;
+
+    let route = resolve_route(config.provider.as_deref());
+    let api_key = config.api_key.clone().unwrap_or_default();
     let mut cmd = Command::new(&node);
     cmd.arg(&entry)
         .arg("--profile")
         .arg(PROFILE_NAME)
         .current_dir(&config.cwd)
         .env("DSH_HOME", &home)
+        // deepseek-official 走 dsh 自带适配器，认这两个变量
         .env("DEEPSEEK_BASE_URL", &config.base_url)
-        .env("DEEPSEEK_API_KEY", config.api_key.clone().unwrap_or_default())
+        .env("DEEPSEEK_API_KEY", &api_key)
+        // pi-ai 的三条路由按 profile 里的 apiKeyEnv 引用取这一组
+        .env("CODESHELF_LLM_BASE_URL", &config.base_url)
+        .env("CODESHELF_LLM_API_KEY", &api_key)
+        .env("CODESHELF_LLM_MODEL", &config.model)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -327,7 +355,7 @@ async fn start_engine(app: AppHandle, config: DshEngineConfig) -> AppResult<DshE
         "initialize",
         json!({
             "cwd": config.cwd,
-            "provider": "deepseek-official",
+            "provider": route,
             "model": config.model,
         }),
         INIT_TIMEOUT,

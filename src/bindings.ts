@@ -3555,9 +3555,16 @@ export type DshEngineConfig = {
  */
 cwd: string; model: string; 
 /**
- * OpenAI 兼容端点，注入为 DEEPSEEK_BASE_URL
+ * 供应商端点（OpenAI 兼容或 Anthropic 原生，取决于 provider 路由）
  */
-baseUrl: string; apiKey: string | null }
+baseUrl: string; apiKey: string | null; 
+/**
+ * dsh 那边的模型路由名，由前端按供应商类型给：
+ * `deepseek-official`（dsh 自带的 DeepSeek 适配器）、`openai`、`anthropic`
+ * （pi-ai 目录路由），其余 OpenAI 兼容端点用 `codeshelf`（profile 里手工声明的路由）。
+ * 缺省 deepseek-official，兼容老会话。
+ */
+provider?: string | null }
 export type DshEngineStatus = { running: boolean; pid: number | null; config: DshEngineConfig | null; 
 /**
  * 本次运行的标识。dsh 的 sessionId 是一次性的（换了 runtime 再用同一个 id 会报
