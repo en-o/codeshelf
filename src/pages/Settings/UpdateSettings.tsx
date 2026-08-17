@@ -6,6 +6,7 @@ import {
   getArchStatus,
   getReleaseChannel,
   openCorrectArchDownload,
+  openReleaseDownload,
   type UpdateInfo,
   type ArchStatus,
   type ReleaseChannel,
@@ -131,28 +132,18 @@ export function UpdateSettings() {
             </p>
             <p className="text-xs text-gray-500 mt-1">v{currentVersion}</p>
           </div>
-          {isPreview ? (
-            <button
-              onClick={() => open("https://github.com/en-o/codeshelf/releases")}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors"
-            >
-              <ExternalLink size={16} />
-              手动下载
-            </button>
-          ) : (
-            <button
-              onClick={handleCheckUpdate}
-              disabled={checking || downloading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
-            >
-              {checking ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <RefreshCw size={16} />
-              )}
-              {checking ? "检查中..." : "检查更新"}
-            </button>
-          )}
+          <button
+            onClick={handleCheckUpdate}
+            disabled={checking || downloading}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
+          >
+            {checking ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <RefreshCw size={16} />
+            )}
+            {checking ? "检查中..." : "检查更新"}
+          </button>
         </div>
       </div>
 
@@ -190,6 +181,19 @@ export function UpdateSettings() {
                   </div>
                   <p className="text-xs text-gray-500 text-center">{progress}% 下载中...</p>
                 </div>
+              ) : isPreview ? (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => openReleaseDownload(updateInfo.version)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors"
+                  >
+                    <ExternalLink size={16} />
+                    去下载 v{updateInfo.version}
+                  </button>
+                  <p className="text-[11px] text-amber-700 text-center">
+                    预览版不自动安装：下载安装包后覆盖安装即可，数据不会丢失
+                  </p>
+                </div>
               ) : (
                 <button
                   onClick={handleDownloadUpdate}
@@ -209,16 +213,16 @@ export function UpdateSettings() {
         </div>
       )}
 
-      {/* 预览版：不检查、不下载、不安装，只能手动下载安装包覆盖安装 */}
+      {/* 预览版：照常检查并提示，但不下载、不安装，升级靠手动覆盖安装 */}
       {isPreview && (
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
           <div className="flex items-start gap-2">
             <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-amber-900 space-y-1">
-              <p className="text-sm font-medium">这是预览版，不参与自动更新</p>
-              <p>预览版不会检查、下载或安装更新，也不会收到新版本提示。</p>
+              <p className="text-sm font-medium">这是预览版：会提示新版本，但不会自动安装</p>
+              <p>正式版发新版时这里照常检查并提示，只是不会自动下载安装。</p>
               <p>
-                需要升级时请到 GitHub Releases 手动下载新版安装包，直接覆盖安装即可（数据不会丢失）。
+                升级时点「去下载」拿到新版安装包，直接覆盖安装即可（数据不会丢失）。
                 装上正式版（版本号形如 0.2.0，无 <code>-</code> 后缀）后会自动恢复自动更新。
               </p>
             </div>
@@ -226,14 +230,22 @@ export function UpdateSettings() {
         </div>
       )}
 
-      {/* 自动更新开关（预览版没有自动更新，开关不显示） */}
-      {!isPreview && (
-        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+      {/* 启动时检查开关。预览版同样有效 —— 它控制的是「是否检查并提示」，
+          而不是「是否自动安装」；预览版任何情况下都不会自动安装。 */}
+      <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-900">自动检查更新</p>
+              <p className="text-sm font-medium text-gray-900">
+                {isPreview ? "启动时检查新版本" : "自动检查更新"}
+              </p>
               <p className="text-xs text-gray-500 mt-1">
-                {autoUpdate ? "启动时自动检查并下载更新" : "已关闭自动更新，你仍可手动检查更新"}
+                {isPreview
+                  ? autoUpdate
+                    ? "启动时检查并提示新版本（不会自动安装）"
+                    : "已关闭启动检查，你仍可手动点上面的按钮"
+                  : autoUpdate
+                    ? "启动时自动检查并下载更新"
+                    : "已关闭自动更新，你仍可手动检查更新"}
               </p>
             </div>
             <button
@@ -249,8 +261,7 @@ export function UpdateSettings() {
               />
             </button>
           </div>
-        </div>
-      )}
+      </div>
 
       {/* 说明 */}
       <div className="p-3 bg-blue-50/50 border border-blue-200/50 rounded-lg">

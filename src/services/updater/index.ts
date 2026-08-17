@@ -13,7 +13,7 @@ export interface UpdateInfo {
   date?: string;
   body?: string;
   isPortable?: boolean;
-  /** 预览版：不检查、不下载、不安装，只能手动下载安装包覆盖安装 */
+  /** 预览版：会检查并提示新版本，但不下载、不安装，只能手动下载安装包覆盖安装 */
   isPreview?: boolean;
 }
 
@@ -38,14 +38,30 @@ export async function getReleaseChannel(): Promise<ReleaseChannel> {
 }
 
 /**
- * 取远端更新的**唯一入口**。预览版在这里断流，返回 null。
+ * 自动更新（下载 + 安装）的**唯一守卫**。预览版在这里断流。
  *
- * 检查 / 下载 / 下载并安装三条路径都各自调过 `check()`，守卫放在这一层，
+ * 三条自动路径（downloadUpdate / installUpdate / downloadAndInstallUpdate）都经过它，
  * 就不用在每个入口各加一处、也不会漏掉以后新增的路径。
+ *
+ * **检查不在此列**：预览版仍然要能感知到「正式版出了新版本」并提示用户，
+ * 只是升级动作得用户自己去下载安装包覆盖装。
  */
-async function checkUpstream(): Promise<Update | null> {
-  if ((await getReleaseChannel()) === "preview") return null;
-  return check();
+async function ensureAutoUpdatable(): Promise<void> {
+  if ((await getReleaseChannel()) === "preview") {
+    throw new Error("预览版不支持自动更新，请手动下载安装包覆盖安装");
+  }
+}
+
+/** 该版本对应的 GitHub Release 页；预览版的「去下载」按钮指向它 */
+export function releasePageUrl(version?: string): string {
+  if (!version) return "https://github.com/en-o/codeshelf/releases/latest";
+  const tag = version.startsWith("v") ? version : `v${version}`;
+  return `https://github.com/en-o/codeshelf/releases/tag/${tag}`;
+}
+
+/** 打开某个版本的下载页（预览版手动升级用） */
+export async function openReleaseDownload(version?: string): Promise<void> {
+  await openUrl(releasePageUrl(version));
 }
 
 // 缓存已检查的更新对象，以及已完成下载、可安装的更新对象
@@ -98,17 +114,12 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
     };
   }
 
-  // 预览版跳过更新检查（渠道说明见 isPreviewVersion）
-  if ((await getReleaseChannel()) === "preview") {
-    return {
-      available: false,
-      currentVersion: await getVersion(),
-      isPreview: true,
-    };
-  }
+  // 预览版**照常检查**：用户要能知道正式版出了新版本，只是升级得自己下载安装包。
+  // 标记 isPreview 让界面把「下载并安装」换成「去下载」。
+  const preview = (await getReleaseChannel()) === "preview";
 
   try {
-    const update = await checkUpstream();
+    const update = await check();
     cachedUpdate = update;
     if (!update || downloadedUpdate?.version !== update.version) {
       downloadedUpdate = null;
@@ -121,12 +132,14 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
         version: update.version,
         date: update.date,
         body: update.body,
+        isPreview: preview,
       };
     }
 
     return {
       available: false,
-      currentVersion: "",
+      currentVersion: await getVersion(),
+      isPreview: preview,
     };
   } catch (error) {
     console.error("Failed to check for updates:", error);
@@ -159,8 +172,9 @@ export async function downloadUpdate(
 async function doDownloadUpdate(
   onProgress?: (progress: number, total: number) => void
 ): Promise<void> {
+  await ensureAutoUpdatable();
   if (!cachedUpdate) {
-    const update = await checkUpstream();
+    const update = await check();
     if (!update) {
       throw new Error("No update available");
     }
@@ -204,6 +218,7 @@ export async function installUpdate(): Promise<void> {
 }
 
 async function doInstallUpdate(): Promise<void> {
+  await ensureAutoUpdatable();
   if (!downloadedUpdate) {
     throw new Error("No update downloaded");
   }
@@ -232,9 +247,10 @@ export async function downloadAndInstallUpdate(
 async function doDownloadAndInstall(
   onProgress?: (progress: number, total: number) => void
 ): Promise<void> {
+  await ensureAutoUpdatable();
   let update = cachedUpdate;
   if (!update) {
-    update = await checkUpstream();
+    update = await check();
     if (!update) {
       throw new Error("No update available");
     }

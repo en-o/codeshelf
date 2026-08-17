@@ -7,6 +7,7 @@ import {
   installUpdate,
   getArchStatus,
   openCorrectArchDownload,
+  openReleaseDownload,
   type UpdateInfo,
   type ArchStatus,
 } from "@/services/updater";
@@ -17,7 +18,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 const RELEASES_URL = "https://github.com/en-o/codeshelf/releases/latest";
 const DEFAULT_RELEASE_NOTE = "修复了一些问题";
 
-type UpdateState = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
+type UpdateState = "idle" | "checking" | "available" | "downloading" | "ready" | "error" | "manual";
 
 function getReleaseNotes(info: UpdateInfo | null): string {
   if (!info?.body || !info.body.trim()) return DEFAULT_RELEASE_NOTE;
@@ -44,7 +45,6 @@ export function UpdateNotification() {
 
       if (info?.available) {
         setUpdateInfo(info);
-        setState("available");
         const notes = getReleaseNotes(info);
         // 记录到通知中心（含更新说明）
         showToast(
@@ -52,6 +52,13 @@ export function UpdateNotification() {
           `发现新版本${info.version ? ` v${info.version}` : ''}`,
           notes,
         );
+        // 预览版到此为止：只提示，不下载不安装，升级由用户手动覆盖安装
+        if (info.isPreview) {
+          setState("manual");
+          setShowNotes(true);
+          return;
+        }
+        setState("available");
         // 下载前先检测架构 —— 不匹配则弹窗拦截，等用户手动确认
         let arch: ArchStatus | null = null;
         try {
@@ -269,6 +276,19 @@ export function UpdateNotification() {
             >
               <Download className="w-4 h-4" />
               立即安装并重启
+            </button>
+          )}
+
+          {state === "manual" && (
+            <button
+              onClick={() => {
+                openReleaseDownload(updateInfo?.version);
+                setDismissed(true);
+              }}
+              className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" />
+              去下载{updateInfo?.version ? ` v${updateInfo.version}` : ""}
             </button>
           )}
 
