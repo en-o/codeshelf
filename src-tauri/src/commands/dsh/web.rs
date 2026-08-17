@@ -1,22 +1,25 @@
-// dsh 自带的 Web UI：`dsh web` 起一个本地 HTTP 服务，我们在应用内开个窗口显示它。
+// dsh 自带的 Web UI：`dsh web` 起一个本地 HTTP 服务，前端用 iframe 内嵌进 dsh 页。
 //
-// 为什么留这条路：dsh 官方界面里有我们没映射的东西（审批弹窗、plan/goal、
-// 它自己的模型设置）。原生 dsh 页负责「历史留在 CodeShelf」，官方界面负责「功能全」，
-// 两条路并存，用户按需要选。
+// 为什么留这条路：官方界面里有我们没映射的东西（审批弹窗、plan/goal、工作区管理）。
+// 原生视图负责「历史留在 CodeShelf」，官方界面负责「功能全」，同一页两个视图切换。
+//
+// 模型不再深绑 DeepSeek：启动时把用户在 CodeShelf 选的供应商按环境变量注入，
+// 配合 home 级补丁里的路由声明（见 runtime.rs 的 HOME_PATCH），
+// 官方界面里显示的就是用户自己的模型，密钥那栏是「由启动环境提供（只读）」。
 
-use super::runtime::{dsh_entry_js, dsh_env_status, dsh_home};
+use super::engine::DshEngineConfig;
+use super::runtime::{dsh_entry_js, dsh_env_status, dsh_home, ensure_profile_files};
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 /// 启动日志（含 dsh 首次初始化 web profile 的输出）
 const EVENT_LOG: &str = "dsh-web-log";
-const WINDOW_LABEL: &str = "dsh-web";
 /// 等它把端口监听起来的上限
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -50,15 +53,16 @@ pub async fn dsh_web_status() -> AppResult<DshWebStatus> {
     })
 }
 
-/// 启动（或复用）dsh 的 Web UI，并在应用内窗口打开它。
+/// 启动（或复用）dsh 的 Web UI，返回它的地址；界面由前端 iframe 内嵌。
+///
+/// `config` 与引擎用的是同一份（工作目录 / 模型 / 端点 / 密钥 / 路由），
+/// 通过环境变量注入 —— 官方界面因此直接用上用户在 CodeShelf 里配的供应商，
+/// 而不是让人再填一次 DeepSeek 的 key。
 #[tauri::command]
 #[specta::specta]
-pub async fn dsh_web_open(app: AppHandle, cwd: Option<String>) -> AppResult<DshWebStatus> {
-    if WEB_PID.load(Ordering::SeqCst) != 0 {
-        if let Some(url) = current_url() {
-            show_window(&app, &url)?;
-            return dsh_web_status().await;
-        }
+pub async fn dsh_web_open(app: AppHandle, config: DshEngineConfig) -> AppResult<DshWebStatus> {
+    if WEB_PID.load(Ordering::SeqCst) != 0 && current_url().is_some() {
+        return dsh_web_status().await;
     }
 
     let status = dsh_env_status().await?;
@@ -74,11 +78,15 @@ pub async fn dsh_web_open(app: AppHandle, cwd: Option<String>) -> AppResult<DshW
     // 端口自己挑：dsh web 默认 3080，用户机器上很可能被别的东西占着，
     // 撞了它会直接退出而不是换一个。
     let port = free_port()?;
-    let work_dir = cwd
-        .filter(|c| std::path::Path::new(c).is_dir())
+    let work_dir = Some(config.cwd.clone())
+        .filter(|c| !c.is_empty() && std::path::Path::new(c).is_dir())
         .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()))
         .unwrap_or_else(|| ".".to_string());
 
+    // home 补丁（模型路由 + 默认模型）也要在这条路径上落盘：用户可能先开官方界面
+    ensure_profile_files()?;
+
+    let api_key = config.api_key.clone().unwrap_or_default();
     let mut cmd = Command::new(&node);
     cmd.arg(dsh_entry_js()?)
         .arg("web")
@@ -86,6 +94,15 @@ pub async fn dsh_web_open(app: AppHandle, cwd: Option<String>) -> AppResult<DshW
         .arg(port.to_string())
         .current_dir(&work_dir)
         .env("DSH_HOME", dsh_home()?)
+        .env("DEEPSEEK_BASE_URL", &config.base_url)
+        .env("DEEPSEEK_API_KEY", &api_key)
+        .env("CODESHELF_LLM_BASE_URL", &config.base_url)
+        .env("CODESHELF_LLM_API_KEY", &api_key)
+        .env("CODESHELF_LLM_MODEL", &config.model)
+        .env(
+            "CODESHELF_LLM_ROUTE",
+            config.provider.clone().unwrap_or_else(|| "deepseek-official".into()),
+        )
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -135,18 +152,14 @@ pub async fn dsh_web_open(app: AppHandle, cwd: Option<String>) -> AppResult<DshW
     let url = format!("http://127.0.0.1:{port}");
     wait_port_ready(port).await?;
     if let Ok(mut slot) = web_url_slot().lock() {
-        *slot = Some(url.clone());
+        *slot = Some(url);
     }
-    show_window(&app, &url)?;
     dsh_web_status().await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn dsh_web_stop(app: AppHandle) -> AppResult<DshWebStatus> {
-    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = win.close();
-    }
+pub async fn dsh_web_stop() -> AppResult<DshWebStatus> {
     kill_web_on_exit();
     dsh_web_status().await
 }
@@ -203,26 +216,4 @@ async fn wait_port_ready(port: u16) -> AppResult<()> {
         }
         tokio::time::sleep(Duration::from_millis(400)).await;
     }
-}
-
-/// 在应用内开一个窗口显示它。
-///
-/// 窗口在 Rust 侧创建，不走前端 API —— capabilities 里没开
-/// `core:webview:allow-create-webview-window`，也**不需要**开：
-/// 这个窗口加载的是 dsh 自己的页面，不该拿到 CodeShelf 的 IPC 权限。
-fn show_window(app: &AppHandle, url: &str) -> AppResult<()> {
-    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = win.show();
-        let _ = win.set_focus();
-        return Ok(());
-    }
-    let parsed = url
-        .parse()
-        .map_err(|e| AppError::Other(format!("dsh web 地址不合法（{url}）：{e}")))?;
-    WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(parsed))
-        .title("dsh · 官方界面")
-        .inner_size(1200.0, 820.0)
-        .build()
-        .map_err(|e| AppError::Other(format!("打开 dsh 界面窗口失败：{e}")))?;
-    Ok(())
 }

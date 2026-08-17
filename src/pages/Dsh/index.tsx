@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { ExternalLink, FolderOpen, Loader2, Square, Trash2 } from "lucide-react";
+import { ExternalLink, FolderOpen, Loader2, PanelsTopLeft, Square, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/common";
 import { useConfirm } from "@/components/common";
 import { showToast } from "@/components/ui";
@@ -15,7 +15,14 @@ import {
   renameChatSession,
   saveChatSession,
 } from "@/services/chat";
-import { dshEngineStatus, dshEnvStatus, dshWebOpen, type DshEnvStatus } from "@/services/dsh";
+import {
+  dshEngineStatus,
+  dshEnvStatus,
+  dshWebOpen,
+  dshWebStop,
+  listenDshWebLog,
+  type DshEnvStatus,
+} from "@/services/dsh";
 import type { AiProviderConfig, ChatMessage, ChatSession, ChatSessionSummary } from "@/types";
 
 import { SessionSidebar } from "../Chat/components/SessionSidebar";
@@ -70,6 +77,10 @@ export function DshPage() {
   const [enginePid, setEnginePid] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<ChatSessionSummary | null>(null);
   const [webOpening, setWebOpening] = useState(false);
+  /** "native" = CodeShelf 自己的会话界面；"official" = 内嵌 dsh 官方界面 */
+  const [view, setView] = useState<"native" | "official">("native");
+  const [webUrl, setWebUrl] = useState<string | null>(null);
+  const [webLog, setWebLog] = useState<string>("");
 
   const activeSessionRef = useRef<ChatSession | null>(null);
   activeSessionRef.current = activeSession;
@@ -118,6 +129,16 @@ export function DshPage() {
     dshEngineStatus()
       .then((s) => setEnginePid(s.running ? s.pid : null))
       .catch(() => setEnginePid(null));
+  }, []);
+
+  useEffect(() => {
+    const un = listenDshWebLog((line) => {
+      // 只留最后一行：这里是给「启动中」当进度提示用的，不做完整日志面板
+      setWebLog(line);
+    });
+    return () => {
+      un.then((f) => f());
+    };
   }, []);
 
   // 引擎状态只在运行态变化时对一次，避免常驻轮询空转 IPC
@@ -296,17 +317,42 @@ export function DshPage() {
     }
   }
 
-  /** 打开 dsh 自带的完整界面：审批弹窗、plan/goal、它自己的模型设置都在那边 */
+  /**
+   * 切到官方界面：起 dsh web 并把地址塞给 iframe。
+   * 传的是与引擎同一份供应商配置 —— 官方界面里用的就是这里选的模型，
+   * 不用再去它自己的设置里填一遍 DeepSeek 的 key。
+   */
   async function handleOpenOfficialUi() {
+    if (!selected) {
+      showToast("warning", "请先在「模型」页配置可用的供应商与模型");
+      return;
+    }
+    setView("official");
+    if (webUrl) return;
     setWebOpening(true);
+    setWebLog("");
     try {
-      await dshWebOpen(activeSession?.allowedCwd ?? null);
+      const status = await dshWebOpen({
+        cwd: activeSession?.allowedCwd ?? "",
+        model: selected.model.model,
+        baseUrl: selected.baseUrl,
+        apiKey: selected.apiKey ?? null,
+        provider: providerRoute,
+      });
+      setWebUrl(status.url);
     } catch (e) {
-      const text = typeof e === "string" && e ? e : e instanceof Error ? e.message : "打开失败";
-      showToast("error", "打开官方界面失败", text);
+      const text = typeof e === "string" && e ? e : e instanceof Error ? e.message : "启动失败";
+      showToast("error", "官方界面启动失败", text);
+      setView("native");
     } finally {
       setWebOpening(false);
     }
+  }
+
+  async function handleStopWeb() {
+    await dshWebStop().catch(() => {});
+    setWebUrl(null);
+    setView("native");
   }
 
   const workspaceName = activeSession?.allowedCwd?.split("/").pop();
@@ -363,19 +409,74 @@ export function DshPage() {
             </button>
           )}
           {ready && (
+            <div className="flex items-center rounded-lg border border-gray-200 overflow-hidden">
+              <button
+                className={`px-2 py-1 flex items-center gap-1 ${
+                  view === "native" ? "bg-blue-500 text-white" : "text-gray-600 hover:bg-gray-50"
+                }`}
+                onClick={() => setView("native")}
+                title="CodeShelf 的会话界面：历史存在这里，可搜索导出"
+              >
+                <PanelsTopLeft size={12} /> 本地
+              </button>
+              <button
+                className={`px-2 py-1 flex items-center gap-1 disabled:opacity-50 ${
+                  view === "official" ? "bg-blue-500 text-white" : "text-gray-600 hover:bg-gray-50"
+                }`}
+                onClick={handleOpenOfficialUi}
+                disabled={webOpening}
+                title="dsh 官方界面（审批、plan、工作区管理都在那边）；会话存在 dsh 自己那里"
+              >
+                {webOpening ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />}
+                {webOpening ? "启动中…" : "官方"}
+              </button>
+            </div>
+          )}
+          {view === "official" && webUrl && (
             <button
-              className="px-2 py-1 border border-gray-200 rounded-lg flex items-center gap-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-              onClick={handleOpenOfficialUi}
-              disabled={webOpening}
-              title="用 dsh 自带的完整界面（审批、plan、它自己的模型设置都在那边）；会话不会同步到这里"
+              className="px-2 py-1 border border-gray-200 rounded-lg flex items-center gap-1 text-gray-600 hover:bg-gray-50"
+              onClick={handleStopWeb}
+              title="关掉官方界面的服务进程"
             >
-              {webOpening ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />}
-              {webOpening ? "启动中…" : "官方界面"}
+              <Square size={12} /> 关闭服务
             </button>
           )}
         </div>
       </PageHeader>
 
+      {/* 官方界面：整块内嵌，不再另开窗口。会话列表由它自己管，所以不显示本地侧栏。 */}
+      {view === "official" ? (
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+          {webUrl ? (
+            <iframe
+              src={webUrl}
+              title="dsh 官方界面"
+              className="flex-1 w-full border-0"
+              // 官方界面是本机 127.0.0.1 上我们自己拉起的进程，不加 sandbox：
+              // 它要用到剪贴板、下载、弹窗，限死了功能会缺一半
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="re-card p-5 space-y-2 text-sm text-gray-600 max-w-md">
+                <div className="flex items-center gap-2">
+                  <Loader2 size={16} className="animate-spin text-blue-500" />
+                  正在启动 dsh 官方界面…
+                </div>
+                <p className="text-xs text-gray-500">
+                  首次使用它会现场初始化 web profile，可能要几十秒。
+                </p>
+                {webLog && (
+                  <p className="text-[11px] text-gray-400 font-mono break-all">{webLog}</p>
+                )}
+              </div>
+            </div>
+          )}
+          <p className="px-5 py-2 text-[11px] text-gray-400 border-t border-gray-100">
+            官方界面用的模型是「{selected?.providerName} · {selected?.model.model}」——
+            由 CodeShelf 注入，密钥在它那边显示为「由启动环境提供」。会话存在 dsh 自己那里，不进本地会话列表。
+          </p>
+        </div>
+      ) : (
       <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         <SessionSidebar
           sessions={sessions}
@@ -462,6 +563,7 @@ export function DshPage() {
           )}
         </main>
       </div>
+      )}
 
       {renameTarget && (
         <RenameDialog

@@ -446,12 +446,61 @@ pub async fn dsh_set_node(path: Option<String>) -> AppResult<DshEnvStatus> {
     dsh_env_status().await
 }
 
+/// home 级补丁：`$DSH_HOME/cordis.patch.yml`，对该 HOME 下**所有** profile 生效，
+/// 包括 dsh 官方的 `web` profile。模型相关的配置全放这里，两条路径（我们的
+/// JSON-RPC 引擎 / 官方 Web 界面）共用一份，不会漂移。
+///
+/// 之所以能这么干而不用 fork dsh：profile 的组合顺序是
+/// bundle → profile 补丁 → home 补丁 → --patch 覆盖，home 补丁是官方留的用户层。
+/// 密钥用 `apiKeyEnv` 引用环境变量，不落盘（官方界面把它显示为「由启动环境提供（只读）」）。
+const HOME_PATCH: &str = r#"# CodeShelf 生成的 home 级补丁，对所有 profile 生效（含 dsh 官方 web 界面）。
+# 手改会在下次启动时被覆盖。
+- id: llm-pi-ai
+  config:
+    providers:
+      openai:
+        apiKeyEnv: CODESHELF_LLM_API_KEY
+        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL
+      anthropic:
+        apiKeyEnv: CODESHELF_LLM_API_KEY
+        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL
+      codeshelf:
+        displayName: CodeShelf 供应商
+        apiKeyEnv: CODESHELF_LLM_API_KEY
+        api: openai-completions
+        # `|| 兜底` 不能省：手工声明的路由缺 model id 或缺 baseURL 会让**整棵插件树**
+        # 加载失败（实测报 invalid config / needs a baseURL），连别的路由都被拖下水。
+        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL || 'http://127.0.0.1:1/v1'
+        models:
+          - id: !!js process.env.CODESHELF_LLM_MODEL || 'codeshelf-unset'
+            contextWindow: 131072
+
+# 默认模型跟着应用走。不改这条的话，官方界面的模型选择器只会显示
+# dsh-base 里写死的 deepseek-v4-flash —— 用户在 CodeShelf 里选的模型进不去。
+- id: agent-default-model
+  config:
+    provider: !!js process.env.CODESHELF_LLM_ROUTE || 'deepseek-official'
+    model: !!js process.env.CODESHELF_LLM_MODEL || 'deepseek-v4-flash'
+"#;
+
+/// 把 home 补丁写到磁盘（内容一致就不动）
+pub fn ensure_home_patch() -> AppResult<()> {
+    let home = dsh_home()?;
+    std::fs::create_dir_all(&home)?;
+    let path = home.join("cordis.patch.yml");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(HOME_PATCH) {
+        write_atomic(&path, HOME_PATCH)?;
+    }
+    Ok(())
+}
+
 /// 把 profile 的两个文件写成代码里的当前版本（内容一致就不动）。
 ///
 /// 安装时写一次不够：这两个文件的内容跟着应用代码走（比如新增模型路由），
 /// 老用户不会为了一行 yaml 去点「重新安装」。所以每次启动引擎前也调一次，
 /// 让「代码里的 profile」永远是磁盘上的那份。
 pub fn ensure_profile_files() -> AppResult<()> {
+    ensure_home_patch()?;
     let profile = profile_dir()?;
     std::fs::create_dir_all(&profile)?;
     for (name, content) in [
@@ -658,40 +707,10 @@ fn profile_package_json() -> String {
 ///
 /// 写入的沙箱模式仍是 workspace-write（由 DSH_PERMISSION_MODE 决定，默认值即此），
 /// 也就是文件写入被限制在会话工作目录内。
-const PROFILE_PATCH: &str = r#"# CodeShelf 托管的 dsh profile 补丁层。由应用生成，手改会在下次启动引擎时被覆盖。
+const PROFILE_PATCH: &str = r#"# CodeShelf 托管的 dsh profile 补丁层（只作用于本 profile，即 JSON-RPC 引擎那条路）。
+# 由应用生成，手改会在下次启动引擎时被覆盖。模型路由在 home 级补丁里，两条路径共用。
 - id: hmr
   disabled: true
-
-# 模型路由。dsh-base 里 llm-pi-ai 默认是「休眠」的（零路由），
-# 这里声明三条，引擎启动时按用户选的供应商决定 initialize 传哪一个：
-#   openai / anthropic —— pi-ai 自带目录，端点、协议、模型清单都有默认值
-#   codeshelf          —— 手工声明的 OpenAI 兼容路由，给通义/Moonshot/Ollama/自建网关用
-# 凭据一律走 apiKeyEnv 引用，密钥不写进这个文件。
-- id: llm-pi-ai
-  config:
-    providers:
-      openai:
-        apiKeyEnv: CODESHELF_LLM_API_KEY
-        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL
-      anthropic:
-        apiKeyEnv: CODESHELF_LLM_API_KEY
-        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL
-      codeshelf:
-        displayName: CodeShelf 供应商
-        apiKeyEnv: CODESHELF_LLM_API_KEY
-        api: openai-completions
-        # 同样要兜底：手工声明的路由缺 baseURL 会让**整棵树**加载失败
-        # （报 "needs a baseURL"），连别的路由都被拖下水。兜底值是个必然连不上的
-        # 地址，真用到它时只有这一条路由报传输错误。
-        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL || 'http://127.0.0.1:1/v1'
-        # 手工声明的路由没有目录可继承，模型必须自己写；型号来自应用选中的那个。
-        # `|| 占位符` 不能省：id 为 undefined 时**整棵插件树**都加载不了
-        # （实测报 llm-pi-ai invalid config），那样连 deepseek 路由的会话都启动不了。
-        # contextWindow 是「声明」而非真相，取一个大多数模型都够用的中间值 ——
-        # 报大了会等到供应商拒绝超长上下文才暴露，所以别往上调。
-        models:
-          - id: !!js process.env.CODESHELF_LLM_MODEL || 'codeshelf-unset'
-            contextWindow: 131072
 
 - id: approval
   config:

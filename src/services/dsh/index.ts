@@ -91,8 +91,12 @@ export const dshEnginePrompt = (sessionKey: string, text: string) =>
 // ========== 官方 Web 界面 ==========
 
 export const dshWebStatus = () => unwrap(commands.dshWebStatus());
-/** 启动（或复用）dsh web 并在应用内窗口打开；首次使用要初始化 profile，可能几十秒 */
-export const dshWebOpen = (cwd: string | null) => unwrap(commands.dshWebOpen(cwd));
+/**
+ * 启动（或复用）dsh web，返回它的地址（前端 iframe 内嵌）。
+ * 传的是与引擎同一份配置：官方界面因此直接用上 CodeShelf 里选的供应商。
+ * 首次使用要初始化 web profile，可能几十秒。
+ */
+export const dshWebOpen = (config: DshEngineConfig) => unwrap(commands.dshWebOpen(config));
 export const dshWebStop = () => unwrap(commands.dshWebStop());
 
 /** dsh web 的启动日志 */

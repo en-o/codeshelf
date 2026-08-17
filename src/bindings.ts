@@ -2505,11 +2505,15 @@ async dshWebStatus() : Promise<Result<DshWebStatus, string>> {
 }
 },
 /**
- * 启动（或复用）dsh 的 Web UI，并在应用内窗口打开它。
+ * 启动（或复用）dsh 的 Web UI，返回它的地址；界面由前端 iframe 内嵌。
+ * 
+ * `config` 与引擎用的是同一份（工作目录 / 模型 / 端点 / 密钥 / 路由），
+ * 通过环境变量注入 —— 官方界面因此直接用上用户在 CodeShelf 里配的供应商，
+ * 而不是让人再填一次 DeepSeek 的 key。
  */
-async dshWebOpen(cwd: string | null) : Promise<Result<DshWebStatus, string>> {
+async dshWebOpen(config: DshEngineConfig) : Promise<Result<DshWebStatus, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("dsh_web_open", { cwd }) };
+    return { status: "ok", data: await TAURI_INVOKE("dsh_web_open", { config }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
