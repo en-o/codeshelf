@@ -9,7 +9,8 @@ export type PageType =
   | "aiProviders"
   | "chat"
   | "workflows"
-  | "apiChat";
+  | "apiChat"
+  | "dsh";
 
 interface UiState {
   initialized: boolean;

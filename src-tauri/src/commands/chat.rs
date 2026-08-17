@@ -529,8 +529,17 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub async fn list_chat_sessions() -> AppResult<Vec<ChatSessionSummary>> {
-    let rows: Vec<(String, String, String, String, String, String, Option<i64>)> = sqlx::query_as(
-        "SELECT id, title, provider_id, model_id, created_at, updated_at, pinned
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<i64>,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT id, title, provider_id, model_id, created_at, updated_at, pinned, engine
          FROM chat_sessions ORDER BY updated_at DESC",
     )
     .fetch_all(pool())
@@ -556,7 +565,7 @@ pub async fn list_chat_sessions() -> AppResult<Vec<ChatSessionSummary>> {
     Ok(rows
         .into_iter()
         .map(
-            |(id, title, provider_id, model_id, created_at, updated_at, pinned)| {
+            |(id, title, provider_id, model_id, created_at, updated_at, pinned, engine)| {
                 let message_count = counts.get(&id).copied().unwrap_or(0) as usize;
                 ChatSessionSummary {
                     id,
@@ -567,6 +576,7 @@ pub async fn list_chat_sessions() -> AppResult<Vec<ChatSessionSummary>> {
                     updated_at,
                     message_count,
                     pinned: pinned.map(|x| x != 0),
+                    engine,
                 }
             },
         )
@@ -587,6 +597,9 @@ pub struct CreateChatSessionInput {
     pub title: Option<String>,
     pub provider_id: String,
     pub model_id: String,
+    /// "dsh" 由 dsh 页创建时传入；缺省 builtin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 #[tauri::command]
@@ -613,8 +626,7 @@ pub async fn create_chat_session(input: CreateChatSessionInput) -> AppResult<Cha
         allowed_cwd: None,
         use_mcp_gateway_tools: None,
         current_compaction_version: None,
-        // 缺省 builtin；用户在会话设置里改成 dsh
-        engine: None,
+        engine: input.engine,
     };
     write_session_full(&session).await?;
     Ok(session)

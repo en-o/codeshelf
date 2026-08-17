@@ -10,11 +10,11 @@ import {
   type DshNotification,
 } from "@/services/dsh";
 import type { ChatMessage, ChatSession } from "@/types";
-import { makeMessage } from "../utils/chatHelpers";
-import type { ModelOption } from "../utils/chatHelpers";
+import { makeMessage } from "../Chat/utils/chatHelpers";
+import type { ModelOption } from "../Chat/utils/chatHelpers";
 
 /**
- * dsh 引擎的会话驱动，与 useChatRunner 平级：
+ * dsh 页的会话驱动。与 Chat 的 useChatRunner 是两回事：
  * 那边自己跑 agent 循环（组消息 → 收 tool_calls → 执行工具 → 再来一轮），
  * 这边只负责**投消息 + 把事件流翻译成消息**，循环在 dsh 进程里跑。
  *

@@ -3311,7 +3311,11 @@ currentCompactionVersion?: string | null;
  * None = builtin，老会话不受影响。
  */
 engine?: string | null }
-export type ChatSessionSummary = { id: string; title: string; providerId: string; modelId: string; createdAt: string; updatedAt: string; messageCount: number; pinned?: boolean | null }
+export type ChatSessionSummary = { id: string; title: string; providerId: string; modelId: string; createdAt: string; updatedAt: string; messageCount: number; pinned?: boolean | null; 
+/**
+ * 引擎标记，列表按它分流到「对话」或「dsh」页；None = builtin
+ */
+engine?: string | null }
 export type ChatStreamMessage = { role: string; 
 /**
  * string 或 OpenAI 多模态内容数组
@@ -3394,7 +3398,11 @@ export type ConflictFileContent = { file: string; base: string | null; current: 
  */
 export type ConnectedClient = { id: string; addr: string; connectedAt: number; lastActivity: number; bytesSent: number; bytesReceived: number }
 export type CreateApiChatSessionInput = { title: string | null; providerId: string; modelId: string; selectedEndpointIds?: string[] }
-export type CreateChatSessionInput = { title: string | null; providerId: string; modelId: string }
+export type CreateChatSessionInput = { title: string | null; providerId: string; modelId: string; 
+/**
+ * "dsh" 由 dsh 页创建时传入；缺省 builtin
+ */
+engine?: string | null }
 export type CreateProjectInput = { name: string; path: string; tags: string[] | null; labels: string[] | null }
 export type CursorPosition = { x: number; y: number }
 export type DailyActivity = { date: string; count: number }

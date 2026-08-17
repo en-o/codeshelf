@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ChatSession, ChatSessionSummary } from "@/types";
+import type { ChatEngine, ChatSession, ChatSessionSummary } from "@/types";
 
 export type ChatMessageContent =
   | string
@@ -39,6 +39,8 @@ export interface CreateChatSessionInput {
   title?: string;
   providerId: string;
   modelId: string;
+  /** "dsh" 由 dsh 页创建时传入；缺省 builtin */
+  engine?: ChatEngine;
 }
 
 export async function getChatHistoryDir(): Promise<string> {

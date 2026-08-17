@@ -373,6 +373,9 @@ pub struct ChatSessionSummary {
     pub message_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned: Option<bool>,
+    /// 引擎标记，列表按它分流到「对话」或「dsh」页；None = builtin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 /// 获取当前 ISO 时间字符串

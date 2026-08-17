@@ -17,6 +17,7 @@ const ToolboxPage = lazy(() => import("@/pages/Toolbox").then((m) => ({ default:
 const AiProvidersPage = lazy(() => import("@/pages/AiProviders").then((m) => ({ default: m.AiProvidersPage })));
 const ChatPage = lazy(() => import("@/pages/Chat").then((m) => ({ default: m.ChatPage })));
 const WorkflowsPage = lazy(() => import("@/pages/Workflows").then((m) => ({ default: m.WorkflowsPage })));
+const DshPage = lazy(() => import("@/pages/Dsh").then((m) => ({ default: m.DshPage })));
 const ApiChatPage = lazy(() => import("@/pages/ApiChat").then((m) => ({ default: m.ApiChatPage })));
 import { useAiProvidersStore } from "@/stores/aiProvidersStore";
 import { useEditorsStore, type EditorConfig, type TerminalConfig } from "@/stores/editorsStore";
@@ -282,6 +283,8 @@ function AppContent() {
                     return <AiProvidersPage />;
                   case "chat":
                     return <ChatPage />;
+                  case "dsh":
+                    return <DshPage />;
                   case "workflows":
                     return <WorkflowsPage />;
                   case "apiChat":

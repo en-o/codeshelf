@@ -229,6 +229,8 @@ export interface ChatSessionSummary {
   updatedAt: string;
   messageCount: number;
   pinned?: boolean;
+  /** 引擎标记，列表按它分流到「对话」或「dsh」页；缺省 builtin */
+  engine?: ChatEngine;
 }
 
 // ============== 应用快捷键 ==============

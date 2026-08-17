@@ -33,7 +33,6 @@ import { AttachmentsPreview } from "./components/AttachmentsPreview";
 import { useChatStream } from "./hooks/useChatStream";
 import { useProjectContext } from "./hooks/useProjectContext";
 import { useChatRunner } from "./hooks/useChatRunner";
-import { useDshRunner } from "./hooks/useDshRunner";
 import { exportSessionAsJson, exportSessionAsMarkdown, importSessionFromJson } from "./utils/exportSession";
 import { compactMessages } from "./utils/compact";
 import { type SlashCommandId } from "./utils/slashCommands";
@@ -177,13 +176,6 @@ export function ChatPage() {
     fn?.(decision);
   }
 
-  const { runDshRequest, stopDsh, dshRunning } = useDshRunner({
-    selected,
-    activeSessionRef,
-    setActiveSession,
-    syncSummary,
-  });
-
   const { runChatRequest } = useChatRunner({
     toolSchemas,
     toolsEnabled,
@@ -199,19 +191,13 @@ export function ChatPage() {
     requestApproval,
   });
 
-  // 引擎只在这一处分流：所有发起请求的入口（发送 / 编辑重发 / 重新生成 / 重试）
-  // 共用 runRequest，新增入口时不会漏掉 dsh。
-  const isDsh = activeSession?.engine === "dsh";
-  const runRequest = isDsh ? runDshRequest : runChatRequest;
-  /** 「有请求在跑」：内置引擎看 streaming，dsh 看它自己的运行状态 */
-  const busy = streaming || dshRunning;
-
   // 加载会话列表
   useEffect(() => {
     async function load() {
       setListLoading(true);
       try {
-        const list = await listChatSessions();
+        // dsh 会话有自己的页面，这里只列内置引擎的
+        const list = (await listChatSessions()).filter((s) => s.engine !== "dsh");
         setSessions(list);
         if (list.length > 0) {
           setActiveSessionId((prev) => prev ?? list[0].id);
@@ -445,7 +431,7 @@ export function ChatPage() {
   }
 
   async function handleSend() {
-    if (!activeSession || !selected || busy) return;
+    if (!activeSession || !selected || streaming) return;
     if (!input.trim() && pendingAttachments.length === 0) return;
     await withSendLock(async () => {
       const content = input.trim();
@@ -468,7 +454,7 @@ export function ChatPage() {
       setLoading(true);
       try {
         const saved = await persistSession(nextSession);
-        await runRequest(saved);
+        await runChatRequest(saved);
       } finally {
         setLoading(false);
       }
@@ -476,9 +462,7 @@ export function ChatPage() {
   }
 
   async function handleStop() {
-    // dsh 协议里没有取消方法，停止 = 关掉引擎进程（上游文档给的唯一手段）
-    if (isDsh) await stopDsh();
-    else await stopStream();
+    await stopStream();
     const session = activeSessionRef.current;
     if (session && session.messages.length > 0) {
       try {
@@ -492,7 +476,7 @@ export function ChatPage() {
   }
 
   async function handleDeleteMessage(msg: ChatMessage) {
-    if (!activeSession || busy) return;
+    if (!activeSession || streaming) return;
     const updated: ChatSession = {
       ...activeSession,
       messages: activeSession.messages.filter((m) => m.id !== msg.id),
@@ -523,7 +507,7 @@ export function ChatPage() {
   }
 
   async function handleEditUserMessage(msg: ChatMessage, newContent: string) {
-    if (!activeSession || !selected || busy) return;
+    if (!activeSession || !selected || streaming) return;
     const idx = activeSession.messages.findIndex((m) => m.id === msg.id);
     if (idx < 0) return;
     await withSendLock(async () => {
@@ -535,12 +519,12 @@ export function ChatPage() {
         messages: [...activeSession.messages, appended],
       };
       const saved = await persistSession(nextSession);
-      await runRequest(saved);
+      await runChatRequest(saved);
     });
   }
 
   async function handleRegenerateAssistant(msg: ChatMessage) {
-    if (!activeSession || !selected || busy) return;
+    if (!activeSession || !selected || streaming) return;
     const idx = activeSession.messages.findIndex((m) => m.id === msg.id);
     if (idx < 0) return;
     const prevUser = [...activeSession.messages.slice(0, idx)].reverse().find((m) => m.role === "user");
@@ -554,12 +538,12 @@ export function ChatPage() {
         messages: [...activeSession.messages, appended],
       };
       const saved = await persistSession(nextSession);
-      await runRequest(saved);
+      await runChatRequest(saved);
     });
   }
 
   async function handleRetryUserMessage(msg: ChatMessage) {
-    if (!activeSession || !selected || busy) return;
+    if (!activeSession || !selected || streaming) return;
     if (msg.role !== "user") return;
     const idx = activeSession.messages.findIndex((m) => m.id === msg.id);
     if (idx < 0) return;
@@ -572,7 +556,7 @@ export function ChatPage() {
         messages: [...activeSession.messages, appended],
       };
       const saved = await persistSession(nextSession);
-      await runRequest(saved);
+      await runChatRequest(saved);
     });
   }
 
@@ -584,7 +568,7 @@ export function ChatPage() {
   }
 
   async function handleCompact() {
-    if (!activeSession || !selected || busy) return;
+    if (!activeSession || !selected || streaming) return;
     if (activeSession.messages.length < 6) {
       showToast("warning", "消息太少，无需压缩");
       return;
@@ -706,7 +690,7 @@ export function ChatPage() {
         modelOptions={modelOptions}
         defaultKey={defaultKey}
         effectiveKey={effectiveKey}
-        streaming={busy}
+        streaming={streaming}
         loading={loading}
         toolsEnabled={toolsEnabled}
         toolSchemas={toolSchemas}
@@ -783,7 +767,7 @@ export function ChatPage() {
               )}
               <MessageList
                 messages={activeSession.messages}
-                streaming={busy}
+                streaming={streaming}
                 thinkingBuffer={thinkingBuffer}
                 onCopy={handleCopyMessage}
                 onEditUser={handleEditUserMessage}
@@ -798,7 +782,7 @@ export function ChatPage() {
                 onSend={handleSend}
                 onStop={handleStop}
                 onSlashCommand={handleSlashCommand}
-                streaming={busy}
+                streaming={streaming}
                 disabled={loading}
                 userHistory={userHistory}
                 mentionRoot={activeSession.allowedCwd ?? null}
