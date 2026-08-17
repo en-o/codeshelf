@@ -45,6 +45,14 @@ pub struct DshEnvStatus {
     pub root: String,
     pub home: String,
     pub profile_dir: String,
+    /// 选中 node 的来源标签（nvm / PATH / 系统目录）
+    pub node_source: Option<String>,
+    /// 当前用的是用户手动指定的那个
+    pub node_pinned: bool,
+    /// 检测到 nvm 时给出它的根目录；界面据此显示 `nvm install 22` 之类的指引
+    pub nvm_root: Option<String>,
+    /// nvm 里装了几个版本（含不满足要求的）
+    pub nvm_versions: usize,
 }
 
 // ========== 路径 ==========
@@ -160,10 +168,145 @@ struct NodeInfo {
     major: u32,
 }
 
-/// 找一个可用的 node：优先满足最低版本的；都不满足时**仍然返回**找到的那个，
-/// 好让界面能说清「你有 v20，但需要 v22」，而不是笼统的「未找到 Node」。
+/// 一个可选的 node，供界面列出来让用户挑。
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeCandidate {
+    pub path: String,
+    pub version: String,
+    pub major: u32,
+    /// 来源标签："nvm" / "PATH" / "系统目录"，界面直接显示
+    pub source: String,
+    /// 满足 dsh 的最低版本要求
+    pub usable: bool,
+    /// 用户手动指定的就是这一个
+    pub pinned: bool,
+}
+
+/// nvm 的根目录（$NVM_DIR，缺省 ~/.nvm；Windows 上是 nvm-windows 的 %NVM_HOME%）。
+/// 只认目录存在与否，不去解析它的 shell 脚本 —— nvm 是 shell 函数，GUI 进程里
+/// 根本 source 不到，能用的只有它在磁盘上的版本目录。
+fn nvm_root() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let env_keys = ["NVM_HOME", "NVM_DIR"];
+    #[cfg(not(target_os = "windows"))]
+    let env_keys = ["NVM_DIR"];
+
+    for key in env_keys {
+        // 空串要当没设置：`env::var` 对 `NVM_DIR=` 返回 Ok("")，
+        // 照单全收会拼出相对路径，结果一个 nvm 版本都扫不到（本机实测踩过）。
+        let Ok(dir) = std::env::var(key) else { continue };
+        if dir.trim().is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(dir.trim());
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+    let default = dirs::home_dir()?.join(".nvm");
+    default.is_dir().then_some(default)
+}
+
+/// nvm 已装的所有版本目录里的 node 可执行文件。
+///
+/// 布局差异：nvm（POSIX）是 `<root>/versions/node/v22.1.0/bin/node`，
+/// nvm-windows 是 `<root>\v22.1.0\node.exe`，两种都扫。
+fn nvm_node_paths() -> Vec<PathBuf> {
+    let Some(root) = nvm_root() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for base in [root.join("versions").join("node"), root.clone()] {
+        let Ok(entries) = std::fs::read_dir(&base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            for exe in [dir.join("bin").join(NODE_EXE), dir.join(NODE_EXE)] {
+                if exe.is_file() {
+                    out.push(exe);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn is_nvm_path(path: &Path) -> bool {
+    nvm_root().is_some_and(|root| path.starts_with(&root))
+}
+
+/// 用户手动指定的 node 记在这里。放 dsh 自己的目录而不是应用设置：
+/// 卸载 dsh 就一起没了，不用在设置结构里留一个别处没人用的字段。
+fn pinned_node_file() -> AppResult<PathBuf> {
+    Ok(dsh_root()?.join("node.txt"))
+}
+
+fn read_pinned_node() -> Option<PathBuf> {
+    let path = std::fs::read_to_string(pinned_node_file().ok()?).ok()?;
+    let path = PathBuf::from(path.trim());
+    path.is_file().then_some(path)
+}
+
+/// 列出所有能跑起来的 node，按「可用的排前面、版本号从高到低」排序。
+async fn discover_nodes() -> Vec<NodeCandidate> {
+    let pinned = read_pinned_node();
+    let mut probes: Vec<(PathBuf, &str)> = vec![(PathBuf::from(NODE_EXE), "PATH")];
+    for path in nvm_node_paths() {
+        probes.push((path, "nvm"));
+    }
+    for dir in extra_bin_dirs() {
+        let exe = dir.join(NODE_EXE);
+        let source = if is_nvm_path(&exe) { "nvm" } else { "系统目录" };
+        probes.push((exe, source));
+    }
+
+    let mut out: Vec<NodeCandidate> = Vec::new();
+    for (path, source) in probes {
+        let Some((version, major)) = probe_node(&path).await else {
+            continue;
+        };
+        // 同一个版本可能被 PATH 和 nvm 目录各命中一次；PATH 那条先到，保留它即可
+        if out.iter().any(|c| c.version == version && c.source == source) {
+            continue;
+        }
+        out.push(NodeCandidate {
+            pinned: pinned.as_deref() == Some(path.as_path()),
+            path: path.to_string_lossy().to_string(),
+            version,
+            major,
+            source: source.to_string(),
+            usable: major >= NODE_MIN_MAJOR,
+        });
+    }
+    out.sort_by(|a, b| b.usable.cmp(&a.usable).then(b.major.cmp(&a.major)));
+    out
+}
+
+/// 选一个 node 用：用户指定的优先（前提是它还在、且版本够），
+/// 否则自动挑第一个满足最低版本的。
+///
+/// 都不满足时**仍然返回**找到的那个，好让界面能说清「你有 v20，但需要 v22」，
+/// 而不是笼统的「未找到 Node」。
 async fn find_node() -> Option<NodeInfo> {
+    if let Some(path) = read_pinned_node() {
+        if let Some((version, major)) = probe_node(&path).await {
+            if major >= NODE_MIN_MAJOR {
+                return Some(NodeInfo {
+                    path,
+                    version,
+                    major,
+                });
+            }
+        }
+    }
+
     let mut candidates: Vec<PathBuf> = vec![PathBuf::from(NODE_EXE)];
+    candidates.extend(nvm_node_paths());
     for dir in extra_bin_dirs() {
         candidates.push(dir.join(NODE_EXE));
     }
@@ -227,12 +370,30 @@ pub async fn dsh_env_status() -> AppResult<DshEnvStatus> {
             .join("dsh-sdk-jsonrpc-server")
             .exists();
 
+    let pinned = read_pinned_node();
+    let node_pinned = matches!(
+        (node.as_ref(), pinned.as_ref()),
+        (Some(n), Some(p)) if &n.path == p
+    );
+
     Ok(DshEnvStatus {
+        node_source: node.as_ref().map(|n| {
+            if is_nvm_path(&n.path) {
+                "nvm".to_string()
+            } else if n.path.parent().is_none() {
+                "PATH".to_string()
+            } else {
+                "系统目录".to_string()
+            }
+        }),
         node_path: node.as_ref().map(|n| n.path.to_string_lossy().to_string()),
         node_version: node.as_ref().map(|n| n.version.clone()),
         node_ok: node.as_ref().is_some_and(|n| n.major >= NODE_MIN_MAJOR),
         node_min_major: NODE_MIN_MAJOR,
+        node_pinned,
         npm_path: npm_for(node.as_ref()).map(|p| p.to_string_lossy().to_string()),
+        nvm_root: nvm_root().map(|p| p.to_string_lossy().to_string()),
+        nvm_versions: nvm_node_paths().len(),
         installed,
         installed_version,
         target_version: DSH_VERSION.to_string(),
@@ -241,6 +402,48 @@ pub async fn dsh_env_status() -> AppResult<DshEnvStatus> {
         home: home.to_string_lossy().to_string(),
         profile_dir: profile.to_string_lossy().to_string(),
     })
+}
+
+/// 列出所有检测到的 node（含版本不够的），界面用它做下拉。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_list_nodes() -> AppResult<Vec<NodeCandidate>> {
+    Ok(discover_nodes().await)
+}
+
+/// 手动指定用哪个 node。传 None 恢复自动选择。
+///
+/// 版本不够的直接拒绝：dsh 在低版本上是**加载插件树时**失败，
+/// 错误信息是 `Promise.withResolvers is not a function` 这种，
+/// 让人以为是 dsh 坏了。不如在这里挡住并说清楚。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_set_node(path: Option<String>) -> AppResult<DshEnvStatus> {
+    let file = pinned_node_file()?;
+    match path {
+        None => {
+            if file.exists() {
+                std::fs::remove_file(&file)?;
+            }
+        }
+        Some(path) => {
+            let candidate = PathBuf::from(path.trim());
+            let (version, major) = probe_node(&candidate)
+                .await
+                .ok_or_else(|| AppError::Invalid(format!("这个路径跑不起来：{}", candidate.display())))?;
+            if major < NODE_MIN_MAJOR {
+                return Err(AppError::Invalid(format!(
+                    "{} 是 {}，dsh 需要 v{} 及以上",
+                    candidate.display(),
+                    version,
+                    NODE_MIN_MAJOR
+                )));
+            }
+            std::fs::create_dir_all(dsh_root()?)?;
+            write_atomic(&file, candidate.to_string_lossy().as_bytes())?;
+        }
+    }
+    dsh_env_status().await
 }
 
 /// 读已装 dsh 的 package.json 版本号；读不出来就当没装明白，返回 None。
@@ -461,6 +664,32 @@ const PROFILE_PATCH: &str = r#"# CodeShelf 托管的 dsh profile 补丁层。由
     - id: jsonrpc
       name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
 "#;
+
+#[cfg(test)]
+mod smoke {
+    use super::*;
+
+    /// 打印本机真实探测到的 node（含 nvm 各版本）。
+    /// 与 netdiag 的 smoke 测试同类：不断言环境，只把「应用眼里看到的」打出来，
+    /// 排查「我明明装了 v22，它却说只有 v20」这类问题时第一时间能看到真相。
+    ///
+    /// `cargo test --lib print_real_node_candidates -- --nocapture`
+    #[tokio::test]
+    async fn print_real_node_candidates() {
+        println!("nvm 根目录: {:?}", nvm_root());
+        println!("nvm 里的 node: {:?}", nvm_node_paths());
+        for c in discover_nodes().await {
+            println!(
+                "候选: {} {} [{}] usable={} pinned={}",
+                c.version, c.path, c.source, c.usable, c.pinned
+            );
+        }
+        match find_node().await {
+            Some(n) => println!("最终选中: {} {}", n.version, n.path.display()),
+            None => println!("最终选中: 无"),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

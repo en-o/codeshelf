@@ -87,8 +87,16 @@ pub(crate) fn get_extra_path_dirs() -> Vec<String> {
         format!("{}/.cargo/bin", home_str),
     ];
 
-    // 收集所有 nvm 版本目录
-    let nvm_dir_env = std::env::var("NVM_DIR").unwrap_or_else(|_| format!("{}/.nvm", home_str));
+    // 收集所有 nvm 版本目录。
+    //
+    // `NVM_DIR` **被设成空串**是常见状态（某些 shell 初始化顺序下就是空的），
+    // 而 `env::var` 对空串返回 `Ok("")` —— 直接 unwrap_or_else 会拿到空路径，
+    // 拼出相对路径 "versions/node"，read_dir 必然失败，于是一个 nvm 版本都扫不到。
+    // 实测就是它让「装了 node 22 却报只有 20」。空串一律当未设置。
+    let nvm_dir_env = std::env::var("NVM_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("{}/.nvm", home_str));
     let mut nvm_bins: Vec<String> = Vec::new();
     let nvm_versions = PathBuf::from(&nvm_dir_env).join("versions/node");
     if let Ok(entries) = std::fs::read_dir(&nvm_versions) {

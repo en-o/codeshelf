@@ -1,7 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
-import { commands, type DshEngineConfig, type DshEngineStatus, type DshEnvStatus } from "@/bindings";
+import {
+  commands,
+  type DshEngineConfig,
+  type DshEngineStatus,
+  type DshEnvStatus,
+  type NodeCandidate,
+} from "@/bindings";
 
-export type { DshEngineConfig, DshEngineStatus, DshEnvStatus };
+export type { DshEngineConfig, DshEngineStatus, DshEnvStatus, NodeCandidate };
 
 // ========== 事件 ==========
 
@@ -67,6 +73,10 @@ async function unwrap<T>(p: Promise<{ status: "ok"; data: T } | { status: "error
 }
 
 export const dshEnvStatus = () => unwrap(commands.dshEnvStatus());
+/** 列出检测到的所有 node（含版本不够的），用于让用户在 nvm 的多个版本里挑 */
+export const dshListNodes = () => unwrap(commands.dshListNodes());
+/** 指定用哪个 node；传 null 恢复自动选择 */
+export const dshSetNode = (path: string | null) => unwrap(commands.dshSetNode(path));
 export const dshInstall = () => unwrap(commands.dshInstall());
 export const dshUninstall = () => unwrap(commands.dshUninstall());
 

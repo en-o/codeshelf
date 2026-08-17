@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle, Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type DshEnvStatus } from "@/bindings";
+import { dshEnvStatus, dshInstall, dshListNodes, dshSetNode, dshUninstall, type DshEnvStatus, type NodeCandidate } from "@/services/dsh";
 import { showToast } from "@/components/ui";
 
 interface DshSettingsProps {
@@ -15,14 +15,29 @@ function errText(e: unknown, fallback: string): string {
 
 export function DshSettings({ onClose }: DshSettingsProps) {
   const [status, setStatus] = useState<DshEnvStatus | null>(null);
+  const [nodes, setNodes] = useState<NodeCandidate[]>([]);
   const [busy, setBusy] = useState<"install" | "uninstall" | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const logBoxRef = useRef<HTMLDivElement>(null);
 
   async function refresh() {
-    const res = await commands.dshEnvStatus();
-    if (res.status === "ok") setStatus(res.data);
-    else showToast("error", errText(res.error, "读取 dsh 状态失败"));
+    try {
+      setStatus(await dshEnvStatus());
+      setNodes(await dshListNodes());
+    } catch (e) {
+      showToast("error", errText(e, "读取 dsh 状态失败"));
+    }
+  }
+
+  /** 选一个 node；"" 表示恢复自动选择 */
+  async function handlePickNode(path: string) {
+    try {
+      setStatus(await dshSetNode(path || null));
+      setNodes(await dshListNodes());
+      showToast("success", path ? "已指定 Node" : "已恢复自动选择");
+    } catch (e) {
+      showToast("error", errText(e, "设置 Node 失败"));
+    }
   }
 
   useEffect(() => {
@@ -43,31 +58,34 @@ export function DshSettings({ onClose }: DshSettingsProps) {
   async function handleInstall() {
     setBusy("install");
     setLog([]);
-    const res = await commands.dshInstall();
-    setBusy(null);
-    if (res.status === "ok") {
-      setStatus(res.data);
-      showToast("success", "dsh 已就绪", `版本 ${res.data.installedVersion ?? res.data.targetVersion}`);
-    } else {
-      showToast("error", errText(res.error, "安装失败"));
+    try {
+      const next = await dshInstall();
+      setStatus(next);
+      showToast("success", "dsh 已就绪", `版本 ${next.installedVersion ?? next.targetVersion}`);
+    } catch (e) {
+      showToast("error", errText(e, "安装失败"));
       refresh();
+    } finally {
+      setBusy(null);
     }
   }
 
   async function handleUninstall() {
     setBusy("uninstall");
-    const res = await commands.dshUninstall();
-    setBusy(null);
-    if (res.status === "ok") {
-      setStatus(res.data);
+    try {
+      setStatus(await dshUninstall());
       setLog([]);
       showToast("success", "已卸载 dsh");
-    } else {
-      showToast("error", errText(res.error, "卸载失败"));
+    } catch (e) {
+      showToast("error", errText(e, "卸载失败"));
+    } finally {
+      setBusy(null);
     }
   }
 
   const ready = !!status?.installed && !!status?.profileReady;
+  /** 机器上有满足版本的 node，只是当前没选中它 */
+  const hasUsableNode = nodes.some((n) => n.usable);
   const versionStale =
     !!status?.installedVersion && status.installedVersion !== status.targetVersion;
 
@@ -105,13 +123,39 @@ export function DshSettings({ onClose }: DshSettingsProps) {
         </div>
 
         <dl className="text-xs text-gray-600 space-y-1">
-          <div className="flex gap-2">
-            <dt className="w-20 shrink-0 text-gray-500">Node</dt>
-            <dd className={status?.nodeOk ? "" : "text-amber-700"}>
-              {status?.nodeVersion
-                ? `${status.nodeVersion}${status.nodeOk ? "" : `（需要 v${status.nodeMinMajor} 及以上）`}`
-                : "未找到"}
-              {status?.nodePath ? <span className="text-gray-400"> · {status.nodePath}</span> : null}
+          <div className="flex gap-2 items-start">
+            <dt className="w-20 shrink-0 text-gray-500 pt-1">Node</dt>
+            <dd className="flex-1 min-w-0 space-y-1">
+              <select
+                className="w-full px-2 py-1 border border-gray-200 rounded bg-white"
+                value={nodes.find((n) => n.pinned)?.path ?? ""}
+                onChange={(e) => handlePickNode(e.target.value)}
+                disabled={busy !== null}
+              >
+                <option value="">
+                  自动选择
+                  {status?.nodeVersion ? `（当前 ${status.nodeVersion}${status.nodeSource ? ` · ${status.nodeSource}` : ""}）` : "（未找到 Node）"}
+                </option>
+                {nodes.map((n) => (
+                  <option key={n.path} value={n.path} disabled={!n.usable}>
+                    {n.version} · {n.source}
+                    {n.usable ? "" : `（低于 v${status?.nodeMinMajor ?? 22}，不可用）`}
+                  </option>
+                ))}
+              </select>
+              {status?.nodePath && (
+                <p className="text-[10px] text-gray-400 break-all">
+                  {status.nodePinned ? "已手动指定：" : "自动选中："}
+                  {status.nodePath}
+                </p>
+              )}
+              {!status?.nodeOk && (
+                <p className="text-amber-700">
+                  {status?.nodeVersion
+                    ? `当前 ${status.nodeVersion}，需要 v${status.nodeMinMajor} 及以上`
+                    : "未找到可用的 Node"}
+                </p>
+              )}
             </dd>
           </div>
           <div className="flex gap-2">
@@ -148,19 +192,35 @@ export function DshSettings({ onClose }: DshSettingsProps) {
         </div>
       </div>
 
-      {/* Node 缺失 / 版本不足：给出明确指引，不替用户装 */}
+      {/* Node 缺失 / 版本不足。分三种情况给不同指引，不替用户装 */}
       {!status?.nodeOk && (
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <div className="flex items-start gap-2 text-xs text-amber-900">
             <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-medium">
-                需要 Node.js v{status?.nodeMinMajor ?? 22} 或更高版本
-              </p>
-              <p>
-                dsh 用到了 Node 22 才有的 API，低版本会在启动阶段直接失败。请从 nodejs.org
-                安装（或 nvm 切到 22+）后点「重新检测」。
-              </p>
+            <div className="space-y-1.5 min-w-0">
+              <p className="font-medium">需要 Node.js v{status?.nodeMinMajor ?? 22} 或更高版本</p>
+              <p>dsh 用到了 Node {status?.nodeMinMajor ?? 22} 才有的 API，低版本会在加载插件时直接失败。</p>
+
+              {hasUsableNode ? (
+                // 装了但没被选中：上面的下拉直接能切，不用去命令行
+                <p>已经检测到可用版本，在上面的 Node 下拉里选中它即可。</p>
+              ) : status?.nvmRoot ? (
+                <>
+                  <p>
+                    检测到 nvm（{status.nvmVersions} 个已装版本，{status.nvmRoot}），
+                    但没有 v{status.nodeMinMajor}+。在终端里装一个：
+                  </p>
+                  <code className="block bg-amber-100 rounded px-2 py-1 font-mono select-all">
+                    nvm install {status.nodeMinMajor}
+                  </code>
+                  <p className="text-amber-700">
+                    装完点「重新检测」。不用 <code>nvm use</code> —— 应用直接按路径调用，
+                    不依赖你当前 shell 切到哪个版本（nvm 是 shell 函数，GUI 进程读不到）。
+                  </p>
+                </>
+              ) : (
+                <p>从 nodejs.org 装一个 v{status?.nodeMinMajor ?? 22}+，或用 nvm 装，再点「重新检测」。</p>
+              )}
             </div>
           </div>
         </div>
@@ -185,8 +245,8 @@ export function DshSettings({ onClose }: DshSettingsProps) {
 
       <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 space-y-1">
         <p>
-          dsh 是 DeepSeek 官方的 agent harness。安装后可在会话里把它选作对话引擎，由它接管
-          工具调用与任务执行；模型走会话选中的供应商配置。
+          dsh 是 DeepSeek 官方的 agent harness。安装后到「助手 → dsh」页使用，由它接管
+          工具调用与任务执行；模型走 dsh 页顶部选中的供应商配置。
         </p>
         <p className="text-gray-500">
           安装内容全部落在上面的目录里，卸载即删除，不会动系统里其他 Node 包。

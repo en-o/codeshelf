@@ -2409,6 +2409,32 @@ async dshEnvStatus() : Promise<Result<DshEnvStatus, string>> {
 }
 },
 /**
+ * 列出所有检测到的 node（含版本不够的），界面用它做下拉。
+ */
+async dshListNodes() : Promise<Result<NodeCandidate[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_list_nodes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 手动指定用哪个 node。传 None 恢复自动选择。
+ * 
+ * 版本不够的直接拒绝：dsh 在低版本上是**加载插件树时**失败，
+ * 错误信息是 `Promise.withResolvers is not a function` 这种，
+ * 让人以为是 dsh 坏了。不如在这里挡住并说清楚。
+ */
+async dshSetNode(path: string | null) : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_set_node", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * 安装/重装 dsh 与 profile。全过程日志按行发 `dsh-install-log` 事件。
  */
 async dshInstall() : Promise<Result<DshEnvStatus, string>> {
@@ -3527,7 +3553,23 @@ installed: boolean; installedVersion: string | null; targetVersion: string;
 /**
  * profile 的两个文件与其 node_modules 都就绪
  */
-profileReady: boolean; root: string; home: string; profileDir: string }
+profileReady: boolean; root: string; home: string; profileDir: string; 
+/**
+ * 选中 node 的来源标签（nvm / PATH / 系统目录）
+ */
+nodeSource: string | null; 
+/**
+ * 当前用的是用户手动指定的那个
+ */
+nodePinned: boolean; 
+/**
+ * 检测到 nvm 时给出它的根目录；界面据此显示 `nvm install 22` 之类的指引
+ */
+nvmRoot: string | null; 
+/**
+ * nvm 里装了几个版本（含不满足要求的）
+ */
+nvmVersions: number }
 /**
  * 编辑器配置
  */
@@ -3785,6 +3827,22 @@ implications: string[] }
  * 网卡 URL 信息（用于多网卡环境下生成多个 QR）
  */
 export type NetworkUrl = { interface: string; ip: string; url: string }
+/**
+ * 一个可选的 node，供界面列出来让用户挑。
+ */
+export type NodeCandidate = { path: string; version: string; major: number; 
+/**
+ * 来源标签："nvm" / "PATH" / "系统目录"，界面直接显示
+ */
+source: string; 
+/**
+ * 满足 dsh 的最低版本要求
+ */
+usable: boolean; 
+/**
+ * 用户手动指定的就是这一个
+ */
+pinned: boolean }
 export type NodeJobDirection = "backend" | "frontend" | "fullstack"
 export type NodeTone = "professional" | "concise"
 /**
