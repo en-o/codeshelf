@@ -73,6 +73,7 @@ pub fn run() {
                 commands::resume_node_agent::kill_all_runs_on_exit();
                 // dsh 引擎同理：它自己还会拉起 bash / 子 agent，必须整组回收
                 commands::dsh::kill_engine_on_exit();
+                commands::dsh::kill_web_on_exit();
             }
         });
 }

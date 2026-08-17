@@ -2496,6 +2496,33 @@ async dshEnginePrompt(sessionKey: string, text: string) : Promise<Result<string,
     else return { status: "error", error: e  as any };
 }
 },
+async dshWebStatus() : Promise<Result<DshWebStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_web_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 启动（或复用）dsh 的 Web UI，并在应用内窗口打开它。
+ */
+async dshWebOpen(cwd: string | null) : Promise<Result<DshWebStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_web_open", { cwd }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async dshWebStop() : Promise<Result<DshWebStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_web_stop") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async chatListTools() : Promise<Result<ToolSchema[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("chat_list_tools") };
@@ -3570,6 +3597,7 @@ nvmRoot: string | null;
  * nvm 里装了几个版本（含不满足要求的）
  */
 nvmVersions: number }
+export type DshWebStatus = { running: boolean; url: string | null; pid: number | null }
 /**
  * 编辑器配置
  */

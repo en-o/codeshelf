@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, Square, Trash2 } from "lucide-react";
+import { ExternalLink, FolderOpen, Loader2, Square, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/common";
 import { useConfirm } from "@/components/common";
 import { showToast } from "@/components/ui";
@@ -15,7 +15,7 @@ import {
   renameChatSession,
   saveChatSession,
 } from "@/services/chat";
-import { dshEngineStatus, dshEnvStatus, type DshEnvStatus } from "@/services/dsh";
+import { dshEngineStatus, dshEnvStatus, dshWebOpen, type DshEnvStatus } from "@/services/dsh";
 import type { ChatMessage, ChatSession, ChatSessionSummary } from "@/types";
 
 import { SessionSidebar } from "../Chat/components/SessionSidebar";
@@ -50,6 +50,7 @@ export function DshPage() {
   const [env, setEnv] = useState<DshEnvStatus | null>(null);
   const [enginePid, setEnginePid] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<ChatSessionSummary | null>(null);
+  const [webOpening, setWebOpening] = useState(false);
 
   const activeSessionRef = useRef<ChatSession | null>(null);
   activeSessionRef.current = activeSession;
@@ -273,6 +274,19 @@ export function DshPage() {
     }
   }
 
+  /** 打开 dsh 自带的完整界面：审批弹窗、plan/goal、它自己的模型设置都在那边 */
+  async function handleOpenOfficialUi() {
+    setWebOpening(true);
+    try {
+      await dshWebOpen(activeSession?.allowedCwd ?? null);
+    } catch (e) {
+      const text = typeof e === "string" && e ? e : e instanceof Error ? e.message : "打开失败";
+      showToast("error", "打开官方界面失败", text);
+    } finally {
+      setWebOpening(false);
+    }
+  }
+
   const workspaceName = activeSession?.allowedCwd?.split("/").pop();
 
   return (
@@ -324,6 +338,17 @@ export function DshPage() {
               title="dsh 没有中途取消，停止即关闭引擎进程"
             >
               <Square size={12} /> 停止
+            </button>
+          )}
+          {ready && (
+            <button
+              className="px-2 py-1 border border-gray-200 rounded-lg flex items-center gap-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              onClick={handleOpenOfficialUi}
+              disabled={webOpening}
+              title="用 dsh 自带的完整界面（审批、plan、它自己的模型设置都在那边）；会话不会同步到这里"
+            >
+              {webOpening ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />}
+              {webOpening ? "启动中…" : "官方界面"}
             </button>
           )}
         </div>

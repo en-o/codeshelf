@@ -4,10 +4,11 @@ import {
   type DshEngineConfig,
   type DshEngineStatus,
   type DshEnvStatus,
+  type DshWebStatus,
   type NodeCandidate,
 } from "@/bindings";
 
-export type { DshEngineConfig, DshEngineStatus, DshEnvStatus, NodeCandidate };
+export type { DshEngineConfig, DshEngineStatus, DshEnvStatus, DshWebStatus, NodeCandidate };
 
 // ========== 事件 ==========
 
@@ -86,3 +87,15 @@ export const dshEngineStop = () => unwrap(commands.dshEngineStop());
 /** 返回入队回执 messageId；回答走事件流 */
 export const dshEnginePrompt = (sessionKey: string, text: string) =>
   unwrap(commands.dshEnginePrompt(sessionKey, text));
+
+// ========== 官方 Web 界面 ==========
+
+export const dshWebStatus = () => unwrap(commands.dshWebStatus());
+/** 启动（或复用）dsh web 并在应用内窗口打开；首次使用要初始化 profile，可能几十秒 */
+export const dshWebOpen = (cwd: string | null) => unwrap(commands.dshWebOpen(cwd));
+export const dshWebStop = () => unwrap(commands.dshWebStop());
+
+/** dsh web 的启动日志 */
+export function listenDshWebLog(handler: (line: string) => void) {
+  return listen<string>("dsh-web-log", (e) => handler(e.payload));
+}
