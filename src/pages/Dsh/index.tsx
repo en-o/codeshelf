@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { ExternalLink, FolderOpen, Loader2, PanelsTopLeft, Square, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/common";
 import { useConfirm } from "@/components/common";
@@ -433,13 +434,22 @@ export function DshPage() {
             </div>
           )}
           {view === "official" && webUrl && (
-            <button
-              className="px-2 py-1 border border-gray-200 rounded-lg flex items-center gap-1 text-gray-600 hover:bg-gray-50"
-              onClick={handleStopWeb}
-              title="关掉官方界面的服务进程"
-            >
-              <Square size={12} /> 关闭服务
-            </button>
+            <>
+              <button
+                className="px-2 py-1 border border-gray-200 rounded-lg flex items-center gap-1 text-gray-600 hover:bg-gray-50"
+                onClick={() => openUrl(webUrl)}
+                title="内嵌显示不出来时的兜底：用系统浏览器打开同一个地址"
+              >
+                <ExternalLink size={12} /> 浏览器打开
+              </button>
+              <button
+                className="px-2 py-1 border border-gray-200 rounded-lg flex items-center gap-1 text-gray-600 hover:bg-gray-50"
+                onClick={handleStopWeb}
+                title="关掉官方界面的服务进程"
+              >
+                <Square size={12} /> 关闭服务
+              </button>
+            </>
           )}
         </div>
       </PageHeader>
@@ -474,6 +484,7 @@ export function DshPage() {
           <p className="px-5 py-2 text-[11px] text-gray-400 border-t border-gray-100">
             官方界面用的模型是「{selected?.providerName} · {selected?.model.model}」——
             由 CodeShelf 注入，密钥在它那边显示为「由启动环境提供」。会话存在 dsh 自己那里，不进本地会话列表。
+            {webUrl ? `（${webUrl}，显示不出来就点上面的「浏览器打开」）` : ""}
           </p>
         </div>
       ) : (
