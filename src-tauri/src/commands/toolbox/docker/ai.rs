@@ -97,6 +97,10 @@ pub(super) async fn generate_dockerfile_with_ai(
         read_project_context(&root)
     );
 
+    crate::commands::chat_anthropic::reject_if_anthropic(
+        provider.preset_key.as_deref(),
+        "Dockerfile 生成",
+    )?;
     let url = format!(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')

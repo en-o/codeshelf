@@ -148,7 +148,7 @@ export interface AiProviderConfig {
   id: string;
   name: string;
   providerType: "preset" | "custom";
-  presetKey?: "bailian" | "deepseek" | "openai" | "ollama" | "moonshot";
+  presetKey?: "bailian" | "deepseek" | "openai" | "ollama" | "moonshot" | "anthropic";
   baseUrl: string;
   apiKey?: string;
   enabled: boolean;

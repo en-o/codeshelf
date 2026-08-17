@@ -33,6 +33,8 @@ export interface ChatStreamRequest {
   presencePenalty?: number;
   tools?: Array<{ type: "function"; function: { name: string; description?: string; parameters: object } }>;
   toolChoice?: "auto" | "none" | "required" | { type: "function"; function: { name: string } };
+  /** 供应商协议；缺省 OpenAI 兼容，"anthropic" 走 Claude 原生格式 */
+  protocol?: "anthropic";
 }
 
 export interface CreateChatSessionInput {

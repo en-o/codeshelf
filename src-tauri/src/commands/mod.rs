@@ -1,5 +1,6 @@
 pub mod api_chat;
 pub mod chat;
+pub mod chat_anthropic;
 pub mod chat_bridge;
 pub mod dsh;
 pub mod extras;

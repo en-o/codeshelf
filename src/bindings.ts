@@ -3374,7 +3374,12 @@ export type ChatStreamMessage = { role: string;
  * string 或 OpenAI 多模态内容数组
  */
 content: JsonValue; reasoning_content?: string | null; tool_calls?: JsonValue[] | null; tool_call_id?: string | null; name?: string | null }
-export type ChatStreamRequest = { requestId: string; providerId: string; model: string; baseUrl: string; apiKey: string | null; thinking: boolean | null; stream: boolean | null; messages: ChatStreamMessage[]; temperature: number | null; maxTokens: number | null; topP: number | null; frequencyPenalty: number | null; presencePenalty: number | null; tools?: JsonValue[] | null; toolChoice?: JsonValue | null }
+export type ChatStreamRequest = { requestId: string; providerId: string; model: string; baseUrl: string; apiKey: string | null; thinking: boolean | null; stream: boolean | null; messages: ChatStreamMessage[]; temperature: number | null; maxTokens: number | null; topP: number | null; frequencyPenalty: number | null; presencePenalty: number | null; tools?: JsonValue[] | null; toolChoice?: JsonValue | null; 
+/**
+ * 供应商协议。缺省（None）走 OpenAI 兼容格式；"anthropic" 走 Claude 原生
+ * `/v1/messages`（见 chat_anthropic.rs）。前端按供应商预设决定。
+ */
+protocol?: string | null }
 export type ChatTask = { id: string; subject: string; description: string; activeForm: string | null; status: string; createdAt: string; updatedAt: string }
 /**
  * Claude Code 安装信息

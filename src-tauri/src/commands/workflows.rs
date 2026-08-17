@@ -281,6 +281,10 @@ async fn run_node_llm(cfg: &Value, outputs: &HashMap<String, String>) -> AppResu
         .find(|m| m.id == model_id)
         .ok_or_else(|| crate::error::AppError::from(format!("未找到 model: {}", model_id)))?;
 
+    crate::commands::chat_anthropic::reject_if_anthropic(
+        provider.preset_key.as_deref(),
+        "流程",
+    )?;
     let url = format!(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')

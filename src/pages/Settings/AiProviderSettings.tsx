@@ -26,6 +26,7 @@ const PRESET_LABELS: Record<NonNullable<AiProviderConfig["presetKey"]>, string> 
   openai: "OpenAI",
   ollama: "Ollama",
   moonshot: "Moonshot AI",
+  anthropic: "Anthropic / Claude",
 };
 
 const PRESET_BASE_URL: Record<NonNullable<AiProviderConfig["presetKey"]>, string> = {
@@ -34,6 +35,8 @@ const PRESET_BASE_URL: Record<NonNullable<AiProviderConfig["presetKey"]>, string
   openai: "https://api.openai.com/v1",
   ollama: "http://localhost:11434/v1",
   moonshot: "https://api.moonshot.cn/v1",
+  // Claude 走自己的 /v1/messages 协议（后端 chat_anthropic.rs），不是 OpenAI 兼容
+  anthropic: "https://api.anthropic.com",
 };
 
 // 内置模型列表，用于添加模型时的快速选择
@@ -71,6 +74,11 @@ const ALL_PRESET_MODELS: Record<NonNullable<AiProviderConfig["presetKey"]>, Arra
     { model: "moonshot-v1-8k", thinking: false },
     { model: "moonshot-v1-32k", thinking: false },
     { model: "moonshot-v1-128k", thinking: false },
+  ],
+  anthropic: [
+    { model: "claude-sonnet-4-5", thinking: true },
+    { model: "claude-opus-4-1", thinking: true },
+    { model: "claude-haiku-4-5", thinking: false },
   ],
 };
 

@@ -119,6 +119,10 @@ async fn run_llm(provider_id: &str, model_id: &str, prompt: &str) -> AppResult<S
         .iter()
         .find(|m| m.id == model_id)
         .ok_or_else(|| crate::error::AppError::from(format!("model 未找到: {}", model_id)))?;
+    crate::commands::chat_anthropic::reject_if_anthropic(
+        provider.preset_key.as_deref(),
+        "聊天桥接",
+    )?;
     let url = format!(
         "{}/chat/completions",
         provider.base_url.trim_end_matches('/')

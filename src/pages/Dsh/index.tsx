@@ -39,8 +39,8 @@ import { buildModelOptions, getDefaultOptionKey, makeMessage } from "../Chat/uti
 function dshRouteFor(provider: AiProviderConfig | undefined): string {
   if (provider?.presetKey === "deepseek") return "deepseek-official";
   if (provider?.presetKey === "openai") return "openai";
-  // Anthropic 目前没有预设项（内置对话还不会说它的协议），按端点认：
-  // 用「自定义厂商」填了 Anthropic 地址的，在 dsh 这边就该走 anthropic 路由。
+  if (provider?.presetKey === "anthropic") return "anthropic";
+  // 没用预设、直接拿「自定义厂商」填了 Anthropic 地址的，也认出来
   if (/(^|\.)anthropic\.com/i.test(provider?.baseUrl ?? "")) return "anthropic";
   return "codeshelf";
 }

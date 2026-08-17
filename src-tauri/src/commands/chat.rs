@@ -37,6 +37,10 @@ pub struct ChatStreamRequest {
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// 供应商协议。缺省（None）走 OpenAI 兼容格式；"anthropic" 走 Claude 原生
+    /// `/v1/messages`（见 chat_anthropic.rs）。前端按供应商预设决定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -95,7 +99,8 @@ pub struct ChatStreamEvent {
 }
 
 impl ChatStreamEvent {
-    fn new(request_id: &str) -> Self {
+    /// `pub(crate)`：Anthropic 适配（chat_anthropic.rs）要往同一个事件通道发同样的事件
+    pub(crate) fn new(request_id: &str) -> Self {
         Self {
             request_id: request_id.to_string(),
             delta: None,
@@ -1019,6 +1024,9 @@ fn build_chat_payload(
 #[tauri::command]
 #[specta::specta]
 pub async fn chat_complete(request: ChatStreamRequest) -> AppResult<String> {
+    if crate::commands::chat_anthropic::is_anthropic(&request) {
+        return crate::commands::chat_anthropic::complete(&request, HTTP_CLIENT.clone()).await;
+    }
     let (url, headers, body) = build_chat_payload(&request, false)?;
     let client = HTTP_CLIENT.clone();
     let response = client
@@ -1054,6 +1062,17 @@ pub async fn chat_complete(request: ChatStreamRequest) -> AppResult<String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn chat_stream(app: AppHandle, request: ChatStreamRequest) -> AppResult<()> {
+    // Anthropic 走另一套请求与流解析，但取消（CHAT_ABORTS）与事件出口共用这里的机制
+    if crate::commands::chat_anthropic::is_anthropic(&request) {
+        let request_id = request.request_id.clone();
+        let client = HTTP_CLIENT.clone();
+        let handle = tokio::spawn(async move {
+            crate::commands::chat_anthropic::stream(app, request, client).await;
+        });
+        CHAT_ABORTS.write().await.insert(request_id, handle.abort_handle());
+        return Ok(());
+    }
+
     let request_id = request.request_id.clone();
     let use_stream = request.stream.unwrap_or(true);
     let (url, headers, body) = build_chat_payload(&request, use_stream)?;

@@ -31,6 +31,8 @@ export async function compactMessages(params: {
   model: string;
   baseUrl: string;
   apiKey?: string;
+  /** 供应商协议；缺省 OpenAI 兼容。不传的话 Claude 会收到 OpenAI 格式的请求直接报错 */
+  protocol?: "anthropic";
   /** 保留多少条尾部消息原样不压缩 */
   keep?: number;
 }): Promise<CompactResult> {
@@ -97,6 +99,7 @@ export async function compactMessages(params: {
     model: params.model,
     baseUrl: params.baseUrl,
     apiKey: params.apiKey,
+    protocol: params.protocol,
     stream: true,
     messages,
   });
