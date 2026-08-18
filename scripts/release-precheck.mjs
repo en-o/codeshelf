@@ -14,6 +14,7 @@
  * 用法：
  *   node scripts/release-precheck.mjs baseline <version>   # 版本格式 + 分支 + 工作树 + 基线 + 分支占用
  *   node scripts/release-precheck.mjs verify-staged        # 暂存区只含版本文件
+ *   node scripts/release-precheck.mjs base-branch <version> # 打印该版本应发自的基线分支
  *
  * 退出码：0 通过，1 不通过（原因打到 stderr）。
  */
@@ -29,6 +30,17 @@ export const VERSION_FILES = [
   "src-tauri/Cargo.toml",
   "src-tauri/Cargo.lock",
 ];
+
+/**
+ * 两条基线：正式版发自 `main`，预览版发自 `main-v`。
+ *
+ * 两条线各自更新、互不可见（预览版包里的 updater 端点是另一个 URL，
+ * 见 src-tauri/tauri.preview.conf.json），所以基线也必须分开 ——
+ * 在 main 上打预览版号，等于把正式版的代码发成预览版，两边历史立刻纠缠。
+ */
+export function baseBranchFor(version) {
+  return /-\d+$/.test(version) ? "main-v" : "main";
+}
 
 const RED = "\x1b[0;31m";
 const YELLOW = "\x1b[1;33m";
@@ -66,10 +78,14 @@ function baseline(version) {
   // 2) 必须在 git 仓库里
   if (!fs.existsSync(".git")) fail("当前目录不是 git 仓库");
 
-  // 3) 必须在 main 分支
+  // 3) 必须在该版本对应的基线分支上：正式版 main，预览版 main-v
+  const baseBranch = baseBranchFor(version);
   const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
-  if (branch !== "main") {
-    fail(`当前分支是 ${branch}，请在 main 分支上运行此脚本`);
+  if (branch !== baseBranch) {
+    fail(
+      `当前分支是 ${branch}，但 ${version} 是${baseBranch === "main-v" ? "预览版" : "正式版"}，` +
+        `请在 ${baseBranch} 分支上运行此脚本`,
+    );
   }
 
   // 4) 工作树与暂存区必须干净。
@@ -88,30 +104,30 @@ function baseline(version) {
   //    强制一致会逼着先 `git push origin main`，而那会让 CI 在 main 上再跑一遍 ——
   //    同一个 commit 触发两个 workflow。
   //    但**落后**必须拦：那意味着拿旧代码打包。分叉同理。
-  if (git(["fetch", "origin", "main", "--quiet"], { allowFail: true }) === null) {
-    fail("无法 fetch origin/main，请检查网络或远程配置");
+  if (git(["fetch", "origin", baseBranch, "--quiet"], { allowFail: true }) === null) {
+    fail(`无法 fetch origin/${baseBranch}，请检查网络或远程配置`);
   }
   const local = git(["rev-parse", "HEAD"]);
-  const remote = git(["rev-parse", "origin/main"]);
-  const base = git(["merge-base", "HEAD", "origin/main"]);
+  const remote = git(["rev-parse", `origin/${baseBranch}`]);
+  const base = git(["merge-base", "HEAD", `origin/${baseBranch}`]);
 
   if (local !== remote) {
     if (local === base) {
-      fail("本地 main 落后于 origin/main，会用旧代码打包。请先 git pull");
+      fail(`本地 ${baseBranch} 落后于 origin/${baseBranch}，会用旧代码打包。请先 git pull`);
     } else if (remote === base) {
-      const subjects = (git(["log", "--format=%s", "origin/main..HEAD"]) || "")
+      const subjects = (git(["log", "--format=%s", `origin/${baseBranch}..HEAD`]) || "")
         .split("\n")
         .filter(Boolean);
       const nonRelease = subjects.filter((s) => !/^chore: release v/.test(s));
       if (nonRelease.length > 0) {
         process.stderr.write(`\n${nonRelease.join("\n")}\n\n`);
         fail(
-          "main 上有未推送的非发版提交（见上）。它们不会进入本次 release 分支，请先推送或整理。",
+          `${baseBranch} 上有未推送的非发版提交（见上）。它们不会进入本次 release 分支，请先推送或整理。`,
         );
       }
-      warn(`main 领先 origin/main ${subjects.length} 个提交，均为历史发版提交，继续。`);
+      warn(`${baseBranch} 领先 origin/${baseBranch} ${subjects.length} 个提交，均为历史发版提交，继续。`);
     } else {
-      fail("本地 main 与 origin/main 已分叉，请先处理后再发版");
+      fail(`本地 ${baseBranch} 与 origin/${baseBranch} 已分叉，请先处理后再发版`);
     }
   }
 
@@ -144,7 +160,11 @@ function verifyStaged() {
 const [cmd, arg] = process.argv.slice(2);
 if (cmd === "baseline") baseline(arg);
 else if (cmd === "verify-staged") verifyStaged();
+// sh 和 bat 都需要「发完切回哪条基线」，判定只留这一份，别在两个脚本里各写一遍
+else if (cmd === "base-branch") process.stdout.write(`${baseBranchFor(arg ?? "")}\n`);
 else {
-  process.stderr.write("用法: release-precheck.mjs baseline <version> | verify-staged\n");
+  process.stderr.write(
+    "用法: release-precheck.mjs baseline <version> | verify-staged | base-branch <version>\n",
+  );
   process.exit(2);
 }

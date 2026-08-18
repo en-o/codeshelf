@@ -13,7 +13,7 @@ export interface UpdateInfo {
   date?: string;
   body?: string;
   isPortable?: boolean;
-  /** 预览版：不检查、不下载、不安装，只能手动下载安装包覆盖安装 */
+  /** 当前是预览版（只在预览线内更新，界面据此显示渠道提示） */
   isPreview?: boolean;
 }
 
@@ -38,14 +38,28 @@ export async function getReleaseChannel(): Promise<ReleaseChannel> {
 }
 
 /**
- * 取远端更新的**唯一入口**。预览版在这里断流，返回 null。
+ * 取远端更新的**唯一入口**：只接受与自己同渠道的版本，跨渠道一律当作"没有更新"。
+ *
+ * 正式版与预览版是两条基线，可以互相下载覆盖安装，但更新功能里谁都不该看到对方 ——
+ * 第一道拦截在编译期（预览版包内置的 endpoint 指向预览专属清单，见
+ * `src-tauri/tauri.preview.conf.json`），这里是第二道：万一清单配错 / 端点被顶掉，
+ * 也不会把预览版推给正式版用户，反之亦然。
  *
  * 检查 / 下载 / 下载并安装三条路径都各自调过 `check()`，守卫放在这一层，
  * 就不用在每个入口各加一处、也不会漏掉以后新增的路径。
  */
 async function checkUpstream(): Promise<Update | null> {
-  if ((await getReleaseChannel()) === "preview") return null;
-  return check();
+  const update = await check();
+  if (!update) return null;
+  const channel = await getReleaseChannel();
+  const upstream: ReleaseChannel = isPreviewVersion(update.version) ? "preview" : "stable";
+  if (upstream !== channel) {
+    console.warn(
+      `忽略跨渠道更新：本机是 ${channel}，远端清单给的是 ${upstream}（v${update.version}）`,
+    );
+    return null;
+  }
+  return update;
 }
 
 // 缓存已检查的更新对象，以及已完成下载、可安装的更新对象
@@ -98,14 +112,9 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
     };
   }
 
-  // 预览版跳过更新检查（渠道说明见 isPreviewVersion）
-  if ((await getReleaseChannel()) === "preview") {
-    return {
-      available: false,
-      currentVersion: await getVersion(),
-      isPreview: true,
-    };
-  }
+  // 预览版走自己的更新源（预览端点），检查逻辑与正式版一致，
+  // 只是 isPreview 会传给界面提示"你在预览线上"。
+  const isPreview = (await getReleaseChannel()) === "preview";
 
   try {
     const update = await checkUpstream();
@@ -121,12 +130,14 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
         version: update.version,
         date: update.date,
         body: update.body,
+        isPreview,
       };
     }
 
     return {
       available: false,
       currentVersion: "",
+      isPreview,
     };
   } catch (error) {
     console.error("Failed to check for updates:", error);
@@ -309,7 +320,14 @@ export function buildCorrectArchDmgUrl(version: string, targetArch: string): str
   )}_${archSuffix}.dmg`;
 }
 
-const RELEASES_PAGE = "https://github.com/en-o/codeshelf/releases/latest";
+/**
+ * 兜底页用**这个版本自己的 tag 页**，不是 `releases/latest`：
+ * latest 永远指向正式版，预览版用户点进去会被带到另一条基线上。
+ */
+function releasePageUrl(version: string): string {
+  const tag = version.startsWith("v") ? version : `v${version}`;
+  return `https://github.com/en-o/codeshelf/releases/tag/${tag}`;
+}
 
 /**
  * 用浏览器打开匹配宿主架构的 dmg 直链；同时打开 release 页作为兜底
@@ -321,6 +339,6 @@ export async function openCorrectArchDownload(version: string, hostArch: string)
     await openUrl(dmgUrl);
   } catch (err) {
     console.warn("打开直链失败，回退到 release 页", err);
-    await openUrl(RELEASES_PAGE);
+    await openUrl(releasePageUrl(version));
   }
 }

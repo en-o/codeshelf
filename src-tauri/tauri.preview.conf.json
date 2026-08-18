@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/en-o/codeshelf/releases/download/preview/latest.json"
+      ]
+    }
+  }
+}

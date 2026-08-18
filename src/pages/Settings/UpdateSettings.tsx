@@ -86,7 +86,9 @@ export function UpdateSettings() {
     } else {
       if (!info.version) {
         showToast("warning", "未拿到新版本号", "请前往 GitHub Releases 手动下载");
-        open("https://github.com/en-o/codeshelf/releases/latest");
+        // 用列表页而不是 /releases/latest：latest 永远是正式版，
+        // 预览版用户点进去会被带到另一条基线上
+        open("https://github.com/en-o/codeshelf/releases");
         return;
       }
       openCorrectArchDownload(info.version, arch.hostArch)
@@ -131,28 +133,18 @@ export function UpdateSettings() {
             </p>
             <p className="text-xs text-gray-500 mt-1">v{currentVersion}</p>
           </div>
-          {isPreview ? (
-            <button
-              onClick={() => open("https://github.com/en-o/codeshelf/releases")}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors"
-            >
-              <ExternalLink size={16} />
-              手动下载
-            </button>
-          ) : (
-            <button
-              onClick={handleCheckUpdate}
-              disabled={checking || downloading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
-            >
-              {checking ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <RefreshCw size={16} />
-              )}
-              {checking ? "检查中..." : "检查更新"}
-            </button>
-          )}
+          <button
+            onClick={handleCheckUpdate}
+            disabled={checking || downloading}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
+          >
+            {checking ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <RefreshCw size={16} />
+            )}
+            {checking ? "检查中..." : "检查更新"}
+          </button>
         </div>
       </div>
 
@@ -209,48 +201,48 @@ export function UpdateSettings() {
         </div>
       )}
 
-      {/* 预览版：不检查、不下载、不安装，只能手动下载安装包覆盖安装 */}
+      {/* 预览版：更新只在预览线内流转，不会拿到正式版的信息（反之亦然） */}
       {isPreview && (
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
           <div className="flex items-start gap-2">
             <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-amber-900 space-y-1">
-              <p className="text-sm font-medium">这是预览版，不参与自动更新</p>
-              <p>预览版不会检查、下载或安装更新，也不会收到新版本提示。</p>
+              <p className="text-sm font-medium">这是预览版，只在预览线内更新</p>
               <p>
-                需要升级时请到 GitHub Releases 手动下载新版安装包，直接覆盖安装即可（数据不会丢失）。
-                装上正式版（版本号形如 0.2.0，无 <code>-</code> 后缀）后会自动恢复自动更新。
+                预览版与正式版是两条独立基线：这里只会检查到新的预览版，不会提示、也不会安装正式版。
+              </p>
+              <p>
+                想切回正式版（版本号形如 0.2.0，无 <code>-</code> 后缀）请到 GitHub Releases
+                自行下载安装包覆盖安装，数据不会丢失。
               </p>
             </div>
           </div>
         </div>
       )}
 
-      {/* 自动更新开关（预览版没有自动更新，开关不显示） */}
-      {!isPreview && (
-        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-900">自动检查更新</p>
-              <p className="text-xs text-gray-500 mt-1">
-                {autoUpdate ? "启动时自动检查并下载更新" : "已关闭自动更新，你仍可手动检查更新"}
-              </p>
-            </div>
-            <button
-              onClick={() => setAutoUpdate(!autoUpdate)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                autoUpdate ? "bg-blue-500" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  autoUpdate ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
+      {/* 自动更新开关 */}
+      <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-900">自动检查更新</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {autoUpdate ? "启动时自动检查并下载更新" : "已关闭自动更新，你仍可手动检查更新"}
+            </p>
           </div>
+          <button
+            onClick={() => setAutoUpdate(!autoUpdate)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              autoUpdate ? "bg-blue-500" : "bg-gray-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                autoUpdate ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
         </div>
-      )}
+      </div>
 
       {/* 说明 */}
       <div className="p-3 bg-blue-50/50 border border-blue-200/50 rounded-lg">
@@ -259,7 +251,7 @@ export function UpdateSettings() {
           <div className="text-xs text-blue-900">
             <p>
               {isPreview
-                ? "预览版只能手动升级：下载新安装包后覆盖安装即可。"
+                ? "应用会自动检查新的预览版（预览线专属更新源）。下载完成后将自动重启应用以完成更新。"
                 : "应用会自动检查 GitHub Releases 上的新版本。下载完成后将自动重启应用以完成更新。"}
             </p>
             <button
