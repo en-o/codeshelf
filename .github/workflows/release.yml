@@ -29,6 +29,9 @@ jobs:
       release_id: ${{ steps.create_release.outputs.result }}
       version: ${{ steps.get_version.outputs.version }}
       release_notes: ${{ steps.release_notes.outputs.notes }}
+      # "true" = 预览版。构建任务据此叠加 tauri.preview.conf.json，
+      # 让预览版包内置的 updater 端点指向预览专属清单。
+      prerelease: ${{ steps.get_version.outputs.prerelease }}
       # 所有构建任务都必须 checkout 这个 SHA。分支在 workflow 运行期间可能又收到新提交，
       # 各任务各自解析分支名会拿到不同的树，产物之间以及产物与 tag 都会对不上。
       build_sha: ${{ github.sha }}
@@ -66,9 +69,11 @@ jobs:
 
           # 预览版必须标成 GitHub prerelease：`/releases/latest` 会跳过 prerelease，
           # 正式版用户的 updater 端点（latest/download/latest.json）才不会被预览版顶掉。
+          # 预览版有自己的端点（tag `preview` 上的 latest.json，由 preview-manifest.yml
+          # 在人工 Publish 之后同步），两条线各更各的，谁也拿不到对方的清单。
           if echo "$VERSION" | grep -q -- '-'; then
             echo "prerelease=true" >> $GITHUB_OUTPUT
-            echo "这是预览版：将发布为 GitHub Pre-release，且应用内不参与自动更新"
+            echo "这是预览版：发布为 GitHub Pre-release，只在预览线内自动更新"
           else
             echo "prerelease=false" >> $GITHUB_OUTPUT
           fi
@@ -230,7 +235,10 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           releaseBody: ${{ needs.create-release.outputs.release_notes }}
           updaterJsonKeepUniversal: true
-          args: ${{ matrix.args }} --config ${{ matrix.config }}
+          # 预览版再叠一层 config，把 updater 端点换成预览专属清单。
+          # 端点是**编译期**烧进包里的：正式版的包物理上就不知道预览清单的地址，
+          # 反之亦然 —— 跨渠道更新不是靠运行时判断拦住的，而是根本拿不到对方的 URL。
+          args: ${{ matrix.args }} --config ${{ matrix.config }}${{ needs.create-release.outputs.prerelease == 'true' && ' --config src-tauri/tauri.preview.conf.json' || '' }}
 
       # 没有 Apple Developer ID 时，release config 至少会用 `-` 给整个 .app 做
       # ad-hoc 签名。不能只依赖 Rust 链接器给主 Mach-O 留下的 linker signature：
@@ -435,6 +443,9 @@ jobs:
               '',
               `确认无误后到 [Release 页面](${release.html_url}) 点 **Publish release**。`,
               '在此之前用户不会收到自动更新。',
+              release.prerelease
+                ? '这是**预览版**：Publish 之后 `preview-manifest` workflow 会把这份 latest.json 同步到固定 tag `preview`，届时预览版用户才收到更新；正式版用户看不到它。'
+                : '这是**正式版**：Publish 之后 `releases/latest` 才会指向它；预览版用户看不到它。',
             ].join('\n');
 
             await core.summary.addRaw(body).write();
