@@ -583,7 +583,10 @@ pub fn build_home_patch(
         routes.insert(
             route_id(&p.id),
             serde_json::json!({
-                "displayName": p.name,
+                // 名字前面挂个来源标记：dsh 自带的路由和我们注入的会同名
+                // （都叫 DeepSeek），选模型时分不出哪个是哪个。
+                // 它的界面没有给外部路由加角标的地方，能控制的只有 displayName。
+                "displayName": format!("CodeShelf · {}", p.name),
                 "apiKeyEnv": key_env_name(&p.id),
                 "api": p.api.clone().unwrap_or_else(|| "openai-completions".into()),
                 "baseURL": p.base_url,
@@ -592,6 +595,7 @@ pub fn build_home_patch(
         );
     }
 
+    let has_routes = !routes.is_empty();
     let default_route = providers
         .iter()
         .find(|p| p.id == default_provider_id)
@@ -604,12 +608,25 @@ pub fn build_home_patch(
         default_model
     };
 
-    let patch = serde_json::json!([
-        { "id": "llm-pi-ai", "config": { "providers": routes } },
+    let mut patch = vec![
+        serde_json::json!({ "id": "llm-pi-ai", "config": { "providers": routes } }),
         // 默认模型也要覆盖：不改它的话官方界面的模型选择器只显示 dsh-base 里
         // 写死的 deepseek-v4-flash，用户在 CodeShelf 里选的模型根本进不去。
-        { "id": "agent-default-model", "config": { "provider": default_route, "model": default_model } },
-    ]);
+        serde_json::json!({
+            "id": "agent-default-model",
+            "config": { "provider": default_route, "model": default_model },
+        }),
+    ];
+
+    // 有我们自己的路由时，关掉 dsh 自带的 deepseek-official。
+    // 它没有密钥（界面上是个红点），却和我们注入的 DeepSeek 同名并排出现，
+    // 选模型时纯粹是干扰。一个供应商都没配时保留它 —— 那是唯一的兜底路由。
+    if !has_routes {
+        // 没有可用路由：保持 dsh 原样，别把唯一能跑的那条也关了
+    } else {
+        patch.push(serde_json::json!({ "id": "llm-deepseek", "disabled": true }));
+    }
+    let patch = serde_json::Value::Array(patch);
 
     format!(
         "# CodeShelf 生成的 home 级补丁，对所有 profile 生效（含 dsh 官方界面）。\n\
@@ -864,13 +881,17 @@ mod tests {
                 .expect("补丁必须是合法 JSON（YAML 是 JSON 超集，dsh 照读）");
 
         let routes = &parsed[0]["config"]["providers"];
-        assert_eq!(routes["cs-p1"]["displayName"], "Moonshot AI");
+        // 带来源前缀：dsh 自带路由和我们注入的会重名，选模型时得分得出来
+        assert_eq!(routes["cs-p1"]["displayName"], "CodeShelf · Moonshot AI");
         assert_eq!(routes["cs-p1"]["api"], "openai-completions", "缺省是 OpenAI 兼容");
         assert_eq!(routes["cs-p1"]["models"].as_array().unwrap().len(), 2);
         assert_eq!(routes["cs-p2"]["api"], "anthropic-messages");
         // 默认模型必须跟着当前选中的走，否则官方界面只会显示 dsh 自带的 deepseek
         assert_eq!(parsed[1]["config"]["provider"], "cs-p2");
         assert_eq!(parsed[1]["config"]["model"], "claude-sonnet-4-5");
+        // 有自己的路由了就关掉 dsh 自带那条没密钥的，免得两个 DeepSeek 并排
+        assert_eq!(parsed[2]["id"], "llm-deepseek");
+        assert_eq!(parsed[2]["disabled"], true);
     }
 
     /// 窗口报大了 dsh 不会拦，供应商会回 400（moonshot-v1-8k 上实测过）。
@@ -902,5 +923,7 @@ mod tests {
         let patch = build_home_patch(&[], "", "");
         assert!(patch.contains("deepseek-official"));
         assert!(patch.contains("deepseek-v4-flash"));
+        // 一条自己的路由都没有时，dsh 自带的那条是唯一能跑的，不能关
+        assert!(!patch.contains("\"llm-deepseek\""));
     }
 }
