@@ -196,8 +196,7 @@ export function ChatPage() {
     async function load() {
       setListLoading(true);
       try {
-        // dsh 会话有自己的页面，这里只列内置引擎的
-        const list = (await listChatSessions()).filter((s) => s.engine !== "dsh");
+        const list = await listChatSessions();
         setSessions(list);
         if (list.length > 0) {
           setActiveSessionId((prev) => prev ?? list[0].id);

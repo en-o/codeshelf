@@ -7,9 +7,8 @@
 // 配合 home 级补丁里的路由声明（见 runtime.rs 的 HOME_PATCH），
 // 官方界面里显示的就是用户自己的模型，密钥那栏是「由启动环境提供（只读）」。
 
-use super::engine::DshEngineConfig;
 use super::runtime::{
-    dsh_entry_js, dsh_env_status, dsh_home, ensure_home_patch, ensure_profile_files, key_env_name,
+    dsh_entry_js, dsh_env_status, dsh_home, ensure_home_patch, key_env_name, DshProviderSpec,
 };
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
@@ -24,6 +23,22 @@ use tokio::process::Command;
 const EVENT_LOG: &str = "dsh-web-log";
 /// 等它把端口监听起来的上限
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// 启动 dsh 需要的一切：工作目录 + 模型来源。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DshLaunchConfig {
+    /// dsh 的默认工作目录（它自己的界面里还能再加工作区）
+    pub cwd: String,
+    /// 当前选中的供应商 id（CodeShelf 侧），决定 dsh 的默认路由
+    pub provider_id: String,
+    pub model: String,
+    /// CodeShelf「模型」页里所有启用的供应商，一一映射成 dsh 的模型路由。
+    /// 传全量而不只是选中那个：dsh 界面里的模型下拉要能列出用户配的全部模型，
+    /// 且每条各用各的端点与密钥（否则选 A 家的模型会拿 B 家的地址去打）。
+    #[serde(default)]
+    pub providers: Vec<DshProviderSpec>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -62,7 +77,7 @@ pub async fn dsh_web_status() -> AppResult<DshWebStatus> {
 /// 而不是让人再填一次 DeepSeek 的 key。
 #[tauri::command]
 #[specta::specta]
-pub async fn dsh_web_open(app: AppHandle, config: DshEngineConfig) -> AppResult<DshWebStatus> {
+pub async fn dsh_web_open(app: AppHandle, config: DshLaunchConfig) -> AppResult<DshWebStatus> {
     if WEB_PID.load(Ordering::SeqCst) != 0 && current_url().is_some() {
         return dsh_web_status().await;
     }
@@ -85,9 +100,7 @@ pub async fn dsh_web_open(app: AppHandle, config: DshEngineConfig) -> AppResult<
         .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()))
         .unwrap_or_else(|| ".".to_string());
 
-    // 官方界面走的是 dsh 的 web profile，模型路由来自 home 补丁 ——
-    // 用户可能先开官方界面再用本地视图，所以这条路径上也要先把补丁写好。
-    ensure_profile_files()?;
+    // 官方界面用的是 dsh 自带的 web profile；模型路由靠 home 补丁注入
     ensure_home_patch(&config.providers, &config.provider_id, &config.model)?;
 
     let mut cmd = Command::new(&node);

@@ -1,71 +1,16 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   commands,
-  type DshEngineConfig,
-  type DshEngineStatus,
   type DshEnvStatus,
+  type DshLaunchConfig,
   type DshProviderSpec,
   type DshWebStatus,
   type NodeCandidate,
 } from "@/bindings";
 
-export type {
-  DshEngineConfig,
-  DshEngineStatus,
-  DshEnvStatus,
-  DshProviderSpec,
-  DshWebStatus,
-  NodeCandidate,
-};
+export type { DshEnvStatus, DshLaunchConfig, DshProviderSpec, DshWebStatus, NodeCandidate };
 
 // ========== 事件 ==========
-
-/**
- * dsh 的会话日志事件。这里只声明我们真正会渲染的那些字段 ——
- * dsh 的事件表还在扩张（0.1.0-rc，官方明说会变），把整张表抄进来只会更快过期。
- * 没列出的 type 一律忽略即可，不影响对话。
- */
-export interface DshSessionEvent {
-  type: string;
-  seq: number;
-  time: number;
-  data: Record<string, unknown>;
-}
-
-/** 流式增量块（assistant/chunk 的 data.chunk） */
-export interface DshStreamChunk {
-  type: "block-start" | "text-delta" | "reasoning-delta" | "tool-call-delta" | "block-end" | "usage" | "finish";
-  text?: string;
-  delta?: string;
-  reason?: { kind: string; error?: { message?: string; code?: string } };
-  [key: string]: unknown;
-}
-
-export interface DshNotification {
-  method: "session.event" | "session.status" | "subagent.started" | "subagent.finished";
-  params: Record<string, unknown>;
-  /**
-   * 发起该会话的调用方 id（CodeShelf 的会话 id），由 Rust 侧回填。
-   * dsh 自己的 sessionId 每次启动引擎都会换，别拿它做匹配。
-   */
-  sessionKey: string | null;
-}
-
-export interface DshEngineExit {
-  pid: number;
-  code: number | null;
-  stderr: string;
-}
-
-/** 订阅引擎事件；返回取消函数。注意 listen 本身是异步的，调用方要先 await 再发消息。 */
-export function listenDshEvents(handler: (n: DshNotification) => void) {
-  return listen<DshNotification>("dsh-event", (e) => handler(e.payload));
-}
-
-/** 引擎进程退出（正常关闭或崩溃） */
-export function listenDshExit(handler: (e: DshEngineExit) => void) {
-  return listen<DshEngineExit>("dsh-engine-exit", (e) => handler(e.payload));
-}
 
 /** 安装过程的日志行 */
 export function listenDshInstallLog(handler: (line: string) => void) {
@@ -89,22 +34,15 @@ export const dshSetNode = (path: string | null) => unwrap(commands.dshSetNode(pa
 export const dshInstall = () => unwrap(commands.dshInstall());
 export const dshUninstall = () => unwrap(commands.dshUninstall());
 
-export const dshEngineStatus = () => unwrap(commands.dshEngineStatus());
-export const dshEngineStart = (config: DshEngineConfig) => unwrap(commands.dshEngineStart(config));
-export const dshEngineStop = () => unwrap(commands.dshEngineStop());
-/** 返回入队回执 messageId；回答走事件流 */
-export const dshEnginePrompt = (sessionKey: string, text: string) =>
-  unwrap(commands.dshEnginePrompt(sessionKey, text));
-
 // ========== 官方 Web 界面 ==========
 
 export const dshWebStatus = () => unwrap(commands.dshWebStatus());
 /**
- * 启动（或复用）dsh web，返回它的地址（前端 iframe 内嵌）。
- * 传的是与引擎同一份配置：官方界面因此直接用上 CodeShelf 里选的供应商。
- * 首次使用要初始化 web profile，可能几十秒。
+ * 启动（或复用）dsh，返回它的地址（前端 iframe 内嵌）。
+ * 配置里带着「模型」页的全部供应商，dsh 那边因此直接用上你自己的模型。
+ * 首次启动要初始化它的 web profile，可能几十秒。
  */
-export const dshWebOpen = (config: DshEngineConfig) => unwrap(commands.dshWebOpen(config));
+export const dshWebOpen = (config: DshLaunchConfig) => unwrap(commands.dshWebOpen(config));
 export const dshWebStop = () => unwrap(commands.dshWebStop());
 
 /** dsh web 的启动日志 */

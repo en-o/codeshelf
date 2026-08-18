@@ -17,9 +17,6 @@ use tokio::process::Command;
 /// 「对话卡住」而不是「版本不兼容」。升级此常量必须重跑 docs/specs/dsh-engine.md 的冒烟。
 pub const DSH_VERSION: &str = "0.1.0-rc.6";
 
-/// profile 目录名（$DSH_HOME/profiles/<名字>）
-pub const PROFILE_NAME: &str = "codeshelf";
-
 /// dsh 依赖 Promise.withResolvers / zlib.createZstdDecompress，Node 20 上插件树直接加载失败。
 pub const NODE_MIN_MAJOR: u32 = 22;
 
@@ -40,11 +37,8 @@ pub struct DshEnvStatus {
     pub installed: bool,
     pub installed_version: Option<String>,
     pub target_version: String,
-    /// profile 的两个文件与其 node_modules 都就绪
-    pub profile_ready: bool,
     pub root: String,
     pub home: String,
-    pub profile_dir: String,
     /// 选中 node 的来源标签（nvm / PATH / 系统目录）
     pub node_source: Option<String>,
     /// 当前用的是用户手动指定的那个
@@ -65,10 +59,6 @@ pub fn dsh_root() -> AppResult<PathBuf> {
 /// 传给子进程的 $DSH_HOME（profile 与 dsh 自己的状态都落在这里）
 pub fn dsh_home() -> AppResult<PathBuf> {
     Ok(dsh_root()?.join("home"))
-}
-
-pub fn profile_dir() -> AppResult<PathBuf> {
-    Ok(dsh_home()?.join("profiles").join(PROFILE_NAME))
 }
 
 /// dsh 的 Node 入口。直接跑这个 js 而不是 .bin/dsh 包装脚本：
@@ -356,20 +346,11 @@ fn npm_for(node: Option<&NodeInfo>) -> Option<PathBuf> {
 pub async fn dsh_env_status() -> AppResult<DshEnvStatus> {
     let root = dsh_root()?;
     let home = dsh_home()?;
-    let profile = profile_dir()?;
     let node = find_node().await;
 
     let entry = dsh_entry_js()?;
     let installed = entry.exists();
     let installed_version = installed_dsh_version(&root);
-    let profile_ready = profile.join("package.json").exists()
-        && profile.join("cordis.patch.yml").exists()
-        && profile
-            .join("node_modules")
-            .join("@deepseek-ai")
-            .join("dsh-sdk-jsonrpc-server")
-            .exists();
-
     let pinned = read_pinned_node();
     let node_pinned = matches!(
         (node.as_ref(), pinned.as_ref()),
@@ -397,10 +378,8 @@ pub async fn dsh_env_status() -> AppResult<DshEnvStatus> {
         installed,
         installed_version,
         target_version: DSH_VERSION.to_string(),
-        profile_ready,
         root: root.to_string_lossy().to_string(),
         home: home.to_string_lossy().to_string(),
-        profile_dir: profile.to_string_lossy().to_string(),
     })
 }
 
@@ -619,26 +598,6 @@ pub fn ensure_home_patch(
     Ok(())
 }
 
-/// 把 profile 的两个文件写成代码里的当前版本（内容一致就不动）。
-///
-/// 安装时写一次不够：这两个文件的内容跟着应用代码走（比如新增模型路由），
-/// 老用户不会为了一行 yaml 去点「重新安装」。所以每次启动引擎前也调一次，
-/// 让「代码里的 profile」永远是磁盘上的那份。
-pub fn ensure_profile_files() -> AppResult<()> {
-    let profile = profile_dir()?;
-    std::fs::create_dir_all(&profile)?;
-    for (name, content) in [
-        ("package.json", profile_package_json()),
-        ("cordis.patch.yml", PROFILE_PATCH.to_string()),
-    ] {
-        let path = profile.join(name);
-        if std::fs::read_to_string(&path).ok().as_deref() != Some(content.as_str()) {
-            write_atomic(&path, content)?;
-        }
-    }
-    Ok(())
-}
-
 /// 读已装 dsh 的 package.json 版本号；读不出来就当没装明白，返回 None。
 fn installed_dsh_version(root: &Path) -> Option<String> {
     let pkg = root
@@ -671,9 +630,7 @@ pub async fn dsh_install(app: AppHandle) -> AppResult<DshEnvStatus> {
         .ok_or_else(|| AppError::Other("未找到 npm，请确认 Node 安装完整".into()))?;
 
     let root = dsh_root()?;
-    let profile = profile_dir()?;
     std::fs::create_dir_all(&root)?;
-    std::fs::create_dir_all(&profile)?;
 
     // npm 需要一个 package.json 才把这里当成安装根；没有它会一路往上找，
     // 最坏情况把包装到用户家目录去。
@@ -698,22 +655,6 @@ pub async fn dsh_install(app: AppHandle) -> AppResult<DshEnvStatus> {
             "--no-fund",
             "--no-audit",
         ],
-    )
-    .await?;
-
-    log_line(&app, "写入 profile …".to_string());
-    ensure_profile_files()?;
-
-    // --legacy-peer-deps：只装 profile 自己声明的两个插件包。默认行为会把 peer
-    // （dsh-agent / dsh-llm / dsh-session …）再装一份到 profile 里，与 dsh 本体的副本
-    // 重复，白白多出二十几个包。实测只装这两个就能正常加载。
-    log_line(&app, "安装 profile 插件 …".to_string());
-    run_npm(
-        &app,
-        &npm,
-        &node,
-        &profile,
-        &["install", "--legacy-peer-deps", "--no-fund", "--no-audit"],
     )
     .await?;
 
@@ -798,65 +739,6 @@ async fn run_npm(
 }
 
 // ========== profile 内容 ==========
-
-fn profile_package_json() -> String {
-    format!(
-        r#"{{
-  "name": "dsh-profile-{PROFILE_NAME}",
-  "private": true,
-  "dependencies": {{
-    "@deepseek-ai/dsh-sdk-jsonrpc-server": "{DSH_VERSION}",
-    "@deepseek-ai/dsh-sdk-protocol": "{DSH_VERSION}"
-  }},
-  "dsh": {{
-    "profile": {{
-      "bundles": ["@deepseek-ai/dsh-base"]
-    }}
-  }}
-}}
-"#
-    )
-}
-
-/// profile 的 patch 层。三处改动都是**必须的**，改动前先看注释：
-///
-/// - hmr 关掉：dsh-base 默认挂 HMR，它要求 node 带 `--expose-internals`，
-///   我们直接跑 bin.js 没有这个参数，不关就是启动即失败。
-/// - approval 改成 never：JSON-RPC 协议里服务端**不会**向客户端发请求（官方文档明写
-///   「server→client requests are dead capability」），所以没有任何通道能把审批问题
-///   递给用户。保持默认的 `ask` 会让 agent 停在等审批上，表现为对话卡死。
-/// - presets 三个都改成 never：permission-presets 会校验「组合出来的 sandbox+approval
-///   必须命中某个预设」，只改 approval 而不同步改预设表会直接报
-///   `composed sandbox and approval defaults match no preset` 起不来。
-///
-/// 写入的沙箱模式仍是 workspace-write（由 DSH_PERMISSION_MODE 决定，默认值即此），
-/// 也就是文件写入被限制在会话工作目录内。
-const PROFILE_PATCH: &str = r#"# CodeShelf 托管的 dsh profile 补丁层（只作用于本 profile，即 JSON-RPC 引擎那条路）。
-# 由应用生成，手改会在下次启动引擎时被覆盖。模型路由在 home 级补丁里，两条路径共用。
-- id: hmr
-  disabled: true
-
-- id: approval
-  config:
-    policy: never
-
-- id: permission
-  config:
-    presets:
-      read-only:
-        sandbox: read-only
-        approval: never
-      workspace-write:
-        sandbox: workspace-write
-        approval: never
-      danger-full-access:
-        sandbox: danger-full-access
-        approval: never
-
-- insert:
-    - id: jsonrpc
-      name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
-"#;
 
 #[cfg(test)]
 mod smoke {
@@ -983,22 +865,5 @@ mod tests {
         let patch = build_home_patch(&[], "", "");
         assert!(patch.contains("deepseek-official"));
         assert!(patch.contains("deepseek-v4-flash"));
-    }
-
-    /// profile 的两个文件是「实测能启动」的那一份，跑偏了 dsh 会在启动阶段直接失败。
-    /// 这里锁住关键行，避免以后顺手改坏。
-    #[test]
-    fn profile_files_keep_required_bits() {
-        let pkg = profile_package_json();
-        assert!(pkg.contains("@deepseek-ai/dsh-base"), "必须基于 dsh-base 组合");
-        assert!(pkg.contains("dsh-sdk-jsonrpc-server"));
-        assert!(pkg.contains(DSH_VERSION), "插件版本要与 dsh 主体同版本");
-
-        assert!(PROFILE_PATCH.contains("id: hmr"));
-        assert!(PROFILE_PATCH.contains("disabled: true"));
-        assert!(PROFILE_PATCH.contains("policy: never"));
-        // 预设表要与 approval 同步，否则 permission-presets 校验不过
-        assert_eq!(PROFILE_PATCH.matches("approval: never").count(), 3);
-        assert!(PROFILE_PATCH.contains("@deepseek-ai/dsh-sdk-jsonrpc-server"));
     }
 }

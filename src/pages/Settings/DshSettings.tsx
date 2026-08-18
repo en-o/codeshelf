@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle, Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { dshEnvStatus, dshInstall, dshListNodes, dshSetNode, dshUninstall, type DshEnvStatus, type NodeCandidate } from "@/services/dsh";
 import { showToast } from "@/components/ui";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
+import { useAiProvidersStore } from "@/stores/aiProvidersStore";
+import { DSH_DEFAULT_MODEL_KEY, toDshProviders } from "@/pages/Dsh/providers";
 
 interface DshSettingsProps {
   onClose?: () => void;
@@ -14,8 +17,14 @@ function errText(e: unknown, fallback: string): string {
 }
 
 export function DshSettings({ onClose }: DshSettingsProps) {
+  const { aiProviders, ensureAiDefaultProvider } = useAiProvidersStore();
   const [status, setStatus] = useState<DshEnvStatus | null>(null);
   const [nodes, setNodes] = useState<NodeCandidate[]>([]);
+  const [defaultModelKey, setDefaultModelKey] = useLocalStorageState<string>(DSH_DEFAULT_MODEL_KEY, "");
+  const dshProviders = useMemo(
+    () => toDshProviders(ensureAiDefaultProvider(aiProviders)),
+    [aiProviders, ensureAiDefaultProvider],
+  );
   const [busy, setBusy] = useState<"install" | "uninstall" | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const logBoxRef = useRef<HTMLDivElement>(null);
@@ -83,7 +92,7 @@ export function DshSettings({ onClose }: DshSettingsProps) {
     }
   }
 
-  const ready = !!status?.installed && !!status?.profileReady;
+  const ready = !!status?.installed;
   /** 机器上有满足版本的 node，只是当前没选中它 */
   const hasUsableNode = nodes.some((n) => n.usable);
   const versionStale =
@@ -162,10 +171,30 @@ export function DshSettings({ onClose }: DshSettingsProps) {
             <dt className="w-20 shrink-0 text-gray-500">安装目录</dt>
             <dd className="break-all text-gray-400">{status?.root ?? "-"}</dd>
           </div>
-          <div className="flex gap-2">
-            <dt className="w-20 shrink-0 text-gray-500">profile</dt>
-            <dd className="break-all text-gray-400">
-              {status?.profileReady ? status.profileDir : "未初始化"}
+          <div className="flex gap-2 items-start">
+            <dt className="w-20 shrink-0 text-gray-500 pt-1">默认模型</dt>
+            <dd className="flex-1 min-w-0 space-y-1">
+              <select
+                className="w-full px-2 py-1 border border-gray-200 rounded bg-white"
+                value={defaultModelKey}
+                onChange={(e) => setDefaultModelKey(e.target.value)}
+                disabled={busy !== null || dshProviders.length === 0}
+              >
+                <option value="">
+                  {dshProviders.length === 0 ? "「模型」页里还没有启用的模型" : "自动（第一个可用模型）"}
+                </option>
+                {dshProviders.map((p) =>
+                  p.models.map((m) => (
+                    <option key={`${p.id}::${m}`} value={`${p.id}::${m}`}>
+                      {p.name} · {m}
+                    </option>
+                  )),
+                )}
+              </select>
+              <p className="text-[10px] text-gray-400">
+                dsh 新会话默认用它；在 dsh 界面里还能临时换成「模型」页里的其它模型。
+                改完要在 dsh 页点「重启」才生效。
+              </p>
             </dd>
           </div>
         </dl>
@@ -245,8 +274,9 @@ export function DshSettings({ onClose }: DshSettingsProps) {
 
       <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 space-y-1">
         <p>
-          dsh 是 DeepSeek 官方的 agent harness。安装后到「助手 → dsh」页使用，由它接管
-          工具调用与任务执行；模型走 dsh 页顶部选中的供应商配置。
+          dsh 是 DeepSeek 官方的 agent harness。安装后到「助手 → dsh」页使用 ——
+          那一页就是 dsh 自己的界面，工具调用、审批、会话都由它管；
+          模型来自「模型」页里已启用的供应商，密钥由 CodeShelf 以环境变量注入，不落盘。
         </p>
         <p className="text-gray-500">
           安装内容全部落在上面的目录里，卸载即删除，不会动系统里其他 Node 包。

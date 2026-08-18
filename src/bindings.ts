@@ -2456,46 +2456,6 @@ async dshUninstall() : Promise<Result<DshEnvStatus, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async dshEngineStatus() : Promise<Result<DshEngineStatus, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_status") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * 启动引擎（已在跑且配置相同则直接复用）。
- * 配置变了（换工作目录/换模型/换密钥）必须重启：这些值只在 initialize 和进程环境里出现一次。
- */
-async dshEngineStart(config: DshEngineConfig) : Promise<Result<DshEngineStatus, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_start", { config }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async dshEngineStop() : Promise<Result<DshEngineStatus, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_stop") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * 投递一条用户消息。返回的是**入队回执**（messageId），不是回答 ——
- * 回答通过 `dsh-event` 事件流出来。
- */
-async dshEnginePrompt(sessionKey: string, text: string) : Promise<Result<string, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("dsh_engine_prompt", { sessionKey, text }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 async dshWebStatus() : Promise<Result<DshWebStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("dsh_web_status") };
@@ -2511,7 +2471,7 @@ async dshWebStatus() : Promise<Result<DshWebStatus, string>> {
  * 通过环境变量注入 —— 官方界面因此直接用上用户在 CodeShelf 里配的供应商，
  * 而不是让人再填一次 DeepSeek 的 key。
  */
-async dshWebOpen(config: DshEngineConfig) : Promise<Result<DshWebStatus, string>> {
+async dshWebOpen(config: DshLaunchConfig) : Promise<Result<DshWebStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("dsh_web_open", { config }) };
 } catch (e) {
@@ -3558,27 +3518,6 @@ export type DownloadTask = { id: string; url: string; savePath: string; fileName
  * 重试次数上限，来自创建时的 DownloadConfig；旧数据无此字段，缺省 3
  */
 maxRetries?: number; createdAt: string; updatedAt: string }
-export type DshEngineConfig = { 
-/**
- * agent 的工作目录（dsh 的 workspace，沙箱写入被限制在这里面）
- */
-cwd: string; 
-/**
- * 当前选中的供应商 id（CodeShelf 侧），决定 dsh 用哪条路由
- */
-providerId: string; model: string; 
-/**
- * CodeShelf「模型」页里所有启用的供应商，一一映射成 dsh 的模型路由。
- * 传全量而不只是选中那个：dsh 界面里的模型下拉要能列出用户配的全部模型，
- * 且每条各用各的端点与密钥（否则选 Claude 会拿别家地址去打）。
- */
-providers?: DshProviderSpec[] }
-export type DshEngineStatus = { running: boolean; pid: number | null; config: DshEngineConfig | null; 
-/**
- * 本次运行的标识。dsh 的 sessionId 是一次性的（换了 runtime 再用同一个 id 会报
- * 「已有持久化日志与当前会话不一致」），所以每次启动都要换一批会话 id。
- */
-runId: string | null }
 export type DshEnvStatus = { 
 /**
  * 选中的 node 可执行文件（优先满足最低版本的那个）
@@ -3591,11 +3530,7 @@ nodeOk: boolean; nodeMinMajor: number; npmPath: string | null;
 /**
  * dsh 已装进数据目录且入口文件存在
  */
-installed: boolean; installedVersion: string | null; targetVersion: string; 
-/**
- * profile 的两个文件与其 node_modules 都就绪
- */
-profileReady: boolean; root: string; home: string; profileDir: string; 
+installed: boolean; installedVersion: string | null; targetVersion: string; root: string; home: string; 
 /**
  * 选中 node 的来源标签（nvm / PATH / 系统目录）
  */
@@ -3612,6 +3547,24 @@ nvmRoot: string | null;
  * nvm 里装了几个版本（含不满足要求的）
  */
 nvmVersions: number }
+/**
+ * 启动 dsh 需要的一切：工作目录 + 模型来源。
+ */
+export type DshLaunchConfig = { 
+/**
+ * dsh 的默认工作目录（它自己的界面里还能再加工作区）
+ */
+cwd: string; 
+/**
+ * 当前选中的供应商 id（CodeShelf 侧），决定 dsh 的默认路由
+ */
+providerId: string; model: string; 
+/**
+ * CodeShelf「模型」页里所有启用的供应商，一一映射成 dsh 的模型路由。
+ * 传全量而不只是选中那个：dsh 界面里的模型下拉要能列出用户配的全部模型，
+ * 且每条各用各的端点与密钥（否则选 A 家的模型会拿 B 家的地址去打）。
+ */
+providers?: DshProviderSpec[] }
 /**
  * CodeShelf 里的一个供应商，映射成 dsh 的一条模型路由。
  */
