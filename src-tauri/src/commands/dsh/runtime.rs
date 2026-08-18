@@ -479,9 +479,64 @@ pub fn key_env_name(provider_id: &str) -> String {
     format!("CODESHELF_KEY_{}", sanitize_id(provider_id).to_uppercase())
 }
 
-/// 手工声明的路由必须给 contextWindow。这是「声明」不是真相，取一个大多数模型
-/// 都够用的中间值；报大了要等供应商拒绝超长上下文才暴露，所以别往上调。
-const DECLARED_CONTEXT_WINDOW: u32 = 131_072;
+/// 推断不出来时的兜底窗口。**故意取小**：dsh 按声明的窗口决定塞多少上下文，
+/// 报大了不会被它拦住，而是等供应商回 400（实测 moonshot-v1-8k 上就是
+/// `exceeded model token limit: 8192 (requested: 11556)`）。宁可浪费也别超。
+const FALLBACK_CONTEXT_WINDOW: u32 = 32_768;
+
+/// 从模型名推断上下文窗口。
+///
+/// 手工声明的路由必须自己给 contextWindow —— 没有目录可继承。写死一个大数会在
+/// 小窗口模型上直接把请求打爆，所以按名字里的线索猜，猜不到就用保守兜底。
+///
+/// 只认「名字里明写了容量」和几个常见家族；判断不了的宁可小。
+fn infer_context_window(model: &str) -> u32 {
+    let m = model.to_ascii_lowercase();
+
+    // moonshot-v1-8k / qwen-turbo-128k / 某某-32k：名字里直接写了
+    let bytes = m.as_bytes();
+    for (i, w) in bytes.windows(1).enumerate() {
+        if w[0] != b'k' && w[0] != b'm' {
+            continue;
+        }
+        // 往前收数字
+        let mut start = i;
+        while start > 0 && bytes[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        if start == i {
+            continue;
+        }
+        // 数字后面必须是词尾或分隔符，避免把 "k8s" 这种误认
+        if bytes.get(i + 1).is_some_and(|c| c.is_ascii_alphanumeric()) {
+            continue;
+        }
+        if let Ok(n) = m[start..i].parse::<u32>() {
+            return match w[0] {
+                b'k' => n.saturating_mul(1024),
+                _ => n.saturating_mul(1_000_000),
+            };
+        }
+    }
+
+    // 常见家族的公开窗口
+    if m.contains("claude") {
+        return 200_000;
+    }
+    if m.contains("gpt-4o") || m.contains("gpt-4.1") || m.contains("gpt-5") {
+        return 128_000;
+    }
+    if m.contains("deepseek") {
+        return 128_000;
+    }
+    if m.contains("qwen-long") {
+        return 1_000_000;
+    }
+    if m.contains("qwen") {
+        return 131_072;
+    }
+    FALLBACK_CONTEXT_WINDOW
+}
 
 /// 生成 home 级补丁（`$DSH_HOME/cordis.patch.yml`）。
 ///
@@ -506,7 +561,7 @@ pub fn build_home_patch(
             .models
             .iter()
             .map(|m| {
-                serde_json::json!({ "id": m, "contextWindow": DECLARED_CONTEXT_WINDOW })
+                serde_json::json!({ "id": m, "contextWindow": infer_context_window(m) })
             })
             .collect();
         routes.insert(
@@ -541,7 +596,9 @@ pub fn build_home_patch(
     ]);
 
     format!(
-        "# CodeShelf 生成的 home 级补丁，对所有 profile 生效（含 dsh 官方界面）。\n         # 内容来自「模型」页里已启用的供应商，手改会在下次启动时被覆盖。\n         # 密钥不在这里，走 apiKeyEnv 引用环境变量。\n{}\n",
+        "# CodeShelf 生成的 home 级补丁，对所有 profile 生效（含 dsh 官方界面）。\n\
+# 内容来自「模型」页里已启用的供应商，手改会在下次启动时被覆盖。\n\
+# 密钥不在这里，走 apiKeyEnv 引用环境变量。\n{}\n",
         serde_json::to_string_pretty(&patch).unwrap_or_else(|_| "[]".into())
     )
 }
@@ -809,6 +866,31 @@ mod smoke {
     /// 与 netdiag 的 smoke 测试同类：不断言环境，只把「应用眼里看到的」打出来，
     /// 排查「我明明装了 v22，它却说只有 v20」这类问题时第一时间能看到真相。
     ///
+    /// 打印一份按真实供应商生成的 home 补丁，方便拿去喂真 dsh 验证。
+    /// `cargo test --lib print_home_patch_sample -- --nocapture`
+    #[test]
+    fn print_home_patch_sample() {
+        let providers = vec![
+            DshProviderSpec {
+                id: "prov-moonshot".into(),
+                name: "Moonshot AI".into(),
+                base_url: "https://api.moonshot.cn/v1".into(),
+                api_key: Some("sk-moonshot".into()),
+                api: None,
+                models: vec!["moonshot-v1-8k".into(), "moonshot-v1-32k".into()],
+            },
+            DshProviderSpec {
+                id: "prov-claude".into(),
+                name: "Anthropic / Claude".into(),
+                base_url: "https://api.anthropic.com".into(),
+                api_key: Some("sk-ant".into()),
+                api: Some("anthropic-messages".into()),
+                models: vec!["claude-sonnet-4-5".into()],
+            },
+        ];
+        println!("{}", build_home_patch(&providers, "prov-moonshot", "moonshot-v1-8k"));
+    }
+
     /// `cargo test --lib print_real_node_candidates -- --nocapture`
     #[tokio::test]
     async fn print_real_node_candidates() {
@@ -870,6 +952,21 @@ mod tests {
         // 默认模型必须跟着当前选中的走，否则官方界面只会显示 dsh 自带的 deepseek
         assert_eq!(parsed[1]["config"]["provider"], "cs-p2");
         assert_eq!(parsed[1]["config"]["model"], "claude-sonnet-4-5");
+    }
+
+    /// 窗口报大了 dsh 不会拦，供应商会回 400（moonshot-v1-8k 上实测过）。
+    #[test]
+    fn context_window_follows_the_model_name() {
+        assert_eq!(infer_context_window("moonshot-v1-8k"), 8 * 1024);
+        assert_eq!(infer_context_window("moonshot-v1-32k"), 32 * 1024);
+        assert_eq!(infer_context_window("moonshot-v1-128k"), 128 * 1024);
+        assert_eq!(infer_context_window("claude-sonnet-4-5"), 200_000);
+        assert_eq!(infer_context_window("gpt-4o"), 128_000);
+        assert_eq!(infer_context_window("qwen-long"), 1_000_000);
+        // 认不出来的一律给保守值，宁可浪费也不要撑爆
+        assert_eq!(infer_context_window("some-unknown-model"), FALLBACK_CONTEXT_WINDOW);
+        // 别把 k8s 这种当容量
+        assert_eq!(infer_context_window("model-k8s-tuned"), FALLBACK_CONTEXT_WINDOW);
     }
 
     /// 密钥只走环境变量引用，**任何情况下都不能出现在补丁文件里**

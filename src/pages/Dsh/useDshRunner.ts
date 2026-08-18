@@ -9,6 +9,7 @@ import {
   listenDshExit,
   type DshNotification,
 } from "@/services/dsh";
+import type { DshProviderSpec } from "@/services/dsh";
 import type { ChatMessage, ChatSession } from "@/types";
 import { makeMessage } from "../Chat/utils/chatHelpers";
 import type { ModelOption } from "../Chat/utils/chatHelpers";
@@ -24,8 +25,8 @@ import type { ModelOption } from "../Chat/utils/chatHelpers";
 
 interface DshRunnerDeps {
   selected: ModelOption | null;
-  /** dsh 那边的模型路由名，见 dshRouteFor */
-  providerRoute: string;
+  /** 「模型」页里所有启用的供应商，映射成 dsh 的模型路由 */
+  dshProviders: DshProviderSpec[];
   activeSessionRef: React.MutableRefObject<ChatSession | null>;
   setActiveSession: React.Dispatch<React.SetStateAction<ChatSession | null>>;
   syncSummary: (s: ChatSession) => void;
@@ -275,7 +276,7 @@ export function useDshRunner(deps: DshRunnerDeps) {
    */
   const runDshRequest = useCallback(
     async (session: ChatSession) => {
-      const { selected, providerRoute } = depsRef.current;
+      const { selected, dshProviders } = depsRef.current;
       if (!selected) return;
       if (!session.allowedCwd) {
         showToast("warning", "dsh 会话需要先选工作目录", "在会话设置里选一个项目目录");
@@ -292,10 +293,9 @@ export function useDshRunner(deps: DshRunnerDeps) {
       try {
         await dshEngineStart({
           cwd: session.allowedCwd,
+          providerId: selected.providerId,
           model: selected.model.model,
-          baseUrl: selected.baseUrl,
-          apiKey: selected.apiKey ?? null,
-          provider: providerRoute,
+          providers: dshProviders,
         });
         await listenerReadyRef.current;
         const done = new Promise<void>((resolve) => {

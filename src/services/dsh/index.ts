@@ -4,11 +4,19 @@ import {
   type DshEngineConfig,
   type DshEngineStatus,
   type DshEnvStatus,
+  type DshProviderSpec,
   type DshWebStatus,
   type NodeCandidate,
 } from "@/bindings";
 
-export type { DshEngineConfig, DshEngineStatus, DshEnvStatus, DshWebStatus, NodeCandidate };
+export type {
+  DshEngineConfig,
+  DshEngineStatus,
+  DshEnvStatus,
+  DshProviderSpec,
+  DshWebStatus,
+  NodeCandidate,
+};
 
 // ========== 事件 ==========
 

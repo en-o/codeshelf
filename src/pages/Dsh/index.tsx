@@ -25,6 +25,7 @@ import {
   type DshEnvStatus,
 } from "@/services/dsh";
 import type { AiProviderConfig, ChatMessage, ChatSession, ChatSessionSummary } from "@/types";
+import type { DshProviderSpec } from "@/services/dsh";
 
 import { SessionSidebar } from "../Chat/components/SessionSidebar";
 import { MessageList } from "../Chat/components/MessageList";
@@ -44,13 +45,30 @@ import { buildModelOptions, getDefaultOptionKey, makeMessage } from "../Chat/uti
  * 认不出来的一律走 codeshelf —— 兼容端点是最常见的情况，
  * 而错进 deepseek-official 会用 DeepSeek 专用适配器去打别人的接口。
  */
-function dshRouteFor(provider: AiProviderConfig | undefined): string {
-  if (provider?.presetKey === "deepseek") return "deepseek-official";
-  if (provider?.presetKey === "openai") return "openai";
-  if (provider?.presetKey === "anthropic") return "anthropic";
-  // 没用预设、直接拿「自定义厂商」填了 Anthropic 地址的，也认出来
-  if (/(^|\.)anthropic\.com/i.test(provider?.baseUrl ?? "")) return "anthropic";
-  return "codeshelf";
+/**
+ * CodeShelf 的供应商 → dsh 的模型路由。
+ *
+ * 每个启用的供应商各生成一条，带自己的端点、密钥引用和模型清单 ——
+ * 这样 dsh（包括它自己的界面）里的模型下拉，就等于「模型」页里配的那些，
+ * 且选哪个用哪个的凭据。全量传是必须的：只传选中那个的话，
+ * 在 dsh 界面里换个模型就会拿错家的地址去打。
+ */
+function toDshProviders(providers: AiProviderConfig[]): DshProviderSpec[] {
+  return providers
+    .filter((p) => p.enabled)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      baseUrl: p.baseUrl,
+      apiKey: p.apiKey ?? null,
+      // Claude 是自己的协议，其余按 OpenAI 兼容
+      api:
+        p.presetKey === "anthropic" || /(^|\.)anthropic\.com/i.test(p.baseUrl)
+          ? "anthropic-messages"
+          : "openai-completions",
+      models: p.models.filter((m) => m.enabled).map((m) => m.model),
+    }))
+    .filter((p) => p.models.length > 0);
 }
 
 /**
@@ -113,11 +131,11 @@ export function DshPage() {
     });
   }
 
-  const providerRoute = dshRouteFor(normalized.find((p) => p.id === selected?.providerId));
+  const dshProviders = useMemo(() => toDshProviders(normalized), [normalized]);
 
   const { runDshRequest, stopDsh, dshRunning } = useDshRunner({
     selected,
-    providerRoute,
+    dshProviders,
     activeSessionRef,
     setActiveSession,
     syncSummary,
@@ -335,10 +353,9 @@ export function DshPage() {
     try {
       const status = await dshWebOpen({
         cwd: activeSession?.allowedCwd ?? "",
+        providerId: selected.providerId,
         model: selected.model.model,
-        baseUrl: selected.baseUrl,
-        apiKey: selected.apiKey ?? null,
-        provider: providerRoute,
+        providers: dshProviders,
       });
       setWebUrl(status.url);
     } catch (e) {

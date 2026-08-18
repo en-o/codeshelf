@@ -3562,18 +3562,17 @@ export type DshEngineConfig = {
 /**
  * agent 的工作目录（dsh 的 workspace，沙箱写入被限制在这里面）
  */
-cwd: string; model: string; 
+cwd: string; 
 /**
- * 供应商端点（OpenAI 兼容或 Anthropic 原生，取决于 provider 路由）
+ * 当前选中的供应商 id（CodeShelf 侧），决定 dsh 用哪条路由
  */
-baseUrl: string; apiKey: string | null; 
+providerId: string; model: string; 
 /**
- * dsh 那边的模型路由名，由前端按供应商类型给：
- * `deepseek-official`（dsh 自带的 DeepSeek 适配器）、`openai`、`anthropic`
- * （pi-ai 目录路由），其余 OpenAI 兼容端点用 `codeshelf`（profile 里手工声明的路由）。
- * 缺省 deepseek-official，兼容老会话。
+ * CodeShelf「模型」页里所有启用的供应商，一一映射成 dsh 的模型路由。
+ * 传全量而不只是选中那个：dsh 界面里的模型下拉要能列出用户配的全部模型，
+ * 且每条各用各的端点与密钥（否则选 Claude 会拿别家地址去打）。
  */
-provider?: string | null }
+providers?: DshProviderSpec[] }
 export type DshEngineStatus = { running: boolean; pid: number | null; config: DshEngineConfig | null; 
 /**
  * 本次运行的标识。dsh 的 sessionId 是一次性的（换了 runtime 再用同一个 id 会报
@@ -3613,6 +3612,22 @@ nvmRoot: string | null;
  * nvm 里装了几个版本（含不满足要求的）
  */
 nvmVersions: number }
+/**
+ * CodeShelf 里的一个供应商，映射成 dsh 的一条模型路由。
+ */
+export type DshProviderSpec = { 
+/**
+ * CodeShelf 的供应商 id，用来拼路由名与环境变量名
+ */
+id: string; name: string; baseUrl: string; apiKey: string | null; 
+/**
+ * "anthropic-messages" 或 "openai-completions"（缺省后者）
+ */
+api: string | null; 
+/**
+ * 该供应商下启用的模型名
+ */
+models: string[] }
 export type DshWebStatus = { running: boolean; url: string | null; pid: number | null }
 /**
  * 编辑器配置
