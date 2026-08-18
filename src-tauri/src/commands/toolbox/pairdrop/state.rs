@@ -21,13 +21,12 @@ pub const FILE_TTL_SECS: u64 = 300; // 5 分钟
 
 /// 单文件最大大小（字节）。
 ///
-/// 中继是**全内存**的（收完整个文件才落 token），所以这个值就是单次请求能吃掉的内存。
-/// 原来是 2GB —— 局域网里任何一台设备匿名 POST 几次就能把桌面端打到 OOM。
-/// 256MB 覆盖照片/文档/短视频这类实际用法；更大的文件本来也不该走内存中继。
-pub const MAX_FILE_SIZE: usize = 256 * 1024 * 1024;
+/// 中继**边收边落盘**（见 [`CachedFile`]），内存里只留元数据，所以这个值限的是磁盘不是内存。
+/// 曾经是 256MB 的内存上限：一个 316MB 的 APK 传到 82% 就撞上 body limit 卡死不动。
+pub const MAX_FILE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 
 /// 缓存里所有待领取文件的总字节上限。单文件限额挡不住"多传几个"。
-pub const MAX_TOTAL_CACHE: usize = 512 * 1024 * 1024;
+pub const MAX_TOTAL_CACHE: u64 = 8 * 1024 * 1024 * 1024;
 
 /// 同时进行的上传数上限。每个上传都在攒内存，必须限并发而不只是限单个大小。
 pub const MAX_CONCURRENT_UPLOADS: usize = 3;
@@ -170,20 +169,55 @@ pub struct PeerEntry {
     pub sender: PeerSender,
 }
 
+/// 中转文件的临时目录。整份文件只在磁盘上停留，进程内存里只有元数据。
+pub fn relay_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("codeshelf-pairdrop")
+}
+
+/// 清掉临时目录里的孤儿文件：进程崩溃残留的，以及 Windows 上因为文件仍被下载流
+/// 占用、[`CachedFile::drop`] 删不掉的那些。
+pub fn sweep_relay_dir() {
+    let Ok(entries) = std::fs::read_dir(relay_dir()) else {
+        return;
+    };
+    // 用 2×TTL：正在被慢速下载的文件不会误删（真删了也不影响——Unix 上已打开的 fd 仍可读，
+    // Windows 上占用中根本删不掉）
+    let max_age = Duration::from_secs(FILE_TTL_SECS * 2);
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// 文件缓存条目
 pub struct CachedFile {
     pub name: String,
     pub mime: Option<String>,
-    /// 用 `Bytes` 而不是 `Vec<u8>`：multipart 收到的就是 `Bytes`，
-    /// 转成响应体时也是 `Bytes`，全程零拷贝，少一次整文件复制。
-    /// 走 axum 的再导出，不为此新增一个直接依赖。
-    pub bytes: axum::body::Bytes,
+    /// 落盘的临时文件路径。以前这里存的是整份 `Bytes`——几百 MB 的 APK / 视频
+    /// 会原样压在桌面端内存里，所以限额只能定得很小、大文件根本传不动。
+    pub path: std::path::PathBuf,
+    pub size: u64,
     /// 接收方 peer id —— 下载时**必须**校验，不是"可选"
     pub to: String,
     /// 发送方 peer id
     pub from: String,
     /// 创建时间，用于 TTL 过期
     pub created_at: Instant,
+}
+
+impl Drop for CachedFile {
+    /// 条目离开缓存（过期清理 / 被领取）时顺手删临时文件。
+    /// 删不掉（Windows 上文件被下载流占用）交给 [`sweep_relay_dir`] 兜底。
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 impl CachedFile {
@@ -498,11 +532,13 @@ fn collect_local_ipv4() -> Vec<(String, String)> {
 mod tests {
     use super::*;
 
-    fn cached(to: &str, from: &str, len: usize) -> CachedFile {
+    fn cached(to: &str, from: &str, len: u64) -> CachedFile {
         CachedFile {
             name: "a.bin".into(),
             mime: None,
-            bytes: axum::body::Bytes::from(vec![0u8; len]),
+            // 不真的建文件：Drop 里的 remove_file 失败会被忽略
+            path: relay_dir().join(format!("test-{}", generate_peer_id())),
+            size: len,
             to: to.into(),
             from: from.into(),
             created_at: Instant::now(),
@@ -520,6 +556,18 @@ mod tests {
     }
 
     #[test]
+    fn dropping_entry_removes_temp_file() {
+        // 中转文件只在磁盘上活着：条目一离开缓存就必须删文件，
+        // 否则每传一次都留一份完整副本在临时目录里。
+        std::fs::create_dir_all(relay_dir()).unwrap();
+        let f = cached("bob", "alice", 3);
+        let path = f.path.clone();
+        std::fs::write(&path, b"abc").unwrap();
+        drop(f);
+        assert!(!path.exists(), "条目 drop 后临时文件应被删除");
+    }
+
+    #[test]
     fn total_cache_accounting_skips_expired() {
         // 复现上传时的额度计算：先剔除过期条目，再累加
         let mut files: HashMap<String, CachedFile> = HashMap::new();
@@ -529,17 +577,17 @@ mod tests {
         files.insert("stale".into(), stale);
 
         files.retain(|_, f| !f.is_expired());
-        let used: usize = files.values().map(|f| f.bytes.len()).sum();
+        let used: u64 = files.values().map(|f| f.size).sum();
         assert_eq!(used, 100, "过期条目不应继续占额度");
     }
 
     #[test]
     fn limits_are_sane() {
-        // 中继是全内存的：单文件上限 × 并发上限 不能超过总缓存上限太多，
-        // 否则限额形同虚设。这条断言就是防止有人只调其中一个常数。
+        // 单文件上限 × 并发上限 不能超过总缓存上限太多，否则限额形同虚设。
+        // 这条断言就是防止有人只调其中一个常数。
         // 用 const 块做**编译期**断言：这几个都是常量，运行时断言 clippy 会指出
         // 「断言结果恒定」。放在 const 里反而更强 —— 改坏了直接编译不过。
         const _: () = assert!(MAX_FILE_SIZE <= MAX_TOTAL_CACHE);
-        const _: () = assert!(MAX_FILE_SIZE * MAX_CONCURRENT_UPLOADS <= 4 * MAX_TOTAL_CACHE);
+        const _: () = assert!(MAX_FILE_SIZE * MAX_CONCURRENT_UPLOADS as u64 <= 4 * MAX_TOTAL_CACHE);
     }
 }

@@ -65,6 +65,8 @@ interface PairDropHistory {
 const HISTORY_STORAGE_KEY = "pairdrop:history:v1";
 const DEVICE_ID_STORAGE_KEY = "pairdrop:device-id";
 const MAX_MESSAGES_PER_PEER = 300;
+/** 与后端 MAX_FILE_SIZE 保持一致（服务端落盘中转，超了会直接 413）。 */
+const MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024;
 
 function emptyHistory(): PairDropHistory {
   return { version: 1, endpoints: {} };
@@ -416,6 +418,11 @@ export function usePairDropClient({
   const sendFile = useCallback(
     async (to: string, file: File) => {
       if (!apiBase) return;
+      // 超限的话在这里就说清楚。以前是把整个文件推给服务端，撞上上限后连接被截断，
+      // 进度条永远停在半路（见 issue #55 的 82%）。
+      if (file.size > MAX_FILE_SIZE) {
+        throw new Error(`文件超过 ${MAX_FILE_SIZE / 1024 / 1024 / 1024}GB 上限`);
+      }
       // 一次上传从开始到结束绑定同一个 endpoint 和同一个 apiBase。
       // 大文件上传可能持续很久，期间用户完全可能切到另一个房间。
       const boundKey = endpointKeyRef.current;

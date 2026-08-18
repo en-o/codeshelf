@@ -16,6 +16,7 @@ use std::time::Instant;
 use axum::{
     body::Body,
     extract::{
+        multipart::Field,
         ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, DefaultBodyLimit, Multipart, Path, Query, State,
     },
@@ -91,9 +92,10 @@ pub async fn start_server(
         .route("/api/discovered", get(api_discovered))
         .route(
             "/api/upload",
-            // axum 默认 2MB body 限制对图片/视频很容易就超了 → 连接被中止 → 浏览器收到 xhr.onerror（「网络错误」)
-            // 这里按 MAX_FILE_SIZE + 1MB 的 multipart 头尾留余量，超过仍然返回 413,而不是闷掉连接
-            post(api_upload).layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+            // axum 默认 2MB body 限制对图片/视频很容易就超了 → 连接被中止 → 浏览器收到 xhr.onerror（「网络错误」)。
+            // 固定上限同样会卡死：316MB 的包撞上 257MB 的 limit 时，服务端提前应答、客户端进度条停在 82% 再也不动。
+            // 改由 api_upload 边收边落盘、自己按 MAX_FILE_SIZE 计数，这里不再设层级上限。
+            post(api_upload).layer(DefaultBodyLimit::disable()),
         )
         .route("/api/file/:token", get(api_file))
         .route("/ws", any(ws_handler))
@@ -160,6 +162,7 @@ pub async fn start_server(
             run_discovery(discovery_state, actual_port, discovery_signal).await;
         });
         let cleanup_task = tokio::spawn(async move {
+            sweep_relay_dir(); // 上次运行崩溃/被杀留下的中转文件
             loop {
                 tokio::select! {
                     _ = cleanup_signal.notified() => break,
@@ -171,6 +174,8 @@ pub async fn start_server(
                         if before != after {
                             log::info!("跨设备传输：清理过期文件 {} -> {}", before, after);
                         }
+                        drop(files);
+                        sweep_relay_dir();
                     }
                 }
             }
@@ -425,9 +430,23 @@ async fn api_upload(
     let mut to: Option<String> = None;
     let mut name: Option<String> = None;
     let mut mime: Option<String> = None;
-    let mut bytes: Option<axum::body::Bytes> = None;
+    let mut spooled: Option<(std::path::PathBuf, u64)> = None;
+    let token = format!("f-{}", generate_peer_id());
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(f)) => f,
+            Ok(None) => break,
+            // 以前这里是 `while let Ok(Some(..))`：解析出错被当成"字段读完了"，
+            // 最后回一句莫名其妙的「缺少 file 字段」，真实原因全丢了。
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("读取上传数据失败: {}", e) })),
+                )
+                    .into_response()
+            }
+        };
         let field_name = field.name().unwrap_or("").to_string();
         if field_name == "to" {
             if let Ok(text) = field.text().await {
@@ -440,7 +459,7 @@ async fn api_upload(
                 }
             }
         } else if field_name == "file" {
-            // 准入检查放在读 file 之前：未授权请求不该先把整个文件收进内存。
+            // 准入检查放在读 file 之前：未授权请求不该先把整个文件收下来。
             // multipart 的 to/from 字段由两个客户端排在 file 之前发送。
             if let Err(resp) =
                 check_upload_peers(&handle.state, from.as_deref(), to.as_deref()).await
@@ -449,24 +468,30 @@ async fn api_upload(
             }
             name = field.file_name().map(|s| s.to_string());
             mime = field.content_type().map(|s| s.to_string());
-            match field.bytes().await {
-                Ok(b) => {
-                    if b.len() > MAX_FILE_SIZE {
-                        return (
-                            StatusCode::PAYLOAD_TOO_LARGE,
-                            Json(json!({ "error": format!("文件超出单文件上限（{} MB）", MAX_FILE_SIZE / 1024 / 1024) })),
+
+            // 一次锁内算出这次最多能收多少，之后边收边写不再抢锁
+            let quota = {
+                let mut files = handle.state.files.lock().await;
+                // 先清掉过期条目，再算总量 —— 否则过期文件会一直占着额度
+                files.retain(|_, f| !f.is_expired());
+                let used: u64 = files.values().map(|f| f.size).sum();
+                MAX_TOTAL_CACHE.saturating_sub(used).min(MAX_FILE_SIZE)
+            };
+            if quota == 0 {
+                return (
+                    StatusCode::INSUFFICIENT_STORAGE,
+                    Json(json!({
+                        "error": format!(
+                            "待领取文件缓存已满（{} MB），请让接收方先取走已发送的文件",
+                            MAX_TOTAL_CACHE / 1024 / 1024
                         )
-                            .into_response();
-                    }
-                    bytes = Some(b);
-                }
-                Err(e) => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({ "error": format!("读取文件失败: {}", e) })),
-                    )
-                        .into_response();
-                }
+                    })),
+                )
+                    .into_response();
+            }
+            match spool_to_disk(field, &token, quota).await {
+                Ok(v) => spooled = Some(v),
+                Err(resp) => return resp,
             }
         }
     }
@@ -476,8 +501,8 @@ async fn api_upload(
         Err(resp) => return resp,
     };
 
-    let bytes = match bytes {
-        Some(b) => b,
+    let (path, size) = match spooled {
+        Some(v) => v,
         None => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -487,33 +512,15 @@ async fn api_upload(
         }
     };
 
-    let token = format!("f-{}-{:x}", generate_peer_id(), bytes.len() as u32);
-    let size = bytes.len() as u64;
-
     {
         let mut files = handle.state.files.lock().await;
-        // 先清掉过期条目，再算总量 —— 否则过期文件会一直占着额度
-        files.retain(|_, f| !f.is_expired());
-        let used: usize = files.values().map(|f| f.bytes.len()).sum();
-        if used + bytes.len() > MAX_TOTAL_CACHE {
-            return (
-                StatusCode::INSUFFICIENT_STORAGE,
-                Json(json!({
-                    "error": format!(
-                        "待领取文件缓存已满（{} / {} MB），请让接收方先取走已发送的文件",
-                        used / 1024 / 1024,
-                        MAX_TOTAL_CACHE / 1024 / 1024
-                    )
-                })),
-            )
-                .into_response();
-        }
         files.insert(
             token.clone(),
             CachedFile {
                 name: name.clone().unwrap_or_else(|| "file".to_string()),
                 mime: mime.clone(),
-                bytes,
+                path,
+                size,
                 to,
                 from,
                 created_at: Instant::now(),
@@ -527,6 +534,81 @@ async fn api_upload(
         "size": size,
     }))
     .into_response()
+}
+
+/// 把 multipart 的文件字段边收边写进临时文件，返回（路径, 字节数）。
+///
+/// 关键是**不整份进内存**：几百 MB 的 APK / 视频以前会原样堆在 `Bytes` 里，
+/// 逼得单文件上限只能定到 256MB，超了就卡死在半途。
+async fn spool_to_disk(
+    field: Field<'_>,
+    token: &str,
+    quota: u64,
+) -> Result<(std::path::PathBuf, u64), Response> {
+    let fail = |(status, msg): (StatusCode, String)| -> Response {
+        (status, Json(json!({ "error": msg }))).into_response()
+    };
+
+    let dir = relay_dir();
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| {
+        fail((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("创建中转目录失败: {}", e),
+        ))
+    })?;
+    let path = dir.join(token);
+    let file = tokio::fs::File::create(&path).await.map_err(|e| {
+        fail((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("创建中转文件失败: {}", e),
+        ))
+    })?;
+
+    match copy_field(field, file, quota).await {
+        Ok(written) => Ok((path, written)),
+        Err(e) => {
+            // 半截文件立刻删掉，别等 sweep
+            let _ = tokio::fs::remove_file(&path).await;
+            Err(fail(e))
+        }
+    }
+}
+
+async fn copy_field(
+    mut field: Field<'_>,
+    mut file: tokio::fs::File,
+    quota: u64,
+) -> Result<u64, (StatusCode, String)> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut written: u64 = 0;
+    while let Some(chunk) = field.chunk().await.map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("读取文件失败: {}", e),
+        )
+    })? {
+        written += chunk.len() as u64;
+        if written > quota {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("文件超出上限（{} MB）", quota / 1024 / 1024),
+            ));
+        }
+        file.write_all(&chunk).await.map_err(|e| {
+            (
+                StatusCode::INSUFFICIENT_STORAGE,
+                format!("写入中转文件失败: {}", e),
+            )
+        })?;
+    }
+    file.flush().await.map_err(|e| {
+        (
+            StatusCode::INSUFFICIENT_STORAGE,
+            format!("写入中转文件失败: {}", e),
+        )
+    })?;
+    Ok(written)
 }
 
 /// `GET /api/file/:token?peer=<自己的 peerId>`
@@ -562,6 +644,14 @@ async fn api_file(
             if file.is_expired() {
                 return (StatusCode::GONE, "文件已过期").into_response();
             }
+            // 流式回传：整份读进内存的话，一个 300MB 的包就能把桌面端顶爆
+            let reader = match tokio::fs::File::open(&file.path).await {
+                Ok(f) => f,
+                Err(e) => {
+                    log::warn!("跨设备传输：中转文件打不开 {:?}: {}", file.path, e);
+                    return (StatusCode::GONE, "文件已失效").into_response();
+                }
+            };
             let mut headers = HeaderMap::new();
             let mime = file
                 .mime
@@ -583,11 +673,15 @@ async fn api_file(
             if let Ok(v) = HeaderValue::from_str(&disposition) {
                 headers.insert(header::CONTENT_DISPOSITION, v);
             }
-            headers.insert(
-                header::CONTENT_LENGTH,
-                HeaderValue::from(file.bytes.len() as u64),
-            );
-            (StatusCode::OK, headers, Body::from(file.bytes)).into_response()
+            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(file.size));
+            // file 在这里 drop → 删掉临时文件；reader 已经打开，Unix 上照常读完，
+            // Windows 上删不掉、由 sweep_relay_dir 兜底
+            (
+                StatusCode::OK,
+                headers,
+                Body::from_stream(tokio_util::io::ReaderStream::new(reader)),
+            )
+                .into_response()
         }
         None => (StatusCode::NOT_FOUND, "文件不存在或已被领取").into_response(),
     }
