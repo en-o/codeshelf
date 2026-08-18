@@ -446,50 +446,118 @@ pub async fn dsh_set_node(path: Option<String>) -> AppResult<DshEnvStatus> {
     dsh_env_status().await
 }
 
-/// home 级补丁：`$DSH_HOME/cordis.patch.yml`，对该 HOME 下**所有** profile 生效，
-/// 包括 dsh 官方的 `web` profile。模型相关的配置全放这里，两条路径（我们的
-/// JSON-RPC 引擎 / 官方 Web 界面）共用一份，不会漂移。
-///
-/// 之所以能这么干而不用 fork dsh：profile 的组合顺序是
-/// bundle → profile 补丁 → home 补丁 → --patch 覆盖，home 补丁是官方留的用户层。
-/// 密钥用 `apiKeyEnv` 引用环境变量，不落盘（官方界面把它显示为「由启动环境提供（只读）」）。
-const HOME_PATCH: &str = r#"# CodeShelf 生成的 home 级补丁，对所有 profile 生效（含 dsh 官方 web 界面）。
-# 手改会在下次启动时被覆盖。
-- id: llm-pi-ai
-  config:
-    providers:
-      openai:
-        apiKeyEnv: CODESHELF_LLM_API_KEY
-        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL
-      anthropic:
-        apiKeyEnv: CODESHELF_LLM_API_KEY
-        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL
-      codeshelf:
-        displayName: CodeShelf 供应商
-        apiKeyEnv: CODESHELF_LLM_API_KEY
-        api: openai-completions
-        # `|| 兜底` 不能省：手工声明的路由缺 model id 或缺 baseURL 会让**整棵插件树**
-        # 加载失败（实测报 invalid config / needs a baseURL），连别的路由都被拖下水。
-        baseURL: !!js process.env.CODESHELF_LLM_BASE_URL || 'http://127.0.0.1:1/v1'
-        models:
-          - id: !!js process.env.CODESHELF_LLM_MODEL || 'codeshelf-unset'
-            contextWindow: 131072
+/// CodeShelf 里的一个供应商，映射成 dsh 的一条模型路由。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DshProviderSpec {
+    /// CodeShelf 的供应商 id，用来拼路由名与环境变量名
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+    /// "anthropic-messages" 或 "openai-completions"（缺省后者）
+    pub api: Option<String>,
+    /// 该供应商下启用的模型名
+    pub models: Vec<String>,
+}
 
-# 默认模型跟着应用走。不改这条的话，官方界面的模型选择器只会显示
-# dsh-base 里写死的 deepseek-v4-flash —— 用户在 CodeShelf 里选的模型进不去。
-- id: agent-default-model
-  config:
-    provider: !!js process.env.CODESHELF_LLM_ROUTE || 'deepseek-official'
-    model: !!js process.env.CODESHELF_LLM_MODEL || 'deepseek-v4-flash'
-"#;
+/// 路由名与环境变量名都得是「安全字符」：供应商 id 是应用生成的随机串，
+/// 但用户可能导入过带奇怪字符的配置，直接拼进 YAML key / env 名会出岔子。
+fn sanitize_id(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// 路由名（dsh 侧的 provider 名）
+pub fn route_id(provider_id: &str) -> String {
+    format!("cs-{}", sanitize_id(provider_id))
+}
+
+/// 该路由的密钥从哪个环境变量取。密钥只在进程环境里传，不写进任何文件。
+pub fn key_env_name(provider_id: &str) -> String {
+    format!("CODESHELF_KEY_{}", sanitize_id(provider_id).to_uppercase())
+}
+
+/// 手工声明的路由必须给 contextWindow。这是「声明」不是真相，取一个大多数模型
+/// 都够用的中间值；报大了要等供应商拒绝超长上下文才暴露，所以别往上调。
+const DECLARED_CONTEXT_WINDOW: u32 = 131_072;
+
+/// 生成 home 级补丁（`$DSH_HOME/cordis.patch.yml`）。
+///
+/// 它对该 HOME 下**所有** profile 生效，包括 dsh 官方的 web profile ——
+/// 所以「CodeShelf 模型页里配了什么，dsh（含官方界面）里就有什么」只需要这一处。
+/// 这也是不用 fork dsh 的关键：profile 组合顺序是
+/// bundle → profile 补丁 → home 补丁 → --patch，home 补丁是官方留给用户的层。
+///
+/// 用 JSON 写进 .yml：YAML 是 JSON 的超集，解析器照读，而 serde_json 帮我们把
+/// 供应商名里的引号/冒号/中文都转义好，比手拼 YAML 稳。
+pub fn build_home_patch(
+    providers: &[DshProviderSpec],
+    default_provider_id: &str,
+    default_model: &str,
+) -> String {
+    let mut routes = serde_json::Map::new();
+    for p in providers {
+        if p.models.is_empty() || p.base_url.trim().is_empty() {
+            continue;
+        }
+        let models: Vec<serde_json::Value> = p
+            .models
+            .iter()
+            .map(|m| {
+                serde_json::json!({ "id": m, "contextWindow": DECLARED_CONTEXT_WINDOW })
+            })
+            .collect();
+        routes.insert(
+            route_id(&p.id),
+            serde_json::json!({
+                "displayName": p.name,
+                "apiKeyEnv": key_env_name(&p.id),
+                "api": p.api.clone().unwrap_or_else(|| "openai-completions".into()),
+                "baseURL": p.base_url,
+                "models": models,
+            }),
+        );
+    }
+
+    let default_route = providers
+        .iter()
+        .find(|p| p.id == default_provider_id)
+        .map(|p| route_id(&p.id))
+        // 一个供应商都没配时给 dsh 自带的路由，别让插件树因为空引用加载失败
+        .unwrap_or_else(|| "deepseek-official".to_string());
+    let default_model = if default_model.trim().is_empty() {
+        "deepseek-v4-flash"
+    } else {
+        default_model
+    };
+
+    let patch = serde_json::json!([
+        { "id": "llm-pi-ai", "config": { "providers": routes } },
+        // 默认模型也要覆盖：不改它的话官方界面的模型选择器只显示 dsh-base 里
+        // 写死的 deepseek-v4-flash，用户在 CodeShelf 里选的模型根本进不去。
+        { "id": "agent-default-model", "config": { "provider": default_route, "model": default_model } },
+    ]);
+
+    format!(
+        "# CodeShelf 生成的 home 级补丁，对所有 profile 生效（含 dsh 官方界面）。\n         # 内容来自「模型」页里已启用的供应商，手改会在下次启动时被覆盖。\n         # 密钥不在这里，走 apiKeyEnv 引用环境变量。\n{}\n",
+        serde_json::to_string_pretty(&patch).unwrap_or_else(|_| "[]".into())
+    )
+}
 
 /// 把 home 补丁写到磁盘（内容一致就不动）
-pub fn ensure_home_patch() -> AppResult<()> {
+pub fn ensure_home_patch(
+    providers: &[DshProviderSpec],
+    default_provider_id: &str,
+    default_model: &str,
+) -> AppResult<()> {
     let home = dsh_home()?;
     std::fs::create_dir_all(&home)?;
+    let content = build_home_patch(providers, default_provider_id, default_model);
     let path = home.join("cordis.patch.yml");
-    if std::fs::read_to_string(&path).ok().as_deref() != Some(HOME_PATCH) {
-        write_atomic(&path, HOME_PATCH)?;
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(content.as_str()) {
+        write_atomic(&path, content)?;
     }
     Ok(())
 }
@@ -500,7 +568,6 @@ pub fn ensure_home_patch() -> AppResult<()> {
 /// 老用户不会为了一行 yaml 去点「重新安装」。所以每次启动引擎前也调一次，
 /// 让「代码里的 profile」永远是磁盘上的那份。
 pub fn ensure_profile_files() -> AppResult<()> {
-    ensure_home_patch()?;
     let profile = profile_dir()?;
     std::fs::create_dir_all(&profile)?;
     for (name, content) in [
@@ -770,6 +837,55 @@ mod tests {
         assert_eq!(parse_major("20.20.0"), Some(20));
         assert_eq!(parse_major(""), None);
         assert_eq!(parse_major("vX.Y.Z"), None);
+    }
+
+    fn spec(id: &str, name: &str, api: Option<&str>, models: &[&str]) -> DshProviderSpec {
+        DshProviderSpec {
+            id: id.into(),
+            name: name.into(),
+            base_url: "https://api.example.com/v1".into(),
+            api_key: Some("sk-secret".into()),
+            api: api.map(|s| s.to_string()),
+            models: models.iter().map(|m| m.to_string()).collect(),
+        }
+    }
+
+    /// 每个供应商一条路由、各带各的端点与密钥引用；默认模型指向当前选中的那个。
+    #[test]
+    fn home_patch_maps_every_provider() {
+        let providers = vec![
+            spec("p1", "Moonshot AI", None, &["moonshot-v1-8k", "moonshot-v1-32k"]),
+            spec("p2", "Claude", Some("anthropic-messages"), &["claude-sonnet-4-5"]),
+        ];
+        let patch = build_home_patch(&providers, "p2", "claude-sonnet-4-5");
+        let parsed: serde_json::Value =
+            serde_json::from_str(patch.lines().skip(3).collect::<Vec<_>>().join("\n").trim())
+                .expect("补丁必须是合法 JSON（YAML 是 JSON 超集，dsh 照读）");
+
+        let routes = &parsed[0]["config"]["providers"];
+        assert_eq!(routes["cs-p1"]["displayName"], "Moonshot AI");
+        assert_eq!(routes["cs-p1"]["api"], "openai-completions", "缺省是 OpenAI 兼容");
+        assert_eq!(routes["cs-p1"]["models"].as_array().unwrap().len(), 2);
+        assert_eq!(routes["cs-p2"]["api"], "anthropic-messages");
+        // 默认模型必须跟着当前选中的走，否则官方界面只会显示 dsh 自带的 deepseek
+        assert_eq!(parsed[1]["config"]["provider"], "cs-p2");
+        assert_eq!(parsed[1]["config"]["model"], "claude-sonnet-4-5");
+    }
+
+    /// 密钥只走环境变量引用，**任何情况下都不能出现在补丁文件里**
+    #[test]
+    fn home_patch_never_contains_the_key() {
+        let patch = build_home_patch(&[spec("p1", "X", None, &["m"])], "p1", "m");
+        assert!(!patch.contains("sk-secret"), "密钥不能落盘");
+        assert!(patch.contains("CODESHELF_KEY_P1"), "要留下环境变量引用");
+    }
+
+    /// 一个供应商都没配也不能让插件树加载失败
+    #[test]
+    fn home_patch_falls_back_when_no_provider() {
+        let patch = build_home_patch(&[], "", "");
+        assert!(patch.contains("deepseek-official"));
+        assert!(patch.contains("deepseek-v4-flash"));
     }
 
     /// profile 的两个文件是「实测能启动」的那一份，跑偏了 dsh 会在启动阶段直接失败。

@@ -8,7 +8,9 @@
 // 官方界面里显示的就是用户自己的模型，密钥那栏是「由启动环境提供（只读）」。
 
 use super::engine::DshEngineConfig;
-use super::runtime::{dsh_entry_js, dsh_env_status, dsh_home, ensure_profile_files};
+use super::runtime::{
+    dsh_entry_js, dsh_env_status, dsh_home, ensure_home_patch, ensure_profile_files, key_env_name,
+};
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -83,10 +85,11 @@ pub async fn dsh_web_open(app: AppHandle, config: DshEngineConfig) -> AppResult<
         .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()))
         .unwrap_or_else(|| ".".to_string());
 
-    // home 补丁（模型路由 + 默认模型）也要在这条路径上落盘：用户可能先开官方界面
+    // 官方界面走的是 dsh 的 web profile，模型路由来自 home 补丁 ——
+    // 用户可能先开官方界面再用本地视图，所以这条路径上也要先把补丁写好。
     ensure_profile_files()?;
+    ensure_home_patch(&config.providers, &config.provider_id, &config.model)?;
 
-    let api_key = config.api_key.clone().unwrap_or_default();
     let mut cmd = Command::new(&node);
     cmd.arg(dsh_entry_js()?)
         .arg("web")
@@ -94,18 +97,14 @@ pub async fn dsh_web_open(app: AppHandle, config: DshEngineConfig) -> AppResult<
         .arg(port.to_string())
         .current_dir(&work_dir)
         .env("DSH_HOME", dsh_home()?)
-        .env("DEEPSEEK_BASE_URL", &config.base_url)
-        .env("DEEPSEEK_API_KEY", &api_key)
-        .env("CODESHELF_LLM_BASE_URL", &config.base_url)
-        .env("CODESHELF_LLM_API_KEY", &api_key)
-        .env("CODESHELF_LLM_MODEL", &config.model)
-        .env(
-            "CODESHELF_LLM_ROUTE",
-            config.provider.clone().unwrap_or_else(|| "deepseek-official".into()),
-        )
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    // 每个供应商的密钥各走各的环境变量（补丁里 apiKeyEnv 引用），不落盘；
+    // 官方界面把它显示为「由启动环境提供（只读）」
+    for p in &config.providers {
+        cmd.env(key_env_name(&p.id), p.api_key.clone().unwrap_or_default());
+    }
     crate::process_guard::configure(&mut cmd);
 
     let mut child = cmd

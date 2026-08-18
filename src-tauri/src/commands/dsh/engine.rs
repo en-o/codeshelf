@@ -7,7 +7,10 @@
 // 这边是常驻长连接（agent 要跨多轮保持上下文），所以 pending 表、reader task、
 // 退出监控都得自己维护。
 
-use super::runtime::{dsh_entry_js, dsh_home, dsh_env_status, PROFILE_NAME};
+use super::runtime::{
+    dsh_entry_js, dsh_env_status, dsh_home, ensure_home_patch, key_env_name, route_id,
+    DshProviderSpec, PROFILE_NAME,
+};
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -37,27 +40,14 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(1500);
 pub struct DshEngineConfig {
     /// agent 的工作目录（dsh 的 workspace，沙箱写入被限制在这里面）
     pub cwd: String,
+    /// 当前选中的供应商 id（CodeShelf 侧），决定 dsh 用哪条路由
+    pub provider_id: String,
     pub model: String,
-    /// 供应商端点（OpenAI 兼容或 Anthropic 原生，取决于 provider 路由）
-    pub base_url: String,
-    pub api_key: Option<String>,
-    /// dsh 那边的模型路由名，由前端按供应商类型给：
-    /// `deepseek-official`（dsh 自带的 DeepSeek 适配器）、`openai`、`anthropic`
-    /// （pi-ai 目录路由），其余 OpenAI 兼容端点用 `codeshelf`（profile 里手工声明的路由）。
-    /// 缺省 deepseek-official，兼容老会话。
+    /// CodeShelf「模型」页里所有启用的供应商，一一映射成 dsh 的模型路由。
+    /// 传全量而不只是选中那个：dsh 界面里的模型下拉要能列出用户配的全部模型，
+    /// 且每条各用各的端点与密钥（否则选 Claude 会拿别家地址去打）。
     #[serde(default)]
-    pub provider: Option<String>,
-}
-
-/// 路由白名单：profile 里声明了哪几条，这里就只允许哪几条。
-/// 传个没注册的名字，dsh 会在 initialize 阶段失败，错误信息还不直白。
-fn resolve_route(provider: Option<&str>) -> &'static str {
-    match provider {
-        Some("openai") => "openai",
-        Some("anthropic") => "anthropic",
-        Some("codeshelf") => "codeshelf",
-        _ => "deepseek-official",
-    }
+    pub providers: Vec<DshProviderSpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -217,29 +207,26 @@ async fn start_engine(app: AppHandle, config: DshEngineConfig) -> AppResult<DshE
         )));
     }
 
-    // profile 内容跟着应用代码走（比如新增模型路由），每次启动对齐一次，
+    // profile / home 补丁都跟着应用与用户配置走，每次启动对齐一次，
     // 免得老用户装完就再也拿不到新配置。
     super::runtime::ensure_profile_files()?;
+    ensure_home_patch(&config.providers, &config.provider_id, &config.model)?;
 
-    let route = resolve_route(config.provider.as_deref());
-    let api_key = config.api_key.clone().unwrap_or_default();
+    let route = route_id(&config.provider_id);
     let mut cmd = Command::new(&node);
     cmd.arg(&entry)
         .arg("--profile")
         .arg(PROFILE_NAME)
         .current_dir(&config.cwd)
         .env("DSH_HOME", &home)
-        // deepseek-official 走 dsh 自带适配器，认这两个变量
-        .env("DEEPSEEK_BASE_URL", &config.base_url)
-        .env("DEEPSEEK_API_KEY", &api_key)
-        // pi-ai 的三条路由按 profile 里的 apiKeyEnv 引用取这一组
-        .env("CODESHELF_LLM_BASE_URL", &config.base_url)
-        .env("CODESHELF_LLM_API_KEY", &api_key)
-        .env("CODESHELF_LLM_MODEL", &config.model)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    // 每个供应商的密钥各走各的环境变量（补丁里用 apiKeyEnv 引用），不落盘
+    for p in &config.providers {
+        cmd.env(key_env_name(&p.id), p.api_key.clone().unwrap_or_default());
+    }
     // dsh 会拉起 bash / 子 agent，取消时必须整组回收
     crate::process_guard::configure(&mut cmd);
 
