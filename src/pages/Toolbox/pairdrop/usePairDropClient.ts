@@ -387,6 +387,34 @@ export function usePairDropClient({
     }
   }, [updateEndpoint]);
 
+  /** 删除某个设备的会话：历史条目 + 聊天记录一起清掉（设备仍在线的话会重新出现在列表里）。 */
+  const removePeer = useCallback(
+    (peerId: string) => {
+      updateEndpoint((current) => {
+        const peers = { ...current.peers };
+        delete peers[peerId];
+        const conversations = { ...current.conversations };
+        delete conversations[peerId];
+        return {
+          ...current,
+          peers,
+          conversations,
+          selectedPeerId:
+            current.selectedPeerId === peerId ? null : current.selectedPeerId,
+        };
+      });
+      setUnread((prev) => {
+        if (!prev.has(peerId)) return prev;
+        const next = new Map(prev);
+        next.delete(peerId);
+        return next;
+      });
+      setSelected((prev) => (prev === peerId ? null : prev));
+      if (selectedRef.current === peerId) selectedRef.current = null;
+    },
+    [updateEndpoint]
+  );
+
   const sendText = useCallback(
     (to: string, text: string) => {
       const trimmed = text.trim();
@@ -584,6 +612,7 @@ export function usePairDropClient({
     knownPeers,
     selected,
     selectPeer,
+    removePeer,
     conversations,
     unread,
     sendText,
