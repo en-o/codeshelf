@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle, Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { dshEnvStatus, dshInstall, dshListNodes, dshSetNode, dshUninstall, type DshEnvStatus, type NodeCandidate } from "@/services/dsh";
+import {
+  dshEnvStatus,
+  dshInstall,
+  dshListNodes,
+  dshModelWindows,
+  dshSetNode,
+  dshUninstall,
+  type DshEnvStatus,
+  type DshModelWindow,
+  type NodeCandidate,
+} from "@/services/dsh";
 import { showToast } from "@/components/ui";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAiProvidersStore } from "@/stores/aiProvidersStore";
@@ -21,6 +31,7 @@ export function DshSettings({ onClose }: DshSettingsProps) {
   const [status, setStatus] = useState<DshEnvStatus | null>(null);
   const [nodes, setNodes] = useState<NodeCandidate[]>([]);
   const [defaultModelKey, setDefaultModelKey] = useLocalStorageState<string>(DSH_DEFAULT_MODEL_KEY, "");
+  const [windows, setWindows] = useState<DshModelWindow[]>([]);
   const dshProviders = useMemo(
     () => toDshProviders(ensureAiDefaultProvider(aiProviders)),
     [aiProviders, ensureAiDefaultProvider],
@@ -48,6 +59,10 @@ export function DshSettings({ onClose }: DshSettingsProps) {
       showToast("error", errText(e, "设置 Node 失败"));
     }
   }
+
+  useEffect(() => {
+    dshModelWindows(dshProviders).then(setWindows).catch(() => setWindows([]));
+  }, [dshProviders]);
 
   useEffect(() => {
     refresh();
@@ -184,16 +199,28 @@ export function DshSettings({ onClose }: DshSettingsProps) {
                   {dshProviders.length === 0 ? "「模型」页里还没有启用的模型" : "自动（第一个可用模型）"}
                 </option>
                 {dshProviders.map((p) =>
-                  p.models.map((m) => (
-                    <option key={`${p.id}::${m}`} value={`${p.id}::${m}`}>
-                      {p.name} · {m}
-                    </option>
-                  )),
+                  p.models.map((m) => {
+                    const w = windows.find((x) => x.providerId === p.id && x.model === m);
+                    // 窗口太小的直接禁掉：dsh 每轮注入的系统提示就要一万多 token，
+                    // 选了只会在发第一句话时收到 CONTEXT_WINDOW_EXCEEDED
+                    const tooSmall = w ? !w.usable : false;
+                    return (
+                      <option
+                        key={`${p.id}::${m}`}
+                        value={`${p.id}::${m}`}
+                        disabled={tooSmall}
+                      >
+                        {p.name} · {m}
+                        {w ? `（${Math.round(w.contextWindow / 1024)}K${tooSmall ? "，窗口太小 dsh 用不了" : ""}）` : ""}
+                      </option>
+                    );
+                  }),
                 )}
               </select>
               <p className="text-[10px] text-gray-400">
                 dsh 新会话默认用它；在 dsh 界面里还能临时换成「模型」页里的其它模型。
-                改完要在 dsh 页点「重启」才生效。
+                改完要在 dsh 页点「重启」才生效。窗口小于 16K 的模型装不下 dsh 每轮
+                注入的系统提示，已置灰。
               </p>
             </dd>
           </div>

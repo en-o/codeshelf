@@ -3,12 +3,20 @@ import {
   commands,
   type DshEnvStatus,
   type DshLaunchConfig,
+  type DshModelWindow,
   type DshProviderSpec,
   type DshWebStatus,
   type NodeCandidate,
 } from "@/bindings";
 
-export type { DshEnvStatus, DshLaunchConfig, DshProviderSpec, DshWebStatus, NodeCandidate };
+export type {
+  DshEnvStatus,
+  DshLaunchConfig,
+  DshModelWindow,
+  DshProviderSpec,
+  DshWebStatus,
+  NodeCandidate,
+};
 
 // ========== 事件 ==========
 
@@ -31,6 +39,9 @@ export const dshEnvStatus = () => unwrap(commands.dshEnvStatus());
 export const dshListNodes = () => unwrap(commands.dshListNodes());
 /** 指定用哪个 node；传 null 恢复自动选择 */
 export const dshSetNode = (path: string | null) => unwrap(commands.dshSetNode(path));
+/** 每个模型的上下文窗口与「dsh 用不用得了」，窗口推断只在 Rust 侧有一份实现 */
+export const dshModelWindows = (providers: DshProviderSpec[]) =>
+  unwrap(commands.dshModelWindows(providers));
 export const dshInstall = () => unwrap(commands.dshInstall());
 export const dshUninstall = () => unwrap(commands.dshUninstall());
 

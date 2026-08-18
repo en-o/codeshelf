@@ -8,7 +8,8 @@
 // 官方界面里显示的就是用户自己的模型，密钥那栏是「由启动环境提供（只读）」。
 
 use super::runtime::{
-    dsh_entry_js, dsh_env_status, dsh_home, ensure_home_patch, key_env_name, DshProviderSpec,
+    dsh_entry_js, dsh_env_status, dsh_home, ensure_home_patch, infer_context_window, key_env_name,
+    DshProviderSpec, MIN_USABLE_CONTEXT_WINDOW,
 };
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
@@ -91,6 +92,18 @@ pub async fn dsh_web_open(app: AppHandle, config: DshLaunchConfig) -> AppResult<
     let node = status
         .node_path
         .ok_or_else(|| AppError::Other("未找到 Node 可执行文件".into()))?;
+
+    // 窗口太小的模型直接挡在门外：dsh 每轮都要注入自己的系统提示 + skill 目录，
+    // 一万多 token 起步。让它启动只会在用户发第一句话时收到
+    // `CONTEXT_WINDOW_EXCEEDED`，那时错误看起来像是模型或密钥的问题。
+    let window = infer_context_window(&config.model);
+    if window < MIN_USABLE_CONTEXT_WINDOW {
+        return Err(AppError::Invalid(format!(
+            "{} 的上下文窗口只有 {}，装不下 dsh 每轮注入的系统提示（一万多 token）。\
+             请在 设置 → dsh 引擎 里换一个 32K 以上的模型。",
+            config.model, window
+        )));
+    }
 
     // 端口自己挑：dsh web 默认 3080，用户机器上很可能被别的东西占着，
     // 撞了它会直接退出而不是换一个。

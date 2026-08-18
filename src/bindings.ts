@@ -2420,6 +2420,18 @@ async dshListNodes() : Promise<Result<NodeCandidate[], string>> {
 }
 },
 /**
+ * 给界面标注「哪些模型 dsh 用得了」。窗口推断只有一份实现（在这里），
+ * 前端不要另抄一份 —— 抄了迟早两边不一致。
+ */
+async dshModelWindows(providers: DshProviderSpec[]) : Promise<Result<DshModelWindow[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_model_windows", { providers }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * 手动指定用哪个 node。传 None 恢复自动选择。
  * 
  * 版本不够的直接拒绝：dsh 在低版本上是**加载插件树时**失败，
@@ -3565,6 +3577,14 @@ providerId: string; model: string;
  * 且每条各用各的端点与密钥（否则选 A 家的模型会拿 B 家的地址去打）。
  */
 providers?: DshProviderSpec[] }
+/**
+ * 一个模型在 dsh 里能不能用（窗口够不够）
+ */
+export type DshModelWindow = { providerId: string; model: string; contextWindow: number; 
+/**
+ * 窗口够 dsh 塞下它自己的系统提示
+ */
+usable: boolean }
 /**
  * CodeShelf 里的一个供应商，映射成 dsh 的一条模型路由。
  */

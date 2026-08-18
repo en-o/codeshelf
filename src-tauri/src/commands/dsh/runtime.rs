@@ -383,6 +383,38 @@ pub async fn dsh_env_status() -> AppResult<DshEnvStatus> {
     })
 }
 
+/// 一个模型在 dsh 里能不能用（窗口够不够）
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DshModelWindow {
+    pub provider_id: String,
+    pub model: String,
+    pub context_window: u32,
+    /// 窗口够 dsh 塞下它自己的系统提示
+    pub usable: bool,
+}
+
+/// 给界面标注「哪些模型 dsh 用得了」。窗口推断只有一份实现（在这里），
+/// 前端不要另抄一份 —— 抄了迟早两边不一致。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_model_windows(providers: Vec<DshProviderSpec>) -> AppResult<Vec<DshModelWindow>> {
+    Ok(providers
+        .iter()
+        .flat_map(|p| {
+            p.models.iter().map(|m| {
+                let context_window = infer_context_window(m);
+                DshModelWindow {
+                    provider_id: p.id.clone(),
+                    model: m.clone(),
+                    context_window,
+                    usable: context_window >= MIN_USABLE_CONTEXT_WINDOW,
+                }
+            })
+        })
+        .collect())
+}
+
 /// 列出所有检测到的 node（含版本不够的），界面用它做下拉。
 #[tauri::command]
 #[specta::specta]
@@ -458,6 +490,11 @@ pub fn key_env_name(provider_id: &str) -> String {
     format!("CODESHELF_KEY_{}", sanitize_id(provider_id).to_uppercase())
 }
 
+/// dsh 每轮都要注入自己的系统提示 + skill 目录，实测「你好」这种一句话
+/// 也要一万多 token。窗口小于这个数的模型**根本跑不了 dsh** ——
+/// 声明得再准也没用，请求一发就被供应商以 CONTEXT_WINDOW_EXCEEDED 拒绝。
+pub const MIN_USABLE_CONTEXT_WINDOW: u32 = 16_384;
+
 /// 推断不出来时的兜底窗口。**故意取小**：dsh 按声明的窗口决定塞多少上下文，
 /// 报大了不会被它拦住，而是等供应商回 400（实测 moonshot-v1-8k 上就是
 /// `exceeded model token limit: 8192 (requested: 11556)`）。宁可浪费也别超。
@@ -469,7 +506,7 @@ const FALLBACK_CONTEXT_WINDOW: u32 = 32_768;
 /// 小窗口模型上直接把请求打爆，所以按名字里的线索猜，猜不到就用保守兜底。
 ///
 /// 只认「名字里明写了容量」和几个常见家族；判断不了的宁可小。
-fn infer_context_window(model: &str) -> u32 {
+pub fn infer_context_window(model: &str) -> u32 {
     let m = model.to_ascii_lowercase();
 
     // moonshot-v1-8k / qwen-turbo-128k / 某某-32k：名字里直接写了

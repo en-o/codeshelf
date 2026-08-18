@@ -291,6 +291,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         // DeepSeek Harness（dsh）引擎
         dsh::dsh_env_status,
         dsh::dsh_list_nodes,
+        dsh::dsh_model_windows,
         dsh::dsh_set_node,
         dsh::dsh_install,
         dsh::dsh_uninstall,
