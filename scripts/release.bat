@@ -14,8 +14,10 @@ if "%~1"=="" (
     echo 用法: %~nx0 ^<版本号^>
     echo.
     echo 示例:
-    echo   %~nx0 0.2.0
-    echo   %~nx0 1.0.0
+    echo   %~nx0 0.2.0      ^(正式版，从 main 发^)
+    echo   %~nx0 0.2.0-1    ^(预览版，从 main-v 发^)
+    echo.
+    echo 两条基线各自更新：正式版用户收不到预览版，预览版用户收不到正式版。
     echo.
     exit /b 1
 )
@@ -31,6 +33,14 @@ set VERSION=%~1
 :: 于是同样的仓库状态在 Windows 上报错、在 macOS 上正常。
 :: batch 的 for /f 处理 git 输出也很脆（引号、特殊字符、延迟展开）。
 set BRANCH_NAME=release/%VERSION%
+
+:: 基线分支同样由共用脚本判定：正式版 main，预览版 main-v
+for /f "usebackq delims=" %%b in (`node scripts\release-precheck.mjs base-branch %VERSION%`) do set BASE_BRANCH=%%b
+if not defined BASE_BRANCH (
+    echo [ERROR] 无法判定基线分支
+    exit /b 1
+)
+echo [INFO] 基线分支: %BASE_BRANCH%
 
 node scripts\release-precheck.mjs baseline %VERSION%
 if errorlevel 1 exit /b 1
@@ -157,9 +167,9 @@ if errorlevel 1 (
 )
 echo [SUCCESS] 推送完成
 
-:: 10. 切回 main 分支
-echo [INFO] 切回 main 分支...
-git checkout main
+:: 10. 切回基线分支
+echo [INFO] 切回 %BASE_BRANCH% 分支...
+git checkout "%BASE_BRANCH%"
 
 echo.
 echo ========================================
@@ -167,7 +177,7 @@ echo   发版流程启动成功！
 echo ========================================
 echo.
 echo 版本号: v%VERSION%
-echo 分支:   %BRANCH_NAME%
+echo 分支:   %BRANCH_NAME% ^(基线 %BASE_BRANCH%^)
 echo.
 echo 接下来请：
 echo   1. 前往 GitHub Actions 查看构建进度
@@ -176,9 +186,9 @@ echo.
 echo   2. 构建完成后，前往 Releases 页面发布
 echo      https://github.com/en-o/codeshelf/releases
 echo.
-echo   3. 发布后可合并回 main 分支：
+echo   3. 发布后可合并回 %BASE_BRANCH% 分支：
 echo      git merge %BRANCH_NAME%
-echo      git push origin main
+echo      git push origin %BASE_BRANCH%
 echo.
 
 endlocal

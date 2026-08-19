@@ -581,8 +581,8 @@ async function sendFiles(files){
   for (const file of files) await sendOneFile(file);
 }
 async function sendOneFile(file){
-  // 与后端 MAX_FILE_SIZE 保持一致（中继是全内存的，2GB 会把桌面端打到 OOM）
-  if (file.size > 256 * 1024 * 1024){ toast(`${file.name} 超过 256MB 上限`, 'error'); return; }
+  // 与后端 MAX_FILE_SIZE 保持一致（中继边收边落盘，限的是磁盘不是内存）
+  if (file.size > 4 * 1024 * 1024 * 1024){ toast(`${file.name} 超过 4GB 上限`, 'error'); return; }
   const peerId = state.selected;
   const localId = genLocalId();
   // 立即插入占位气泡,uploadProgress=0 显示进度条

@@ -157,6 +157,7 @@ export function PeerItem({
   unread,
   onClick,
   onContextMenu,
+  onDelete,
 }: {
   peer: Peer & { lastSeenAt?: number };
   active: boolean;
@@ -164,44 +165,54 @@ export function PeerItem({
   unread: number;
   onClick: () => void;
   onContextMenu: (event: MouseEvent) => void;
+  onDelete: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left relative ${
-        active ? "bg-blue-50 dark:bg-blue-900/30" : ""
-      }`}
-    >
-      {active && (
-        <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />
-      )}
-      <Avatar
-        label={avatarLabel(peer.displayName)}
-        color={avatarColor(peer.peerId)}
-        size={32}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-          {peer.displayName}
-        </div>
-        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <DeviceIcon type={peer.deviceType} />
-          {deviceLabel(peer.deviceType)} · {online ? "在线" : "历史"}
-        </div>
-      </div>
-      <span
-        className={`w-2 h-2 rounded-full shrink-0 ${
-          online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
+    <div className="group relative">
+      <button
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        className={`w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-left ${
+          active ? "bg-blue-50 dark:bg-blue-900/30" : ""
         }`}
-        title={online ? "在线" : "离线"}
-      />
-      {unread > 0 && (
-        <span className="bg-red-500 text-white text-[10px] font-semibold rounded-full px-1.5 min-w-[18px] h-[18px] flex items-center justify-center">
-          {unread}
-        </span>
-      )}
-    </button>
+      >
+        {active && (
+          <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />
+        )}
+        <Avatar
+          label={avatarLabel(peer.displayName)}
+          color={avatarColor(peer.peerId)}
+          size={32}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+            {peer.displayName}
+          </div>
+          <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+            <DeviceIcon type={peer.deviceType} />
+            {deviceLabel(peer.deviceType)} · {online ? "在线" : "历史"}
+          </div>
+        </div>
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${
+            online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
+          }`}
+          title={online ? "在线" : "离线"}
+        />
+        {unread > 0 && (
+          <span className="bg-red-500 text-white text-[10px] font-semibold rounded-full px-1.5 min-w-[18px] h-[18px] flex items-center justify-center">
+            {unread}
+          </span>
+        )}
+      </button>
+      <button
+        onClick={onDelete}
+        className="absolute right-7 top-1/2 -translate-y-1/2 hidden group-hover:flex w-6 h-6 items-center justify-center rounded-md bg-white dark:bg-gray-800 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+        title="删除会话"
+      >
+        <X size={13} />
+      </button>
+    </div>
   );
 }
 

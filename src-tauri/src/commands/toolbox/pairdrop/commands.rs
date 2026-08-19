@@ -167,11 +167,14 @@ pub async fn pairdrop_save_file(token: String, save_path: String) -> AppResult<u
         }
     }
 
-    let bytes_written = file.bytes.len() as u64;
-    tokio::fs::write(&save_path, &file.bytes)
-        .await
-        .map_err(|e| crate::error::AppError::from(format!("写入文件失败: {}", e)))?;
-    Ok(bytes_written)
+    // 文件已经在磁盘上（中转临时目录），直接移过去即可；不再经手内存。
+    // 临时目录和目标可能不在同一个卷（Windows 上尤其常见），rename 会失败 → 退回复制。
+    if tokio::fs::rename(&file.path, &save_path).await.is_err() {
+        tokio::fs::copy(&file.path, &save_path)
+            .await
+            .map_err(|e| crate::error::AppError::from(format!("写入文件失败: {}", e)))?;
+    }
+    Ok(file.size)
 }
 
 /// 从"加入的对方桌面端"按 URL 下载文件并写到本地。
@@ -199,11 +202,6 @@ pub async fn pairdrop_download_save(url: String, save_path: String) -> AppResult
             resp.status().as_u16()
         )));
     }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| crate::error::AppError::from(format!("读取响应失败: {}", e)))?;
-
     let path = std::path::Path::new(&save_path);
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
@@ -212,8 +210,24 @@ pub async fn pairdrop_download_save(url: String, save_path: String) -> AppResult
                 .map_err(|e| crate::error::AppError::from(format!("创建目录失败: {}", e)))?;
         }
     }
-    let n = bytes.len() as u64;
-    tokio::fs::write(&save_path, &bytes)
+
+    // 边下边写：`resp.bytes()` 会把整份文件先攒在内存里，几百 MB 的包足够把桌面端顶爆
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    let mut stream = resp.bytes_stream();
+    let mut file = tokio::fs::File::create(&save_path)
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("创建文件失败: {}", e)))?;
+    let mut n: u64 = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk =
+            chunk.map_err(|e| crate::error::AppError::from(format!("读取响应失败: {}", e)))?;
+        n += chunk.len() as u64;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| crate::error::AppError::from(format!("写入文件失败: {}", e)))?;
+    }
+    file.flush()
         .await
         .map_err(|e| crate::error::AppError::from(format!("写入文件失败: {}", e)))?;
     Ok(n)

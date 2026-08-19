@@ -13,7 +13,7 @@ export interface UpdateInfo {
   date?: string;
   body?: string;
   isPortable?: boolean;
-  /** 预览版：会检查并提示新版本，但不下载、不安装，只能手动下载安装包覆盖安装 */
+  /** 当前是预览版（只在预览线内更新，界面据此显示渠道提示） */
   isPreview?: boolean;
 }
 
@@ -38,30 +38,28 @@ export async function getReleaseChannel(): Promise<ReleaseChannel> {
 }
 
 /**
- * 自动更新（下载 + 安装）的**唯一守卫**。预览版在这里断流。
+ * 取远端更新的**唯一入口**：只接受与自己同渠道的版本，跨渠道一律当作"没有更新"。
  *
- * 三条自动路径（downloadUpdate / installUpdate / downloadAndInstallUpdate）都经过它，
+ * 正式版与预览版是两条基线，可以互相下载覆盖安装，但更新功能里谁都不该看到对方 ——
+ * 第一道拦截在编译期（预览版包内置的 endpoint 指向预览专属清单，见
+ * `src-tauri/tauri.preview.conf.json`），这里是第二道：万一清单配错 / 端点被顶掉，
+ * 也不会把预览版推给正式版用户，反之亦然。
+ *
+ * 检查 / 下载 / 下载并安装三条路径都各自调过 `check()`，守卫放在这一层，
  * 就不用在每个入口各加一处、也不会漏掉以后新增的路径。
- *
- * **检查不在此列**：预览版仍然要能感知到「正式版出了新版本」并提示用户，
- * 只是升级动作得用户自己去下载安装包覆盖装。
  */
-async function ensureAutoUpdatable(): Promise<void> {
-  if ((await getReleaseChannel()) === "preview") {
-    throw new Error("预览版不支持自动更新，请手动下载安装包覆盖安装");
+async function checkUpstream(): Promise<Update | null> {
+  const update = await check();
+  if (!update) return null;
+  const channel = await getReleaseChannel();
+  const upstream: ReleaseChannel = isPreviewVersion(update.version) ? "preview" : "stable";
+  if (upstream !== channel) {
+    console.warn(
+      `忽略跨渠道更新：本机是 ${channel}，远端清单给的是 ${upstream}（v${update.version}）`,
+    );
+    return null;
   }
-}
-
-/** 该版本对应的 GitHub Release 页；预览版的「去下载」按钮指向它 */
-export function releasePageUrl(version?: string): string {
-  if (!version) return "https://github.com/en-o/codeshelf/releases/latest";
-  const tag = version.startsWith("v") ? version : `v${version}`;
-  return `https://github.com/en-o/codeshelf/releases/tag/${tag}`;
-}
-
-/** 打开某个版本的下载页（预览版手动升级用） */
-export async function openReleaseDownload(version?: string): Promise<void> {
-  await openUrl(releasePageUrl(version));
+  return update;
 }
 
 // 缓存已检查的更新对象，以及已完成下载、可安装的更新对象
@@ -114,12 +112,12 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
     };
   }
 
-  // 预览版**照常检查**：用户要能知道正式版出了新版本，只是升级得自己下载安装包。
-  // 标记 isPreview 让界面把「下载并安装」换成「去下载」。
-  const preview = (await getReleaseChannel()) === "preview";
+  // 预览版走自己的更新源（预览端点），检查逻辑与正式版一致，
+  // 只是 isPreview 会传给界面提示"你在预览线上"。
+  const isPreview = (await getReleaseChannel()) === "preview";
 
   try {
-    const update = await check();
+    const update = await checkUpstream();
     cachedUpdate = update;
     if (!update || downloadedUpdate?.version !== update.version) {
       downloadedUpdate = null;
@@ -132,14 +130,14 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
         version: update.version,
         date: update.date,
         body: update.body,
-        isPreview: preview,
+        isPreview,
       };
     }
 
     return {
       available: false,
-      currentVersion: await getVersion(),
-      isPreview: preview,
+      currentVersion: "",
+      isPreview,
     };
   } catch (error) {
     console.error("Failed to check for updates:", error);
@@ -172,9 +170,8 @@ export async function downloadUpdate(
 async function doDownloadUpdate(
   onProgress?: (progress: number, total: number) => void
 ): Promise<void> {
-  await ensureAutoUpdatable();
   if (!cachedUpdate) {
-    const update = await check();
+    const update = await checkUpstream();
     if (!update) {
       throw new Error("No update available");
     }
@@ -218,7 +215,6 @@ export async function installUpdate(): Promise<void> {
 }
 
 async function doInstallUpdate(): Promise<void> {
-  await ensureAutoUpdatable();
   if (!downloadedUpdate) {
     throw new Error("No update downloaded");
   }
@@ -247,10 +243,9 @@ export async function downloadAndInstallUpdate(
 async function doDownloadAndInstall(
   onProgress?: (progress: number, total: number) => void
 ): Promise<void> {
-  await ensureAutoUpdatable();
   let update = cachedUpdate;
   if (!update) {
-    update = await check();
+    update = await checkUpstream();
     if (!update) {
       throw new Error("No update available");
     }
@@ -325,7 +320,14 @@ export function buildCorrectArchDmgUrl(version: string, targetArch: string): str
   )}_${archSuffix}.dmg`;
 }
 
-const RELEASES_PAGE = "https://github.com/en-o/codeshelf/releases/latest";
+/**
+ * 兜底页用**这个版本自己的 tag 页**，不是 `releases/latest`：
+ * latest 永远指向正式版，预览版用户点进去会被带到另一条基线上。
+ */
+function releasePageUrl(version: string): string {
+  const tag = version.startsWith("v") ? version : `v${version}`;
+  return `https://github.com/en-o/codeshelf/releases/tag/${tag}`;
+}
 
 /**
  * 用浏览器打开匹配宿主架构的 dmg 直链；同时打开 release 页作为兜底
@@ -337,6 +339,6 @@ export async function openCorrectArchDownload(version: string, hostArch: string)
     await openUrl(dmgUrl);
   } catch (err) {
     console.warn("打开直链失败，回退到 release 页", err);
-    await openUrl(RELEASES_PAGE);
+    await openUrl(releasePageUrl(version));
   }
 }

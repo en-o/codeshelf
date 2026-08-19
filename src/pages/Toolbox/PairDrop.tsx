@@ -393,6 +393,20 @@ function ChatWorkspace({
     });
   };
 
+  const handleDeletePeer = (peer: HistoricalPeer) => {
+    if (!window.confirm(`删除与「${peer.displayName}」的会话记录？聊天内容不可恢复。`)) {
+      return;
+    }
+    client.removePeer(peer.peerId);
+    setPeerAliases((prev) => {
+      if (!(peer.peerId in prev)) return prev;
+      const next = { ...prev };
+      delete next[peer.peerId];
+      savePeerAliases(next);
+      return next;
+    });
+  };
+
   const handleRenameLocal = () => {
     const name = window.prompt("重命名本机", localClient.selfName || "");
     if (name === null) return;
@@ -762,6 +776,7 @@ function ChatWorkspace({
                       peer,
                     });
                   }}
+                  onDelete={() => handleDeletePeer(peer)}
                 />
               ))}
               {visibleRemoteTargets.map((target) => {
@@ -1061,6 +1076,7 @@ function ChatWorkspace({
           onEditRemoteAddress={handleEditRemoteAddress}
           onForgetRemote={handleForgetRemote}
           onRenamePeer={handleRenamePeer}
+          onDeletePeer={handleDeletePeer}
         />
       ) : null}
     </div>
@@ -1082,6 +1098,7 @@ function PairDropContextMenu({
   onEditRemoteAddress,
   onForgetRemote,
   onRenamePeer,
+  onDeletePeer,
 }: {
   menu: ContextMenuState;
   activeRoomId: string;
@@ -1097,6 +1114,7 @@ function PairDropContextMenu({
   onEditRemoteAddress: (target: RemoteTarget) => void;
   onForgetRemote: (target: RemoteTarget) => void;
   onRenamePeer: (peer: HistoricalPeer) => void;
+  onDeletePeer: (peer: HistoricalPeer) => void;
 }) {
   const x = Math.min(menu.x, window.innerWidth - 180);
   const y = Math.min(menu.y, window.innerHeight - 260);
@@ -1183,6 +1201,12 @@ function PairDropContextMenu({
             onClick={() => run(() => onRenamePeer(menu.peer))}
           >
             重命名
+          </button>
+          <button
+            className={`${itemClass} text-red-600 dark:text-red-400`}
+            onClick={() => run(() => onDeletePeer(menu.peer))}
+          >
+            删除会话
           </button>
         </>
       ) : null}

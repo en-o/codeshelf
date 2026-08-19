@@ -1,0 +1,125 @@
+name: Preview channel manifest
+
+# 预览版没有 `releases/latest` 这种固定入口（GitHub 的 latest 会跳过 prerelease），
+# 所以预览线用一个**固定 tag `preview`** 作为更新端点：
+#   https://github.com/en-o/codeshelf/releases/download/preview/latest.json
+#
+# 这个 workflow 在**人工 Publish 某个预览版之后**，把那次 release 的 latest.json
+# 原样搬到 `preview` 上。为什么必须等 Publish：Draft 的附件下载链接对外不可用，
+# 提前搬过去等于把用户指向一份下载不了的包。
+#
+# 正式版发布不走这里：它靠 GitHub 自己的 `latest` 指针，且 `preview` 这个 release
+# 本身是 prerelease，永远不会被算成 latest —— 两条线互不覆盖。
+
+on:
+  release:
+    types: [published]
+  # 手动补跑：某次同步失败、或想把预览端点回滚到旧版本时用
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要同步到 preview 端点的预览版 tag（如 v0.2.0-1）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    # 正式版 release 直接跳过：它不该出现在预览端点上，也不需要
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror latest.json to the rolling `preview` release
+        uses: actions/github-script@v8
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const PREVIEW_TAG = 'preview';
+
+            // 1) 找到源 release（事件触发就是它自己；手动触发按 tag 找）
+            let source;
+            if (context.eventName === 'workflow_dispatch') {
+              const tag = process.env.INPUT_TAG;
+              const { data } = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              source = data;
+            } else {
+              source = context.payload.release;
+            }
+            if (source.tag_name === PREVIEW_TAG) {
+              core.info('源就是 preview 本身，跳过（避免自我复制）');
+              return;
+            }
+            if (!source.prerelease) {
+              core.setFailed(`${source.tag_name} 不是预览版，不能同步到预览端点`);
+              return;
+            }
+            if (source.draft) {
+              core.setFailed(`${source.tag_name} 还是 Draft，附件对外不可下载，先 Publish 再同步`);
+              return;
+            }
+
+            // 2) 取源 release 上的 latest.json
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner, repo, release_id: source.id, per_page: 100,
+            });
+            const manifest = assets.find(a => a.name === 'latest.json');
+            if (!manifest) {
+              core.setFailed(`${source.tag_name} 上没有 latest.json，无法同步预览端点`);
+              return;
+            }
+            const { data: content } = await github.rest.repos.getReleaseAsset({
+              owner, repo, asset_id: manifest.id,
+              headers: { accept: 'application/octet-stream' },
+            });
+            const body = Buffer.from(content);
+            // 清单里的下载链接指向源 release 的附件，搬运的只是这份 JSON 本身
+            core.info(`源清单 ${manifest.name}（${body.length} 字节）来自 ${source.tag_name}`);
+
+            // 3) 拿到（或创建）固定的 preview release
+            let target;
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: PREVIEW_TAG });
+              target = data;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              const { data } = await github.rest.repos.createRelease({
+                owner, repo,
+                tag_name: PREVIEW_TAG,
+                name: 'Preview channel manifest',
+                body: '预览版更新端点。只放 latest.json，安装包在各自的 vX.Y.Z-N release 里。',
+                draft: false,
+                // 必须是 prerelease：否则它会顶掉 `releases/latest`，正式版用户就会被指向预览清单
+                prerelease: true,
+              });
+              target = data;
+            }
+            if (target.draft) {
+              core.setFailed('preview release 处于 Draft 状态，附件不可公开下载，请先 Publish');
+              return;
+            }
+
+            // 4) 覆盖 latest.json（同名 asset 不能重复上传，先删旧的）
+            const { data: old } = await github.rest.repos.listReleaseAssets({
+              owner, repo, release_id: target.id, per_page: 100,
+            });
+            for (const a of old.filter(a => a.name === 'latest.json')) {
+              await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: a.id });
+            }
+            await github.rest.repos.uploadReleaseAsset({
+              owner, repo, release_id: target.id, name: 'latest.json', data: body,
+            });
+
+            // 正文记一笔当前指向哪个版本，出问题时一眼能看出预览端点停在哪
+            await github.rest.repos.updateRelease({
+              owner, repo, release_id: target.id,
+              body: [
+                '预览版更新端点。只放 latest.json，安装包在各自的 `vX.Y.Z-N` release 里。',
+                '',
+                `当前指向：**${source.tag_name}**（同步于 ${new Date().toISOString()}）`,
+              ].join('\n'),
+            });
+
+            core.summary.addRaw(`预览端点已指向 ${source.tag_name}`).write();

@@ -26,8 +26,10 @@ if [ -z "$1" ]; then
     echo "用法: $0 <版本号>"
     echo ""
     echo "示例:"
-    echo "  $0 0.2.0"
-    echo "  $0 1.0.0"
+    echo "  $0 0.2.0      # 正式版，从 main 发"
+    echo "  $0 0.2.0-1    # 预览版，从 main-v 发"
+    echo ""
+    echo "两条基线各自更新：正式版用户收不到预览版，预览版用户收不到正式版。"
     echo ""
     exit 1
 fi
@@ -43,9 +45,12 @@ cd "$PROJECT_ROOT" || exit 1
 # 版本号格式、git 仓库、分支、工作树干净、基线（落后/分叉拦，仅发版提交可领先）、
 # release 分支占用。**与 release.bat 共用同一份实现**，避免两边逻辑漂移。
 BRANCH_NAME="release/$VERSION"
+# 基线分支同样由共用脚本判定：正式版 main，预览版 main-v
+BASE_BRANCH=$(node scripts/release-precheck.mjs base-branch "$VERSION") || exit 1
 
 info "项目目录: $PROJECT_ROOT"
 info "目标版本: $VERSION"
+info "基线分支: $BASE_BRANCH"
 
 node scripts/release-precheck.mjs baseline "$VERSION" || exit 1
 success "前置校验通过"
@@ -162,9 +167,9 @@ info "推送到远程 origin/$BRANCH_NAME..."
 git push origin "$BRANCH_NAME"
 success "推送完成"
 
-# 10. 切回 main 分支
-info "切回 main 分支..."
-git checkout main
+# 10. 切回基线分支
+info "切回 $BASE_BRANCH 分支..."
+git checkout "$BASE_BRANCH"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
@@ -172,7 +177,7 @@ echo -e "${GREEN}  发版流程启动成功！${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "版本号: ${YELLOW}v$VERSION${NC}"
-echo -e "分支:   ${YELLOW}$BRANCH_NAME${NC}"
+echo -e "分支:   ${YELLOW}$BRANCH_NAME${NC}（基线 $BASE_BRANCH）"
 echo ""
 echo "接下来请："
 echo "  1. 前往 GitHub Actions 查看构建进度"
@@ -180,8 +185,12 @@ echo "     https://github.com/en-o/codeshelf/actions"
 echo ""
 echo "  2. 构建完成后，前往 Releases 页面发布"
 echo "     https://github.com/en-o/codeshelf/releases"
+if [ "$BASE_BRANCH" = "main-v" ]; then
+echo "     预览版会发成 Pre-release；Publish 之后 preview-manifest workflow"
+echo "     才把清单同步到固定 tag preview，预览版用户此时才收到更新。"
+fi
 echo ""
-echo "  3. 发布后可合并回 main 分支："
+echo "  3. 发布后可合并回 $BASE_BRANCH 分支："
 echo "     git merge $BRANCH_NAME"
-echo "     git push origin main"
+echo "     git push origin $BASE_BRANCH"
 echo ""
