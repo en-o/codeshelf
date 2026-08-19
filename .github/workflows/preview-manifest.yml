@@ -28,6 +28,7 @@ jobs:
   sync:
     # 正式版 release 直接跳过：它不该出现在预览端点上，也不需要
     if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Mirror latest.json to the rolling `preview` release

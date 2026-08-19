@@ -17,6 +17,7 @@ concurrency:
 jobs:
   frontend:
     name: 前端与 sidecar 构建
+    timeout-minutes: 30
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -46,13 +47,15 @@ jobs:
 
   rust:
     name: Rust 检查与测试
+    timeout-minutes: 45
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -85,6 +88,7 @@ jobs:
 
   msrv:
     name: 最低工具链验证 (Rust 1.88)
+    timeout-minutes: 45
     runs-on: ubuntu-22.04
     # 其余 job 都用浮动的 `stable`，会随 runner 升级 —— 真实 MSRV 涨了也发现不了，
     # 直到按 BUILD.md 装了最低版本的用户来报「编译不过」。
@@ -92,9 +96,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
         with:
@@ -113,6 +118,7 @@ jobs:
 
   windows-cross:
     name: Windows 交叉编译检查
+    timeout-minutes: 45
     runs-on: ubuntu-22.04
     # #[cfg(target_os = "windows")] 代码在 Linux/macOS 上根本不会被编译，
     # 本地 cargo check 全绿也可能藏着 Windows 专有的编译错误。
@@ -120,9 +126,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install mingw-w64
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-install
+        with:
+          packages: mingw-w64
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
@@ -136,6 +143,7 @@ jobs:
 
   macos:
     name: macOS 编译检查
+    timeout-minutes: 45
     runs-on: macos-14
     # 同理：#[cfg(target_os = "macos")] 的代码在 ubuntu 的 rust job 里不会被编译。
     # macOS 无法从 Linux 交叉编译（要 Apple SDK），直接用 macOS runner 原生跑。

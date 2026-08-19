@@ -24,6 +24,7 @@ jobs:
   create-release:
     permissions:
       contents: write
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create_release.outputs.result }}
@@ -183,6 +184,7 @@ jobs:
             args: ''
             config: 'src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows.conf.json'
 
+    timeout-minutes: 90
     runs-on: ${{ matrix.platform }}
     env:
       # 写进产物，安装后可核对「这个二进制到底是哪个 commit 构建的」
@@ -215,9 +217,10 @@ jobs:
 
       - name: Install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
         # npm ci 而不是 npm install：出包必须用与 lockfile 完全一致的依赖树。
@@ -398,6 +401,7 @@ jobs:
       # 调 getRelease 会直接 403「Resource not accessible by integration」。
       # 本 job 只读不写，权限给到 write 纯粹是 draft 可见性的要求。
       contents: write
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Summarize draft release
