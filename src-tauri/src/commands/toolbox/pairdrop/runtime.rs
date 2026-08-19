@@ -38,6 +38,12 @@ use super::state::*;
 use crate::error::AppResult;
 
 const DISCOVERY_SERVICE_TYPE: &str = "_codeshelf-pairdrop._tcp.local.";
+
+/// 服务端向每个 peer 发 WS ping 的间隔
+const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+/// 超过这么久没收到任何帧（含 pong）就判定连接已死，踢出 peer 列表。
+/// 取 3 倍心跳间隔：丢一两个 pong 不至于误踢。
+const PEER_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 const DISCOVERY_TTL_MS: i64 = 20_000;
 
 #[derive(Clone)]
@@ -738,13 +744,10 @@ async fn handle_socket(
                 .collect::<String>()
         })
         .filter(|id| !id.is_empty());
-    let peer_id = {
-        let peers = handle.state.peers.lock().await;
-        match requested_id {
-            Some(id) if !peers.contains_key(&id) => id,
-            _ => generate_peer_id(),
-        }
-    };
+    // 同一 clientId 重连直接**顶掉**旧连接，而不是领一个新 id：
+    // 旧连接可能只是半开的僵尸（休眠 / 换网 / 进程被杀，收不到 FIN），
+    // 让它占着 id 的话同一台设备会变成两个 peer，名字还被 dedup 成「安卓 (2)」。
+    let peer_id = requested_id.unwrap_or_else(generate_peer_id);
     let (default_base, default_type) = guess_display_name(&user_agent);
     let device_type = role.unwrap_or(default_type);
     // 默认名 = 设备类型 + 基于 IP 的 4 位短码（如 "Mac #3f2a"）：同设备稳定、不同设备基本不撞，
@@ -759,9 +762,11 @@ async fn handle_socket(
     // 注册 peer：在锁内按当前频道已有名字去重，保证同频道默认名唯一
     let display_name = {
         let mut peers = handle.state.peers.lock().await;
+        // 去重时排除自己（被顶掉的旧连接同 id），否则重连一次就多一个「(2)」
         let taken: HashSet<String> = peers
-            .values()
-            .map(|e| e.info.display_name.clone())
+            .iter()
+            .filter(|(id, _)| *id != &peer_id)
+            .map(|(_, e)| e.info.display_name.clone())
             .collect();
         let name = dedup_name(&desired_name, &taken);
         peers.insert(
@@ -799,9 +804,23 @@ async fn handle_socket(
 
     let (mut sink, mut stream) = socket.split();
 
-    // 发送循环
+    // 发送循环（顺带每 15s 发一个 WS ping 探活，浏览器/客户端会自动回 pong）
     let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
+        let mut hb = tokio::time::interval(HEARTBEAT_INTERVAL);
+        hb.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            let msg = tokio::select! {
+                m = rx.recv() => match m {
+                    Some(m) => m,
+                    None => break,
+                },
+                _ = hb.tick() => {
+                    if sink.send(Message::Ping(Vec::new())).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
+            };
             let text = match serde_json::to_string(&msg) {
                 Ok(s) => s,
                 Err(e) => {
@@ -817,8 +836,17 @@ async fn handle_socket(
         let _ = sink.send(Message::Close(None)).await;
     });
 
-    // 接收循环
-    while let Some(msg) = stream.next().await {
+    // 接收循环。任何一帧（含 pong）都算活着；连续 PEER_IDLE_TIMEOUT 没动静就判定
+    // 连接已死 —— 半开 TCP 收不到 FIN，只靠 stream 结束会让幽灵 peer 永远挂在列表里。
+    loop {
+        let msg = match tokio::time::timeout(PEER_IDLE_TIMEOUT, stream.next()).await {
+            Err(_) => {
+                log::info!("跨设备传输：心跳超时，断开 peer={}", peer_id);
+                break;
+            }
+            Ok(None) => break,
+            Ok(Some(m)) => m,
+        };
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
@@ -836,10 +864,16 @@ async fn handle_socket(
         }
     }
 
-    // 清理：移除 peer
+    // 清理：只移除**自己这条连接**的条目。
+    // 被同 clientId 的新连接顶掉时，map 里已经是新连接的 entry，不能连它一起删。
     {
         let mut peers = handle.state.peers.lock().await;
-        peers.remove(&peer_id);
+        if peers
+            .get(&peer_id)
+            .is_some_and(|e| e.sender.same_channel(&tx))
+        {
+            peers.remove(&peer_id);
+        }
     }
     log::info!("跨设备传输：断开 peer={}", peer_id);
     send_task.abort();
