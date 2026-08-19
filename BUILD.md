@@ -135,7 +135,7 @@ CodeShelf-Portable-vX.X.X-x64.zip
 scripts\release.bat 0.2.0
 
 # Linux/macOS
-./scripts/release.sh 0.2.0
+sh ./scripts/release.sh 0.2.0
 ```
 
 发版脚本会：
