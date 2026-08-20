@@ -283,7 +283,8 @@ pub async fn pairdrop_upload_path(
         if let Ok(bytes) = &chunk {
             sent += bytes.len() as u64;
             // 按百分比节流：8KB 一个 chunk，10GB 就是 130 万次事件，全发出去前端会被淹掉
-            let pct = if size == 0 { 100 } else { sent * 100 / size };
+            // 空文件（size == 0）直接算 100%，checked_div 顺带满足 clippy::manual_checked_ops
+            let pct = (sent * 100).checked_div(size).unwrap_or(100);
             if pct != last_pct {
                 last_pct = pct;
                 let _ = app_for_progress.emit(
