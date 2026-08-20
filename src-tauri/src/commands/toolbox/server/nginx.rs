@@ -1,6 +1,6 @@
 // 生成等价 nginx 配置
 
-use super::super::{NginxConfigOptions, ProxyConfig};
+use super::super::{AuthRule, NginxConfigOptions, ProxyConfig};
 use super::{ensure_servers_loaded, SERVERS};
 use crate::error::AppResult;
 
