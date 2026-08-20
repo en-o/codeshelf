@@ -342,3 +342,13 @@ export async function openCorrectArchDownload(version: string, hostArch: string)
     await openUrl(releasePageUrl(version));
   }
 }
+
+/**
+ * 手动下载入口：有版本号就开这个版本的 tag 页，没有就退回 releases/latest。
+ */
+export async function openReleaseDownload(version?: string): Promise<void> {
+  const url = version
+    ? releasePageUrl(version)
+    : "https://github.com/en-o/codeshelf/releases/latest";
+  await openUrl(url);
+}
