@@ -162,6 +162,9 @@ fn push_auth_location(
         };
         push_nginx_line(out, 8, &format!("alias \"{}\";", escape_nginx_string(&target)));
         if !exact {
+            push_nginx_line(out, 8, "autoindex on;");
+            push_nginx_line(out, 8, "autoindex_exact_size off;");
+            push_nginx_line(out, 8, "autoindex_localtime on;");
             push_nginx_line(out, 8, "try_files $uri $uri/ =404;");
         }
     } else {
@@ -259,6 +262,9 @@ fn build_nginx_config(options: NginxConfigOptions) -> String {
         push_nginx_line(&mut out, 4, &format!("location {location} {{"));
         push_nginx_line(&mut out, 8, &format!("alias \"{root_dir}/\";"));
         push_nginx_line(&mut out, 8, &format!("index {index_directive};"));
+        push_nginx_line(&mut out, 8, "autoindex on;");
+        push_nginx_line(&mut out, 8, "autoindex_exact_size off;");
+        push_nginx_line(&mut out, 8, "autoindex_localtime on;");
         push_nginx_line(&mut out, 8, &format!("try_files $uri $uri/ {fallback};"));
     } else {
         out.push('\n');
@@ -266,6 +272,9 @@ fn build_nginx_config(options: NginxConfigOptions) -> String {
         push_nginx_line(&mut out, 4, &format!("index {index_directive};"));
         out.push('\n');
         push_nginx_line(&mut out, 4, "location / {");
+        push_nginx_line(&mut out, 8, "autoindex on;");
+        push_nginx_line(&mut out, 8, "autoindex_exact_size off;");
+        push_nginx_line(&mut out, 8, "autoindex_localtime on;");
         push_nginx_line(&mut out, 8, &format!("try_files $uri $uri/ {fallback};"));
     }
 

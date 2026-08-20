@@ -89,6 +89,9 @@ export function ServiceList({ servers, rules, copiedId, callbacks }: ServiceList
                   {server.rootDir}
                 </div>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    目录浏览
+                  </span>
                   {server.cors && (
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
                       CORS

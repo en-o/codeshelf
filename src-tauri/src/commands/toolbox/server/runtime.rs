@@ -9,7 +9,7 @@ use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, Request, StatusCode},
     response::IntoResponse,
-    routing::any,
+    routing::{any, get},
     Router,
 };
 use socket2::{Domain, Socket, Type};
@@ -21,6 +21,7 @@ use tower_http::{
 
 use super::super::ServerConfig;
 use super::auth;
+use super::directory_listing::{directory_listing, DirectoryListingState};
 use super::ServerController;
 
 /// 代理状态
@@ -35,8 +36,14 @@ pub(super) async fn run_server(
     config: ServerConfig,
     controller: Arc<ServerController>,
 ) -> AppResult<()> {
-    // 创建静态文件服务
-    let serve_dir = ServeDir::new(&config.root_dir).append_index_html_on_directories(true);
+    // ServeDir 负责文件、Range 和 MIME；目录没有 index.html 时交给 fallback 生成索引页。
+    // 用 fallback 而不是 not_found_service：有效目录的列表应返回 200，真正不存在的路径
+    // 会由 directory_listing 继续返回 404。
+    let directory_listing_service = get(directory_listing)
+        .with_state(DirectoryListingState::new(&config.root_dir));
+    let serve_dir = ServeDir::new(&config.root_dir)
+        .append_index_html_on_directories(true)
+        .fallback(directory_listing_service);
 
     // 构建路由
     let mut app = Router::new();
