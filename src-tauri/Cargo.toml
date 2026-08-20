@@ -95,3 +95,11 @@ windows = { version = "0.61", features = [
     "Win32_System_Registry",
     "Win32_Security",
 ] }
+
+# target/debug 曾经涨到 100GB，其中 deps 65GB、incremental 21GB —— 绝大部分是**依赖的调试信息**。
+# 断点几乎只打在自己的代码里，依赖的 DWARF 纯属浪费磁盘。
+[profile.dev]
+debug = "line-tables-only" # 自己的代码保留行号（panic 回溯照常可读），去掉变量/类型的完整调试信息
+
+[profile.dev.package."*"]
+debug = false # 依赖不带调试信息 —— 体积大头在这里

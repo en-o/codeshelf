@@ -252,7 +252,6 @@ function ChatWorkspace({
   const currentRoomIsRemote = !!activeRemoteTarget;
   const localRoomDisabled = !!disabledRooms[LOCAL_ROOM_ID];
   const [draft, setDraft] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -537,7 +536,24 @@ function ChatWorkspace({
     setDraft("");
   };
 
-  const handleSelectFile = () => fileInputRef.current?.click();
+  // 走系统文件对话框而不是 <input type=file>：拿得到真实路径，上传交给后端流式做，
+  // 发送方那条消息之后一直能指向自己的源文件（中转缓存被领取删掉也不受影响）。
+  // 拖拽进来的文件在 WebView 里没有路径，仍走 handleFilesChosen 的 XHR 上传。
+  const handleSelectFile = async () => {
+    if (!client.selected || !selectedPeerOnline) return;
+    const picked = await openDialog({ multiple: true, title: "选择要发送的文件" });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    for (const path of paths) {
+      try {
+        await client.sendFilePath(client.selected, path);
+      } catch (e) {
+        showToast(
+          "error",
+          "发送失败: " + (typeof e === "string" && e ? e : e instanceof Error ? e.message : String(e))
+        );
+      }
+    }
+  };
 
   const handleFilesChosen = async (files: FileList | null) => {
     if (!files || !client.selected || !selectedPeerOnline) return;
@@ -548,7 +564,6 @@ function ChatWorkspace({
         showToast("error", "发送 " + file.name + " 失败: " + (e instanceof Error ? e.message : String(e)));
       }
     }
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -939,13 +954,6 @@ function ChatWorkspace({
                 >
                   <Paperclip size={16} />
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => handleFilesChosen(e.target.files)}
-                />
                 <textarea
                   className="flex-1 min-h-9 max-h-32 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:border-blue-500 dark:text-gray-100 resize-none"
                   rows={1}

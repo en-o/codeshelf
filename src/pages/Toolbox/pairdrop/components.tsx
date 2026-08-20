@@ -383,8 +383,29 @@ export function MessageBubble({
             )
           ) : null}
           {isSelf && !uploading && (message.token || message.taken) ? (
-            <div className="mt-2 text-[10px] opacity-80">
-              {message.taken ? "对方已领取，中转缓存已清理" : "已发送"}
+            <div className="mt-2 space-y-1.5">
+              <div className="text-[10px] opacity-80">
+                {message.taken ? "对方已领取，中转缓存已清理" : "已发送"}
+              </div>
+              {/* 发送方指向自己的源文件，跟中转缓存的生死无关 */}
+              {message.localPath ? (
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => onCopyPath?.(message.localPath!)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] bg-white/20 hover:bg-white/30 text-white rounded transition-colors"
+                  >
+                    <Copy size={11} />
+                    复制路径
+                  </button>
+                  <button
+                    onClick={() => onOpenPath?.(message.localPath!)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] bg-white/20 hover:bg-white/30 text-white rounded transition-colors"
+                  >
+                    <FolderOpen size={11} />
+                    打开位置
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
