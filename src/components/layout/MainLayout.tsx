@@ -31,7 +31,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   // Use the 1:1 classes from index.css
   return (
-    <div className="flex w-full h-screen overflow-hidden bg-gray-50 text-gray-900 rounded-xl">
+    <div className="relative flex w-full h-screen overflow-hidden bg-gray-50 text-gray-900 rounded-xl">
       <Sidebar currentPage={currentPage} onPageChange={setCurrentPage} />
 
       <div className={`re-main-wrap ${sidebarCollapsed ? 'expanded' : ''}`}>
@@ -45,6 +45,13 @@ export function MainLayout({ children }: MainLayoutProps) {
           </p>
         </footer>
       </div>
+
+      {/* 透明无边框窗口放在纯白桌面上时，系统阴影在部分机型上几乎不可见。
+          用覆盖层画一圈稳定的内边框，避免被 fixed 侧栏或页面背景盖住。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[100] rounded-xl border border-black/[0.12] dark:border-white/[0.12]"
+      />
     </div>
   );
 }

@@ -2400,6 +2400,105 @@ async mcpGatewayInternalEndpoint() : Promise<Result<McpGatewayInternalEndpoint |
     else return { status: "error", error: e  as any };
 }
 },
+async dshEnvStatus() : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_env_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 列出所有检测到的 node（含版本不够的），界面用它做下拉。
+ */
+async dshListNodes() : Promise<Result<NodeCandidate[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_list_nodes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 给界面标注「哪些模型 dsh 用得了」。窗口推断只有一份实现（在这里），
+ * 前端不要另抄一份 —— 抄了迟早两边不一致。
+ */
+async dshModelWindows(providers: DshProviderSpec[]) : Promise<Result<DshModelWindow[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_model_windows", { providers }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 手动指定用哪个 node。传 None 恢复自动选择。
+ * 
+ * 版本不够的直接拒绝：dsh 在低版本上是**加载插件树时**失败，
+ * 错误信息是 `Promise.withResolvers is not a function` 这种，
+ * 让人以为是 dsh 坏了。不如在这里挡住并说清楚。
+ */
+async dshSetNode(path: string | null) : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_set_node", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 安装/重装 dsh 与 profile。全过程日志按行发 `dsh-install-log` 事件。
+ */
+async dshInstall() : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_install") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 卸载：只删我们自己那一个目录。
+ */
+async dshUninstall() : Promise<Result<DshEnvStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_uninstall") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async dshWebStatus() : Promise<Result<DshWebStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_web_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 启动（或复用）dsh 的 Web UI，返回它的地址；界面由前端 iframe 内嵌。
+ * 
+ * `config` 与引擎用的是同一份（工作目录 / 模型 / 端点 / 密钥 / 路由），
+ * 通过环境变量注入 —— 官方界面因此直接用上用户在 CodeShelf 里配的供应商，
+ * 而不是让人再填一次 DeepSeek 的 key。
+ */
+async dshWebOpen(config: DshLaunchConfig) : Promise<Result<DshWebStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_web_open", { config }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async dshWebStop() : Promise<Result<DshWebStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dsh_web_stop") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async chatListTools() : Promise<Result<ToolSchema[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("chat_list_tools") };
@@ -3152,6 +3251,42 @@ isRosetta: boolean;
  */
 mismatch: boolean }
 /**
+ * 一条访问控制规则：某个访问路径需要密码才能看。
+ * 
+ * 「锁整站」= path `/` + prefix，「锁子目录」= path `/private` + prefix，
+ * 「锁单个文件」= path `/docs/salary.pdf` + exact。
+ */
+export type AuthRule = { id: string; 
+/**
+ * **访问路径**（URL 上的路径），不是磁盘路径
+ */
+path: string; 
+/**
+ * "prefix" = 该路径及其下所有内容；"exact" = 只有这一个路径
+ */
+matchKind: string; 
+/**
+ * 登录页上给用户看的说明
+ */
+label: string | null; 
+/**
+ * `v1$<轮数>$<salt_hex>$<hash_hex>`。带版本前缀，以后换算法时老配置还能认出来。
+ */
+passwordHash: string; enabled?: boolean }
+/**
+ * 前端提交的规则。密码留空表示**沿用原密码** —— 没有这条语义，
+ * 用户每次编辑服务（改个端口）都会把已设好的密码清掉。
+ */
+export type AuthRuleInput = { 
+/**
+ * 编辑已有规则时带上；新建时为空
+ */
+id: string | null; path: string; matchKind: string | null; label: string | null; 
+/**
+ * 明文密码，只在设置/修改时传；留空 = 用 id 找回原来的哈希
+ */
+password: string | null; enabled: boolean | null }
+/**
  * 自动发送配置
  */
 export type AutoSendConfig = { 
@@ -3235,14 +3370,28 @@ useMcpGatewayTools?: boolean | null;
 /**
  * 当前生效的上下文压缩版本号（如 "v2"）。None 表示从未压缩
  */
-currentCompactionVersion?: string | null }
-export type ChatSessionSummary = { id: string; title: string; providerId: string; modelId: string; createdAt: string; updatedAt: string; messageCount: number; pinned?: boolean | null }
+currentCompactionVersion?: string | null; 
+/**
+ * 对话引擎："builtin"（默认，内置 agent 循环）或 "dsh"（DeepSeek Harness 子进程）。
+ * None = builtin，老会话不受影响。
+ */
+engine?: string | null }
+export type ChatSessionSummary = { id: string; title: string; providerId: string; modelId: string; createdAt: string; updatedAt: string; messageCount: number; pinned?: boolean | null; 
+/**
+ * 引擎标记，列表按它分流到「对话」或「dsh」页；None = builtin
+ */
+engine?: string | null }
 export type ChatStreamMessage = { role: string; 
 /**
  * string 或 OpenAI 多模态内容数组
  */
 content: JsonValue; reasoning_content?: string | null; tool_calls?: JsonValue[] | null; tool_call_id?: string | null; name?: string | null }
-export type ChatStreamRequest = { requestId: string; providerId: string; model: string; baseUrl: string; apiKey: string | null; thinking: boolean | null; stream: boolean | null; messages: ChatStreamMessage[]; temperature: number | null; maxTokens: number | null; topP: number | null; frequencyPenalty: number | null; presencePenalty: number | null; tools?: JsonValue[] | null; toolChoice?: JsonValue | null }
+export type ChatStreamRequest = { requestId: string; providerId: string; model: string; baseUrl: string; apiKey: string | null; thinking: boolean | null; stream: boolean | null; messages: ChatStreamMessage[]; temperature: number | null; maxTokens: number | null; topP: number | null; frequencyPenalty: number | null; presencePenalty: number | null; tools?: JsonValue[] | null; toolChoice?: JsonValue | null; 
+/**
+ * 供应商协议。缺省（None）走 OpenAI 兼容格式；"anthropic" 走 Claude 原生
+ * `/v1/messages`（见 chat_anthropic.rs）。前端按供应商预设决定。
+ */
+protocol?: string | null }
 export type ChatTask = { id: string; subject: string; description: string; activeForm: string | null; status: string; createdAt: string; updatedAt: string }
 /**
  * Claude Code 安装信息
@@ -3319,7 +3468,11 @@ export type ConflictFileContent = { file: string; base: string | null; current: 
  */
 export type ConnectedClient = { id: string; addr: string; connectedAt: number; lastActivity: number; bytesSent: number; bytesReceived: number }
 export type CreateApiChatSessionInput = { title: string | null; providerId: string; modelId: string; selectedEndpointIds?: string[] }
-export type CreateChatSessionInput = { title: string | null; providerId: string; modelId: string }
+export type CreateChatSessionInput = { title: string | null; providerId: string; modelId: string; 
+/**
+ * "dsh" 由 dsh 页创建时传入；缺省 builtin
+ */
+engine?: string | null }
 export type CreateProjectInput = { name: string; path: string; tags: string[] | null; labels: string[] | null }
 export type CursorPosition = { x: number; y: number }
 export type DailyActivity = { date: string; count: number }
@@ -3413,6 +3566,78 @@ export type DownloadTask = { id: string; url: string; savePath: string; fileName
  * 重试次数上限，来自创建时的 DownloadConfig；旧数据无此字段，缺省 3
  */
 maxRetries?: number; createdAt: string; updatedAt: string }
+export type DshEnvStatus = { 
+/**
+ * 选中的 node 可执行文件（优先满足最低版本的那个）
+ */
+nodePath: string | null; nodeVersion: string | null; 
+/**
+ * node 存在且主版本号 >= NODE_MIN_MAJOR
+ */
+nodeOk: boolean; nodeMinMajor: number; npmPath: string | null; 
+/**
+ * dsh 已装进数据目录且入口文件存在
+ */
+installed: boolean; installedVersion: string | null; targetVersion: string; root: string; home: string; 
+/**
+ * 选中 node 的来源标签（nvm / PATH / 系统目录）
+ */
+nodeSource: string | null; 
+/**
+ * 当前用的是用户手动指定的那个
+ */
+nodePinned: boolean; 
+/**
+ * 检测到 nvm 时给出它的根目录；界面据此显示 `nvm install 22` 之类的指引
+ */
+nvmRoot: string | null; 
+/**
+ * nvm 里装了几个版本（含不满足要求的）
+ */
+nvmVersions: number }
+/**
+ * 启动 dsh 需要的一切：工作目录 + 模型来源。
+ */
+export type DshLaunchConfig = { 
+/**
+ * dsh 的默认工作目录（它自己的界面里还能再加工作区）
+ */
+cwd: string; 
+/**
+ * 当前选中的供应商 id（CodeShelf 侧），决定 dsh 的默认路由
+ */
+providerId: string; model: string; 
+/**
+ * CodeShelf「模型」页里所有启用的供应商，一一映射成 dsh 的模型路由。
+ * 传全量而不只是选中那个：dsh 界面里的模型下拉要能列出用户配的全部模型，
+ * 且每条各用各的端点与密钥（否则选 A 家的模型会拿 B 家的地址去打）。
+ */
+providers?: DshProviderSpec[] }
+/**
+ * 一个模型在 dsh 里能不能用（窗口够不够）
+ */
+export type DshModelWindow = { providerId: string; model: string; contextWindow: number; 
+/**
+ * 窗口够 dsh 塞下它自己的系统提示
+ */
+usable: boolean }
+/**
+ * CodeShelf 里的一个供应商，映射成 dsh 的一条模型路由。
+ */
+export type DshProviderSpec = { 
+/**
+ * CodeShelf 的供应商 id，用来拼路由名与环境变量名
+ */
+id: string; name: string; baseUrl: string; apiKey: string | null; 
+/**
+ * "anthropic-messages" 或 "openai-completions"（缺省后者）
+ */
+api: string | null; 
+/**
+ * 该供应商下启用的模型名
+ */
+models: string[] }
+export type DshWebStatus = { running: boolean; url: string | null; pid: number | null }
 /**
  * 编辑器配置
  */
@@ -3670,6 +3895,22 @@ implications: string[] }
  * 网卡 URL 信息（用于多网卡环境下生成多个 QR）
  */
 export type NetworkUrl = { interface: string; ip: string; url: string }
+/**
+ * 一个可选的 node，供界面列出来让用户挑。
+ */
+export type NodeCandidate = { path: string; version: string; major: number; 
+/**
+ * 来源标签："nvm" / "PATH" / "系统目录"，界面直接显示
+ */
+source: string; 
+/**
+ * 满足 dsh 的最低版本要求
+ */
+usable: boolean; 
+/**
+ * 用户手动指定的就是这一个
+ */
+pinned: boolean }
 export type NodeJobDirection = "backend" | "frontend" | "fullstack"
 export type NodeTone = "professional" | "concise"
 /**
@@ -3842,7 +4083,12 @@ proxies: ProxyConfig[];
 /**
  * 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
  */
-exposeLan?: boolean; status?: string; createdAt: string }
+exposeLan?: boolean; 
+/**
+ * 访问控制规则。`default` 不能省：老配置文件里没有这个字段，
+ * 缺了它整份配置会解析失败 —— 用户的所有服务一次性消失。
+ */
+authRules?: AuthRule[]; status?: string; createdAt: string }
 /**
  * 创建服务的输入
  */
@@ -3862,7 +4108,11 @@ proxies: ProxyConfig[] | null;
 /**
  * 对局域网开放；缺省 false（只绑 loopback）
  */
-exposeLan?: boolean | null }
+exposeLan?: boolean | null; 
+/**
+ * 访问控制规则；`None` = 保持现有规则不变
+ */
+authRules?: AuthRuleInput[] | null }
 /**
  * 单个目标的检查结果：四层各一条，便于定位卡在哪一步。
  */

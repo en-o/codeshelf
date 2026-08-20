@@ -580,6 +580,7 @@ export function ChatPage() {
         model: selected.model.model,
         baseUrl: selected.baseUrl,
         apiKey: selected.apiKey,
+        protocol: selected.protocol,
       });
       const next: ChatSession = { ...activeSession, currentCompactionVersion: res.version };
       await persistSession(next);

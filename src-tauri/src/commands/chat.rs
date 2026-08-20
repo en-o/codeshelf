@@ -37,6 +37,10 @@ pub struct ChatStreamRequest {
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// 供应商协议。缺省（None）走 OpenAI 兼容格式；"anthropic" 走 Claude 原生
+    /// `/v1/messages`（见 chat_anthropic.rs）。前端按供应商预设决定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -95,7 +99,8 @@ pub struct ChatStreamEvent {
 }
 
 impl ChatStreamEvent {
-    fn new(request_id: &str) -> Self {
+    /// `pub(crate)`：Anthropic 适配（chat_anthropic.rs）要往同一个事件通道发同样的事件
+    pub(crate) fn new(request_id: &str) -> Self {
         Self {
             request_id: request_id.to_string(),
             delta: None,
@@ -231,11 +236,12 @@ struct SessionDbRow {
     allowed_cwd: Option<String>,
     use_mcp_gateway_tools: Option<i64>,
     current_compaction_version: Option<String>,
+    engine: Option<String>,
 }
 
 const SESSION_SELECT: &str = "SELECT id, title, provider_id, model_id, created_at, updated_at,
     system_prompt, temperature, max_tokens, top_p, frequency_penalty, presence_penalty,
-    pinned, allowed_cwd, use_mcp_gateway_tools, current_compaction_version FROM chat_sessions";
+    pinned, allowed_cwd, use_mcp_gateway_tools, current_compaction_version, engine FROM chat_sessions";
 
 #[derive(sqlx::FromRow)]
 struct MessageDbRow {
@@ -315,6 +321,7 @@ fn session_from_row(row: SessionDbRow) -> ChatSession {
         allowed_cwd: row.allowed_cwd,
         use_mcp_gateway_tools: row.use_mcp_gateway_tools.map(|x| x != 0),
         current_compaction_version: row.current_compaction_version,
+        engine: row.engine,
     }
 }
 
@@ -396,8 +403,8 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
             id, title, provider_id, model_id, created_at, updated_at,
             system_prompt, temperature, max_tokens, top_p, frequency_penalty,
             presence_penalty, pinned, allowed_cwd, use_mcp_gateway_tools,
-            current_compaction_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            current_compaction_version, engine
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             provider_id = excluded.provider_id,
@@ -412,7 +419,8 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
             pinned = excluded.pinned,
             allowed_cwd = excluded.allowed_cwd,
             use_mcp_gateway_tools = excluded.use_mcp_gateway_tools,
-            current_compaction_version = excluded.current_compaction_version",
+            current_compaction_version = excluded.current_compaction_version,
+            engine = excluded.engine",
     )
     .bind(&session.id)
     .bind(&session.title)
@@ -430,6 +438,7 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
     .bind(&session.allowed_cwd)
     .bind(session.use_mcp_gateway_tools.map(|x| x as i64))
     .bind(&session.current_compaction_version)
+    .bind(&session.engine)
     .execute(&mut *tx)
     .await
     .map_err(|e| crate::error::AppError::from(format!("upsert chat_sessions 失败: {}", e)))?;
@@ -525,8 +534,17 @@ async fn write_session_full(session: &ChatSession) -> AppResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub async fn list_chat_sessions() -> AppResult<Vec<ChatSessionSummary>> {
-    let rows: Vec<(String, String, String, String, String, String, Option<i64>)> = sqlx::query_as(
-        "SELECT id, title, provider_id, model_id, created_at, updated_at, pinned
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<i64>,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT id, title, provider_id, model_id, created_at, updated_at, pinned, engine
          FROM chat_sessions ORDER BY updated_at DESC",
     )
     .fetch_all(pool())
@@ -552,7 +570,7 @@ pub async fn list_chat_sessions() -> AppResult<Vec<ChatSessionSummary>> {
     Ok(rows
         .into_iter()
         .map(
-            |(id, title, provider_id, model_id, created_at, updated_at, pinned)| {
+            |(id, title, provider_id, model_id, created_at, updated_at, pinned, engine)| {
                 let message_count = counts.get(&id).copied().unwrap_or(0) as usize;
                 ChatSessionSummary {
                     id,
@@ -563,6 +581,7 @@ pub async fn list_chat_sessions() -> AppResult<Vec<ChatSessionSummary>> {
                     updated_at,
                     message_count,
                     pinned: pinned.map(|x| x != 0),
+                    engine,
                 }
             },
         )
@@ -583,6 +602,9 @@ pub struct CreateChatSessionInput {
     pub title: Option<String>,
     pub provider_id: String,
     pub model_id: String,
+    /// "dsh" 由 dsh 页创建时传入；缺省 builtin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 #[tauri::command]
@@ -609,6 +631,7 @@ pub async fn create_chat_session(input: CreateChatSessionInput) -> AppResult<Cha
         allowed_cwd: None,
         use_mcp_gateway_tools: None,
         current_compaction_version: None,
+        engine: input.engine,
     };
     write_session_full(&session).await?;
     Ok(session)
@@ -1001,6 +1024,9 @@ fn build_chat_payload(
 #[tauri::command]
 #[specta::specta]
 pub async fn chat_complete(request: ChatStreamRequest) -> AppResult<String> {
+    if crate::commands::chat_anthropic::is_anthropic(&request) {
+        return crate::commands::chat_anthropic::complete(&request, HTTP_CLIENT.clone()).await;
+    }
     let (url, headers, body) = build_chat_payload(&request, false)?;
     let client = HTTP_CLIENT.clone();
     let response = client
@@ -1036,6 +1062,17 @@ pub async fn chat_complete(request: ChatStreamRequest) -> AppResult<String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn chat_stream(app: AppHandle, request: ChatStreamRequest) -> AppResult<()> {
+    // Anthropic 走另一套请求与流解析，但取消（CHAT_ABORTS）与事件出口共用这里的机制
+    if crate::commands::chat_anthropic::is_anthropic(&request) {
+        let request_id = request.request_id.clone();
+        let client = HTTP_CLIENT.clone();
+        let handle = tokio::spawn(async move {
+            crate::commands::chat_anthropic::stream(app, request, client).await;
+        });
+        CHAT_ABORTS.write().await.insert(request_id, handle.abort_handle());
+        return Ok(());
+    }
+
     let request_id = request.request_id.clone();
     let use_stream = request.stream.unwrap_or(true);
     let (url, headers, body) = build_chat_payload(&request, use_stream)?;

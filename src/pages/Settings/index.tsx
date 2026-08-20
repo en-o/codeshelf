@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useSettingsStore, Theme } from "@/stores/settingsStore";
 import { useEditorsStore, TerminalConfig } from "@/stores/editorsStore";
 import { useProjectsStore } from "@/stores/projectsStore";
-import { Monitor, Code, Terminal, Search, ChevronRight, Tag, Download, Info, Keyboard, Link2, Server, MousePointerClick } from "lucide-react";
+import { Monitor, Code, Terminal, Search, ChevronRight, Tag, Download, Info, Keyboard, Link2, Server, MousePointerClick, Bot } from "lucide-react";
 import { PageHeader } from "@/components/common";
 import { getVersion } from "@tauri-apps/api/app";
 import { EditorSettings } from "./EditorSettings";
@@ -16,8 +16,9 @@ import { ShortcutSettings } from "./ShortcutSettings";
 import { ChatBridgeSettings } from "./ChatBridgeSettings";
 import { McpGatewaySettings } from "./McpGatewaySettings";
 import { ShellIntegrationSettings } from "./ShellIntegrationSettings";
+import { DshSettings } from "./DshSettings";
 
-type SettingsSection = "appearance" | "editor" | "terminal" | "scan" | "labels" | "shortcuts" | "chatBridge" | "mcpGateway" | "shellIntegration" | "update" | "about" | null;
+type SettingsSection = "appearance" | "editor" | "terminal" | "scan" | "labels" | "shortcuts" | "chatBridge" | "mcpGateway" | "shellIntegration" | "dsh" | "update" | "about" | null;
 
 export function SettingsPage() {
   const theme = useSettingsStore((s) => s.theme);
@@ -131,6 +132,14 @@ export function SettingsPage() {
       icon: MousePointerClick,
       value: "快速添加",
       component: ShellIntegrationSettings,
+    },
+    {
+      id: "dsh" as const,
+      title: "dsh 引擎",
+      description: "DeepSeek Harness，会话可切换的对话引擎",
+      icon: Bot,
+      value: "点击配置",
+      component: DshSettings,
     },
     {
       id: "update" as const,

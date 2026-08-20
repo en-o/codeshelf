@@ -83,6 +83,7 @@ pub async fn create_server(input: ServerConfigInput) -> AppResult<ServerConfig> 
         index_page,
         proxies: input.proxies.unwrap_or_default(),
         expose_lan: input.expose_lan.unwrap_or(false),
+        auth_rules: super::auth::merge_auth_rules(input.auth_rules, &[])?,
         status: "stopped".to_string(),
         created_at: current_time(),
     };
@@ -361,6 +362,10 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> AppRe
     // 处理首页设置
     let index_page = input.index_page.filter(|s| !s.is_empty());
 
+    // 访问控制规则：密码留空的沿用 old_config 里的哈希。
+    // 必须在拿写锁之前算好 —— 失败时直接返回，不能留下改了一半的配置。
+    let auth_rules = super::auth::merge_auth_rules(input.auth_rules, &old_config.auth_rules)?;
+
     // 更新配置
     {
         let mut servers = SERVERS.lock().await;
@@ -375,6 +380,7 @@ pub async fn update_server(server_id: String, input: ServerConfigInput) -> AppRe
             server.index_page = index_page;
             server.proxies = input.proxies.unwrap_or_default();
             server.expose_lan = input.expose_lan.unwrap_or(false);
+            server.auth_rules = auth_rules;
         }
     }
 

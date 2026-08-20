@@ -918,7 +918,7 @@ checksum = "3f88a43d011fc4a6876cb7344703e297c71dda42494fee094d5f7c76bf13f746"
 
 [[package]]
 name = "codeshelf"
-version = "0.1.45"
+version = "0.1.48"
 dependencies = [
  "arboard",
  "axum",
@@ -942,6 +942,7 @@ dependencies = [
  "russh-config",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "socket2 0.5.10",
  "specta",
  "specta-typescript",

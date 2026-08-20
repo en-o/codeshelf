@@ -10,6 +10,8 @@ export interface ModelOption {
   baseUrl: string;
   apiKey?: string;
   key: string;
+  /** 供应商协议；缺省 OpenAI 兼容。"anthropic" 走 Claude 原生 /v1/messages */
+  protocol?: "anthropic";
 }
 
 export function buildModelOptions(providers: AiProviderConfig[]): ModelOption[] {
@@ -26,6 +28,8 @@ export function buildModelOptions(providers: AiProviderConfig[]): ModelOption[] 
         baseUrl: p.baseUrl,
         apiKey: p.apiKey,
         key: `${p.id}:${m.id}`,
+        // 协议在这里判一次就够：所有发请求的地方都从 ModelOption 取
+        protocol: p.presetKey === "anthropic" ? "anthropic" : undefined,
       });
     }
   }

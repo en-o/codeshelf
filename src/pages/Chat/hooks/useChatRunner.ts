@@ -95,6 +95,7 @@ export function useChatRunner(deps: ChatRunnerDeps) {
         model: selected.model.model,
         baseUrl: selected.baseUrl,
         apiKey: selected.apiKey,
+        protocol: selected.protocol,
         keep: COMPACT_KEEP,
       });
       const next: ChatSession = { ...session, currentCompactionVersion: res.version };
@@ -197,6 +198,7 @@ export function useChatRunner(deps: ChatRunnerDeps) {
           model: selected.model.model,
           baseUrl: selected.baseUrl,
           apiKey: selected.apiKey,
+          protocol: selected.protocol,
           thinking: selected.model.thinking,
           stream: selected.model.stream !== false,
           temperature: session.temperature,

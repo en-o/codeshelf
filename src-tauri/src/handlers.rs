@@ -3,7 +3,7 @@
 // 通过 tauri-specta 注册：调试构建时会把命令签名导出为 src/bindings.ts，供前端类型安全调用。
 
 use crate::commands::{
-    api_chat, chat, chat_bridge, extras, git, project, resume, resume_docx, resume_node_agent,
+    api_chat, chat, chat_bridge, dsh, extras, git, project, resume, resume_docx, resume_node_agent,
     settings, shell_integration, stats, storage_admin, system, toolbox, tools, workflows,
 };
 use crate::{keyboard_hook, mcp_gateway};
@@ -288,6 +288,16 @@ pub fn make_builder() -> Builder<tauri::Wry> {
         // MCP gateway
         mcp_gateway::mcp_gateway_status,
         mcp_gateway::mcp_gateway_internal_endpoint,
+        // DeepSeek Harness（dsh）引擎
+        dsh::dsh_env_status,
+        dsh::dsh_list_nodes,
+        dsh::dsh_model_windows,
+        dsh::dsh_set_node,
+        dsh::dsh_install,
+        dsh::dsh_uninstall,
+        dsh::dsh_web_status,
+        dsh::dsh_web_open,
+        dsh::dsh_web_stop,
         // Tools / Tasks
         tools::chat_list_tools,
         tools::chat_execute_tool,

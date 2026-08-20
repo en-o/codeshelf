@@ -148,7 +148,7 @@ export interface AiProviderConfig {
   id: string;
   name: string;
   providerType: "preset" | "custom";
-  presetKey?: "bailian" | "deepseek" | "openai" | "ollama" | "moonshot";
+  presetKey?: "bailian" | "deepseek" | "openai" | "ollama" | "moonshot" | "anthropic";
   baseUrl: string;
   apiKey?: string;
   enabled: boolean;
@@ -214,7 +214,11 @@ export interface ChatSession {
   useMcpGatewayTools?: boolean;
   /** 当前生效的上下文压缩版本号（如 "v2"）；缺省表示从未压缩 */
   currentCompactionVersion?: string;
+  /** 对话引擎；缺省 "builtin"。"dsh" 由 DeepSeek Harness 子进程接管 agent 循环 */
+  engine?: ChatEngine;
 }
+
+export type ChatEngine = "builtin" | "dsh";
 
 export interface ChatSessionSummary {
   id: string;
@@ -225,6 +229,8 @@ export interface ChatSessionSummary {
   updatedAt: string;
   messageCount: number;
   pinned?: boolean;
+  /** 引擎标记，列表按它分流到「对话」或「dsh」页；缺省 builtin */
+  engine?: ChatEngine;
 }
 
 // ============== 应用快捷键 ==============

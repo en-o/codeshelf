@@ -404,10 +404,49 @@ pub struct ServerConfig {
     /// 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1。
     #[serde(default)]
     pub expose_lan: bool,
+    /// 访问控制规则。`default` 不能省：老配置文件里没有这个字段，
+    /// 缺了它整份配置会解析失败 —— 用户的所有服务一次性消失。
+    #[serde(default)]
+    pub auth_rules: Vec<AuthRule>,
     #[serde(default = "default_stopped")]
     pub status: String, // "running", "stopped"
     #[serde(alias = "created_at")]
     pub created_at: String,
+}
+
+/// 一条访问控制规则：某个访问路径需要密码才能看。
+///
+/// 「锁整站」= path `/` + prefix，「锁子目录」= path `/private` + prefix，
+/// 「锁单个文件」= path `/docs/salary.pdf` + exact。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthRule {
+    pub id: String,
+    /// **访问路径**（URL 上的路径），不是磁盘路径
+    pub path: String,
+    /// "prefix" = 该路径及其下所有内容；"exact" = 只有这一个路径
+    pub match_kind: String,
+    /// 登录页上给用户看的说明
+    pub label: Option<String>,
+    /// `v1$<轮数>$<salt_hex>$<hash_hex>`。带版本前缀，以后换算法时老配置还能认出来。
+    pub password_hash: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// 前端提交的规则。密码留空表示**沿用原密码** —— 没有这条语义，
+/// 用户每次编辑服务（改个端口）都会把已设好的密码清掉。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthRuleInput {
+    /// 编辑已有规则时带上；新建时为空
+    pub id: Option<String>,
+    pub path: String,
+    pub match_kind: Option<String>,
+    pub label: Option<String>,
+    /// 明文密码，只在设置/修改时传；留空 = 用 id 找回原来的哈希
+    pub password: Option<String>,
+    pub enabled: Option<bool>,
 }
 
 /// 代理配置
@@ -437,6 +476,9 @@ pub struct ServerConfigInput {
     /// 对局域网开放；缺省 false（只绑 loopback）
     #[serde(default)]
     pub expose_lan: Option<bool>,
+    /// 访问控制规则；`None` = 保持现有规则不变
+    #[serde(default)]
+    pub auth_rules: Option<Vec<AuthRuleInput>>,
 }
 
 /// 服务访问日志
@@ -536,6 +578,9 @@ pub struct NginxConfigOptions {
     pub proxies: Option<Vec<ProxyConfig>>,
     pub access_log: Option<bool>,
     pub error_log: Option<bool>,
+    /// 访问控制规则，导出成 nginx 的 auth_basic 段
+    #[serde(default)]
+    pub auth_rules: Option<Vec<AuthRule>>,
 }
 
 // ============== 工具函数 ==============

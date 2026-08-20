@@ -3,6 +3,8 @@
 // 子模块：
 // - crud:    CRUD 命令（create/stop/remove/get/get_servers/update）
 // - runtime: start_server 与底层 axum 运行/代理处理
+// - directory_listing: 没有首页文件时的目录索引
+// - auth:    按路径加密码的访问控制（登录页 + Cookie 会话）
 // - nginx:   生成等价 nginx 配置
 
 use super::ServerConfig;
@@ -15,7 +17,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod auth;
 mod crud;
+mod directory_listing;
 mod nginx;
 mod runtime;
 

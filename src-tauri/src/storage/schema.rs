@@ -325,6 +325,10 @@ pub struct ChatSession {
     /// 当前生效的上下文压缩版本号（如 "v2"）。None 表示从未压缩
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_compaction_version: Option<String>,
+    /// 对话引擎："builtin"（默认，内置 agent 循环）或 "dsh"（DeepSeek Harness 子进程）。
+    /// None = builtin，老会话不受影响。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 // ============== 上下文压缩 ==============
@@ -369,6 +373,9 @@ pub struct ChatSessionSummary {
     pub message_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned: Option<bool>,
+    /// 引擎标记，列表按它分流到「对话」或「dsh」页；None = builtin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 /// 获取当前 ISO 时间字符串

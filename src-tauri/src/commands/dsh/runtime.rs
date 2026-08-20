@@ -1,0 +1,929 @@
+// dsh 运行时：环境探测 + 托管安装。
+//
+// 为什么是「托管安装」而不是用用户全局的 dsh：dsh 现在是 developer preview，
+// 官方明说会有破坏性变更。我们把版本 pin 死装进应用数据目录，用户机器上的
+// `npm i -g dsh` 升级到新 rc 时不会把 CodeShelf 的对话打挂。
+
+use crate::error::{AppError, AppResult};
+use crate::storage::{get_storage_config, write_atomic};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+
+/// 装哪个版本。**不要改成 latest** —— rc 版之间协议会变，出问题时用户看到的是
+/// 「对话卡住」而不是「版本不兼容」。升级此常量必须重跑 docs/specs/dsh-engine.md 的冒烟。
+pub const DSH_VERSION: &str = "0.1.0-rc.6";
+
+/// dsh 依赖 Promise.withResolvers / zlib.createZstdDecompress，Node 20 上插件树直接加载失败。
+pub const NODE_MIN_MAJOR: u32 = 22;
+
+/// 安装过程按行推给前端的事件名
+const INSTALL_LOG_EVENT: &str = "dsh-install-log";
+
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DshEnvStatus {
+    /// 选中的 node 可执行文件（优先满足最低版本的那个）
+    pub node_path: Option<String>,
+    pub node_version: Option<String>,
+    /// node 存在且主版本号 >= NODE_MIN_MAJOR
+    pub node_ok: bool,
+    pub node_min_major: u32,
+    pub npm_path: Option<String>,
+    /// dsh 已装进数据目录且入口文件存在
+    pub installed: bool,
+    pub installed_version: Option<String>,
+    pub target_version: String,
+    pub root: String,
+    pub home: String,
+    /// 选中 node 的来源标签（nvm / PATH / 系统目录）
+    pub node_source: Option<String>,
+    /// 当前用的是用户手动指定的那个
+    pub node_pinned: bool,
+    /// 检测到 nvm 时给出它的根目录；界面据此显示 `nvm install 22` 之类的指引
+    pub nvm_root: Option<String>,
+    /// nvm 里装了几个版本（含不满足要求的）
+    pub nvm_versions: usize,
+}
+
+// ========== 路径 ==========
+
+/// 所有 dsh 相关文件都在这一个目录下，卸载 = 删掉它。
+pub fn dsh_root() -> AppResult<PathBuf> {
+    Ok(get_storage_config()?.data_dir.join("dsh"))
+}
+
+/// 传给子进程的 $DSH_HOME（profile 与 dsh 自己的状态都落在这里）
+pub fn dsh_home() -> AppResult<PathBuf> {
+    Ok(dsh_root()?.join("home"))
+}
+
+/// dsh 的 Node 入口。直接跑这个 js 而不是 .bin/dsh 包装脚本：
+/// 包装脚本在 Windows 上是 .cmd，还要经过一层 shell，路径带空格时容易出岔子。
+pub fn dsh_entry_js() -> AppResult<PathBuf> {
+    Ok(dsh_root()?
+        .join("node_modules")
+        .join("@deepseek-ai")
+        .join("dsh")
+        .join("lib")
+        .join("bin.js"))
+}
+
+// ========== node / npm 探测 ==========
+
+/// PATH 之外还要找的目录：macOS 从 Dock 启动时只继承最小 PATH，nvm 装的 node 全在
+/// ~/.nvm/versions/node/*/bin 下。复用 Claude Code 工具箱里同一份实现，不再抄一遍。
+#[cfg(not(target_os = "windows"))]
+fn extra_bin_dirs() -> Vec<PathBuf> {
+    crate::commands::toolbox::claude_code::get_extra_path_dirs()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn extra_bin_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(program_files) = std::env::var("ProgramFiles") {
+        dirs.push(PathBuf::from(program_files).join("nodejs"));
+    }
+    if let Some(local) = dirs::data_local_dir() {
+        dirs.push(local.join("Programs").join("nodejs"));
+        // fnm / volta 常见落点
+        dirs.push(local.join("fnm_multishells"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        dirs.push(home.join("AppData").join("Roaming").join("npm"));
+    }
+    dirs
+}
+
+#[cfg(target_os = "windows")]
+const NODE_EXE: &str = "node.exe";
+#[cfg(not(target_os = "windows"))]
+const NODE_EXE: &str = "node";
+
+/// 给子进程用的 PATH：系统 PATH + 常见安装目录，选中的 node 所在目录排最前
+/// （npm 会用 PATH 里第一个 node 跑自己，顺序错了就会用回旧版本）。
+fn augmented_path(node_dir: Option<&Path>) -> String {
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(dir) = node_dir {
+        parts.push(dir.to_string_lossy().to_string());
+    }
+    for p in std::env::var("PATH").unwrap_or_default().split(sep) {
+        if !p.is_empty() && !parts.iter().any(|x| x == p) {
+            parts.push(p.to_string());
+        }
+    }
+    for dir in extra_bin_dirs() {
+        let s = dir.to_string_lossy().to_string();
+        if !parts.iter().any(|x| x == &s) {
+            parts.push(s);
+        }
+    }
+    parts.join(&sep.to_string())
+}
+
+fn parse_major(version: &str) -> Option<u32> {
+    version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// 跑 `<node> -v`。探测失败（不存在/不可执行）返回 None。
+async fn probe_node(exe: &Path) -> Option<(String, u32)> {
+    let mut cmd = Command::new(exe);
+    cmd.arg("-v").env("PATH", augmented_path(None));
+    crate::process_guard::configure(&mut cmd);
+    let out = cmd.output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let major = parse_major(&version)?;
+    Some((version, major))
+}
+
+struct NodeInfo {
+    path: PathBuf,
+    version: String,
+    major: u32,
+}
+
+/// 一个可选的 node，供界面列出来让用户挑。
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeCandidate {
+    pub path: String,
+    pub version: String,
+    pub major: u32,
+    /// 来源标签："nvm" / "PATH" / "系统目录"，界面直接显示
+    pub source: String,
+    /// 满足 dsh 的最低版本要求
+    pub usable: bool,
+    /// 用户手动指定的就是这一个
+    pub pinned: bool,
+}
+
+/// nvm 的根目录（$NVM_DIR，缺省 ~/.nvm；Windows 上是 nvm-windows 的 %NVM_HOME%）。
+/// 只认目录存在与否，不去解析它的 shell 脚本 —— nvm 是 shell 函数，GUI 进程里
+/// 根本 source 不到，能用的只有它在磁盘上的版本目录。
+fn nvm_root() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let env_keys = ["NVM_HOME", "NVM_DIR"];
+    #[cfg(not(target_os = "windows"))]
+    let env_keys = ["NVM_DIR"];
+
+    for key in env_keys {
+        // 空串要当没设置：`env::var` 对 `NVM_DIR=` 返回 Ok("")，
+        // 照单全收会拼出相对路径，结果一个 nvm 版本都扫不到（本机实测踩过）。
+        let Ok(dir) = std::env::var(key) else { continue };
+        if dir.trim().is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(dir.trim());
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+    let default = dirs::home_dir()?.join(".nvm");
+    default.is_dir().then_some(default)
+}
+
+/// nvm 已装的所有版本目录里的 node 可执行文件。
+///
+/// 布局差异：nvm（POSIX）是 `<root>/versions/node/v22.1.0/bin/node`，
+/// nvm-windows 是 `<root>\v22.1.0\node.exe`，两种都扫。
+fn nvm_node_paths() -> Vec<PathBuf> {
+    let Some(root) = nvm_root() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for base in [root.join("versions").join("node"), root.clone()] {
+        let Ok(entries) = std::fs::read_dir(&base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            for exe in [dir.join("bin").join(NODE_EXE), dir.join(NODE_EXE)] {
+                if exe.is_file() {
+                    out.push(exe);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn is_nvm_path(path: &Path) -> bool {
+    nvm_root().is_some_and(|root| path.starts_with(&root))
+}
+
+/// 用户手动指定的 node 记在这里。放 dsh 自己的目录而不是应用设置：
+/// 卸载 dsh 就一起没了，不用在设置结构里留一个别处没人用的字段。
+fn pinned_node_file() -> AppResult<PathBuf> {
+    Ok(dsh_root()?.join("node.txt"))
+}
+
+fn read_pinned_node() -> Option<PathBuf> {
+    let path = std::fs::read_to_string(pinned_node_file().ok()?).ok()?;
+    let path = PathBuf::from(path.trim());
+    path.is_file().then_some(path)
+}
+
+/// 列出所有能跑起来的 node，按「可用的排前面、版本号从高到低」排序。
+async fn discover_nodes() -> Vec<NodeCandidate> {
+    let pinned = read_pinned_node();
+    let mut probes: Vec<(PathBuf, &str)> = vec![(PathBuf::from(NODE_EXE), "PATH")];
+    for path in nvm_node_paths() {
+        probes.push((path, "nvm"));
+    }
+    for dir in extra_bin_dirs() {
+        let exe = dir.join(NODE_EXE);
+        let source = if is_nvm_path(&exe) { "nvm" } else { "系统目录" };
+        probes.push((exe, source));
+    }
+
+    let mut out: Vec<NodeCandidate> = Vec::new();
+    for (path, source) in probes {
+        let Some((version, major)) = probe_node(&path).await else {
+            continue;
+        };
+        // 同一个版本可能被 PATH 和 nvm 目录各命中一次；PATH 那条先到，保留它即可
+        if out.iter().any(|c| c.version == version && c.source == source) {
+            continue;
+        }
+        out.push(NodeCandidate {
+            pinned: pinned.as_deref() == Some(path.as_path()),
+            path: path.to_string_lossy().to_string(),
+            version,
+            major,
+            source: source.to_string(),
+            usable: major >= NODE_MIN_MAJOR,
+        });
+    }
+    out.sort_by(|a, b| b.usable.cmp(&a.usable).then(b.major.cmp(&a.major)));
+    out
+}
+
+/// 选一个 node 用：用户指定的优先（前提是它还在、且版本够），
+/// 否则自动挑第一个满足最低版本的。
+///
+/// 都不满足时**仍然返回**找到的那个，好让界面能说清「你有 v20，但需要 v22」，
+/// 而不是笼统的「未找到 Node」。
+async fn find_node() -> Option<NodeInfo> {
+    if let Some(path) = read_pinned_node() {
+        if let Some((version, major)) = probe_node(&path).await {
+            if major >= NODE_MIN_MAJOR {
+                return Some(NodeInfo {
+                    path,
+                    version,
+                    major,
+                });
+            }
+        }
+    }
+
+    let mut candidates: Vec<PathBuf> = vec![PathBuf::from(NODE_EXE)];
+    candidates.extend(nvm_node_paths());
+    for dir in extra_bin_dirs() {
+        candidates.push(dir.join(NODE_EXE));
+    }
+
+    let mut fallback: Option<NodeInfo> = None;
+    for path in candidates {
+        let Some((version, major)) = probe_node(&path).await else {
+            continue;
+        };
+        let info = NodeInfo {
+            path,
+            version,
+            major,
+        };
+        if info.major >= NODE_MIN_MAJOR {
+            return Some(info);
+        }
+        if fallback.is_none() {
+            fallback = Some(info);
+        }
+    }
+    fallback
+}
+
+#[cfg(target_os = "windows")]
+const NPM_EXE: &str = "npm.cmd";
+#[cfg(not(target_os = "windows"))]
+const NPM_EXE: &str = "npm";
+
+/// npm 优先取选中 node 的同目录（nvm/官方包都是这个布局），保证 npm 与 node 版本配套；
+/// 否则退回 PATH 上的 npm。
+fn npm_for(node: Option<&NodeInfo>) -> Option<PathBuf> {
+    if let Some(dir) = node.and_then(|n| n.path.parent()) {
+        let sibling = dir.join(NPM_EXE);
+        if sibling.exists() {
+            return Some(sibling);
+        }
+    }
+    // 裸名字交给 PATH 解析；能不能跑起来在真正执行时才知道
+    Some(PathBuf::from(NPM_EXE))
+}
+
+// ========== 命令 ==========
+
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_env_status() -> AppResult<DshEnvStatus> {
+    let root = dsh_root()?;
+    let home = dsh_home()?;
+    let node = find_node().await;
+
+    let entry = dsh_entry_js()?;
+    let installed = entry.exists();
+    let installed_version = installed_dsh_version(&root);
+    let pinned = read_pinned_node();
+    let node_pinned = matches!(
+        (node.as_ref(), pinned.as_ref()),
+        (Some(n), Some(p)) if &n.path == p
+    );
+
+    Ok(DshEnvStatus {
+        node_source: node.as_ref().map(|n| {
+            if is_nvm_path(&n.path) {
+                "nvm".to_string()
+            } else if n.path.parent().is_none() {
+                "PATH".to_string()
+            } else {
+                "系统目录".to_string()
+            }
+        }),
+        node_path: node.as_ref().map(|n| n.path.to_string_lossy().to_string()),
+        node_version: node.as_ref().map(|n| n.version.clone()),
+        node_ok: node.as_ref().is_some_and(|n| n.major >= NODE_MIN_MAJOR),
+        node_min_major: NODE_MIN_MAJOR,
+        node_pinned,
+        npm_path: npm_for(node.as_ref()).map(|p| p.to_string_lossy().to_string()),
+        nvm_root: nvm_root().map(|p| p.to_string_lossy().to_string()),
+        nvm_versions: nvm_node_paths().len(),
+        installed,
+        installed_version,
+        target_version: DSH_VERSION.to_string(),
+        root: root.to_string_lossy().to_string(),
+        home: home.to_string_lossy().to_string(),
+    })
+}
+
+/// 一个模型在 dsh 里能不能用（窗口够不够）
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DshModelWindow {
+    pub provider_id: String,
+    pub model: String,
+    pub context_window: u32,
+    /// 窗口够 dsh 塞下它自己的系统提示
+    pub usable: bool,
+}
+
+/// 给界面标注「哪些模型 dsh 用得了」。窗口推断只有一份实现（在这里），
+/// 前端不要另抄一份 —— 抄了迟早两边不一致。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_model_windows(providers: Vec<DshProviderSpec>) -> AppResult<Vec<DshModelWindow>> {
+    Ok(providers
+        .iter()
+        .flat_map(|p| {
+            p.models.iter().map(|m| {
+                let context_window = infer_context_window(m);
+                DshModelWindow {
+                    provider_id: p.id.clone(),
+                    model: m.clone(),
+                    context_window,
+                    usable: context_window >= MIN_USABLE_CONTEXT_WINDOW,
+                }
+            })
+        })
+        .collect())
+}
+
+/// 列出所有检测到的 node（含版本不够的），界面用它做下拉。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_list_nodes() -> AppResult<Vec<NodeCandidate>> {
+    Ok(discover_nodes().await)
+}
+
+/// 手动指定用哪个 node。传 None 恢复自动选择。
+///
+/// 版本不够的直接拒绝：dsh 在低版本上是**加载插件树时**失败，
+/// 错误信息是 `Promise.withResolvers is not a function` 这种，
+/// 让人以为是 dsh 坏了。不如在这里挡住并说清楚。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_set_node(path: Option<String>) -> AppResult<DshEnvStatus> {
+    let file = pinned_node_file()?;
+    match path {
+        None => {
+            if file.exists() {
+                std::fs::remove_file(&file)?;
+            }
+        }
+        Some(path) => {
+            let candidate = PathBuf::from(path.trim());
+            let (version, major) = probe_node(&candidate)
+                .await
+                .ok_or_else(|| AppError::Invalid(format!("这个路径跑不起来：{}", candidate.display())))?;
+            if major < NODE_MIN_MAJOR {
+                return Err(AppError::Invalid(format!(
+                    "{} 是 {}，dsh 需要 v{} 及以上",
+                    candidate.display(),
+                    version,
+                    NODE_MIN_MAJOR
+                )));
+            }
+            std::fs::create_dir_all(dsh_root()?)?;
+            write_atomic(&file, candidate.to_string_lossy().as_bytes())?;
+        }
+    }
+    dsh_env_status().await
+}
+
+/// CodeShelf 里的一个供应商，映射成 dsh 的一条模型路由。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DshProviderSpec {
+    /// CodeShelf 的供应商 id，用来拼路由名与环境变量名
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+    /// "anthropic-messages" 或 "openai-completions"（缺省后者）
+    pub api: Option<String>,
+    /// 该供应商下启用的模型名
+    pub models: Vec<String>,
+}
+
+/// 路由名与环境变量名都得是「安全字符」：供应商 id 是应用生成的随机串，
+/// 但用户可能导入过带奇怪字符的配置，直接拼进 YAML key / env 名会出岔子。
+fn sanitize_id(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// 路由名（dsh 侧的 provider 名）
+pub fn route_id(provider_id: &str) -> String {
+    format!("cs-{}", sanitize_id(provider_id))
+}
+
+/// 该路由的密钥从哪个环境变量取。密钥只在进程环境里传，不写进任何文件。
+pub fn key_env_name(provider_id: &str) -> String {
+    format!("CODESHELF_KEY_{}", sanitize_id(provider_id).to_uppercase())
+}
+
+/// dsh 每轮都要注入自己的系统提示 + skill 目录，实测「你好」这种一句话
+/// 也要一万多 token。窗口小于这个数的模型**根本跑不了 dsh** ——
+/// 声明得再准也没用，请求一发就被供应商以 CONTEXT_WINDOW_EXCEEDED 拒绝。
+pub const MIN_USABLE_CONTEXT_WINDOW: u32 = 16_384;
+
+/// 推断不出来时的兜底窗口。**故意取小**：dsh 按声明的窗口决定塞多少上下文，
+/// 报大了不会被它拦住，而是等供应商回 400（实测 moonshot-v1-8k 上就是
+/// `exceeded model token limit: 8192 (requested: 11556)`）。宁可浪费也别超。
+const FALLBACK_CONTEXT_WINDOW: u32 = 32_768;
+
+/// 从模型名推断上下文窗口。
+///
+/// 手工声明的路由必须自己给 contextWindow —— 没有目录可继承。写死一个大数会在
+/// 小窗口模型上直接把请求打爆，所以按名字里的线索猜，猜不到就用保守兜底。
+///
+/// 只认「名字里明写了容量」和几个常见家族；判断不了的宁可小。
+pub fn infer_context_window(model: &str) -> u32 {
+    let m = model.to_ascii_lowercase();
+
+    // moonshot-v1-8k / qwen-turbo-128k / 某某-32k：名字里直接写了
+    let bytes = m.as_bytes();
+    for (i, w) in bytes.windows(1).enumerate() {
+        if w[0] != b'k' && w[0] != b'm' {
+            continue;
+        }
+        // 往前收数字
+        let mut start = i;
+        while start > 0 && bytes[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        if start == i {
+            continue;
+        }
+        // 数字后面必须是词尾或分隔符，避免把 "k8s" 这种误认
+        if bytes.get(i + 1).is_some_and(|c| c.is_ascii_alphanumeric()) {
+            continue;
+        }
+        if let Ok(n) = m[start..i].parse::<u32>() {
+            return match w[0] {
+                b'k' => n.saturating_mul(1024),
+                _ => n.saturating_mul(1_000_000),
+            };
+        }
+    }
+
+    // 常见家族的公开窗口
+    if m.contains("claude") {
+        return 200_000;
+    }
+    if m.contains("gpt-4o") || m.contains("gpt-4.1") || m.contains("gpt-5") {
+        return 128_000;
+    }
+    if m.contains("deepseek") {
+        return 128_000;
+    }
+    if m.contains("qwen-long") {
+        return 1_000_000;
+    }
+    if m.contains("qwen") {
+        return 131_072;
+    }
+    FALLBACK_CONTEXT_WINDOW
+}
+
+/// 生成 home 级补丁（`$DSH_HOME/cordis.patch.yml`）。
+///
+/// 它对该 HOME 下**所有** profile 生效，包括 dsh 官方的 web profile ——
+/// 所以「CodeShelf 模型页里配了什么，dsh（含官方界面）里就有什么」只需要这一处。
+/// 这也是不用 fork dsh 的关键：profile 组合顺序是
+/// bundle → profile 补丁 → home 补丁 → --patch，home 补丁是官方留给用户的层。
+///
+/// 用 JSON 写进 .yml：YAML 是 JSON 的超集，解析器照读，而 serde_json 帮我们把
+/// 供应商名里的引号/冒号/中文都转义好，比手拼 YAML 稳。
+pub fn build_home_patch(
+    providers: &[DshProviderSpec],
+    default_provider_id: &str,
+    default_model: &str,
+) -> String {
+    let mut routes = serde_json::Map::new();
+    for p in providers {
+        if p.models.is_empty() || p.base_url.trim().is_empty() {
+            continue;
+        }
+        let models: Vec<serde_json::Value> = p
+            .models
+            .iter()
+            .map(|m| {
+                serde_json::json!({ "id": m, "contextWindow": infer_context_window(m) })
+            })
+            .collect();
+        routes.insert(
+            route_id(&p.id),
+            serde_json::json!({
+                // 名字前面挂个来源标记：dsh 自带的路由和我们注入的会同名
+                // （都叫 DeepSeek），选模型时分不出哪个是哪个。
+                // 它的界面没有给外部路由加角标的地方，能控制的只有 displayName。
+                "displayName": format!("CodeShelf · {}", p.name),
+                "apiKeyEnv": key_env_name(&p.id),
+                "api": p.api.clone().unwrap_or_else(|| "openai-completions".into()),
+                "baseURL": p.base_url,
+                "models": models,
+            }),
+        );
+    }
+
+    let has_routes = !routes.is_empty();
+    let default_route = providers
+        .iter()
+        .find(|p| p.id == default_provider_id)
+        .map(|p| route_id(&p.id))
+        // 一个供应商都没配时给 dsh 自带的路由，别让插件树因为空引用加载失败
+        .unwrap_or_else(|| "deepseek-official".to_string());
+    let default_model = if default_model.trim().is_empty() {
+        "deepseek-v4-flash"
+    } else {
+        default_model
+    };
+
+    let mut patch = vec![
+        serde_json::json!({ "id": "llm-pi-ai", "config": { "providers": routes } }),
+        // 默认模型也要覆盖：不改它的话官方界面的模型选择器只显示 dsh-base 里
+        // 写死的 deepseek-v4-flash，用户在 CodeShelf 里选的模型根本进不去。
+        serde_json::json!({
+            "id": "agent-default-model",
+            "config": { "provider": default_route, "model": default_model },
+        }),
+    ];
+
+    // 有我们自己的路由时，关掉 dsh 自带的 deepseek-official。
+    // 它没有密钥（界面上是个红点），却和我们注入的 DeepSeek 同名并排出现，
+    // 选模型时纯粹是干扰。一个供应商都没配时保留它 —— 那是唯一的兜底路由。
+    if !has_routes {
+        // 没有可用路由：保持 dsh 原样，别把唯一能跑的那条也关了
+    } else {
+        patch.push(serde_json::json!({ "id": "llm-deepseek", "disabled": true }));
+    }
+    let patch = serde_json::Value::Array(patch);
+
+    format!(
+        "# CodeShelf 生成的 home 级补丁，对所有 profile 生效（含 dsh 官方界面）。\n\
+# 内容来自「模型」页里已启用的供应商，手改会在下次启动时被覆盖。\n\
+# 密钥不在这里，走 apiKeyEnv 引用环境变量。\n{}\n",
+        serde_json::to_string_pretty(&patch).unwrap_or_else(|_| "[]".into())
+    )
+}
+
+/// 把 home 补丁写到磁盘（内容一致就不动）
+pub fn ensure_home_patch(
+    providers: &[DshProviderSpec],
+    default_provider_id: &str,
+    default_model: &str,
+) -> AppResult<()> {
+    let home = dsh_home()?;
+    std::fs::create_dir_all(&home)?;
+    let content = build_home_patch(providers, default_provider_id, default_model);
+    let path = home.join("cordis.patch.yml");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(content.as_str()) {
+        write_atomic(&path, content)?;
+    }
+    Ok(())
+}
+
+/// 读已装 dsh 的 package.json 版本号；读不出来就当没装明白，返回 None。
+fn installed_dsh_version(root: &Path) -> Option<String> {
+    let pkg = root
+        .join("node_modules")
+        .join("@deepseek-ai")
+        .join("dsh")
+        .join("package.json");
+    let text = std::fs::read_to_string(pkg).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// 安装/重装 dsh 与 profile。全过程日志按行发 `dsh-install-log` 事件。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_install(app: AppHandle) -> AppResult<DshEnvStatus> {
+    let node = find_node()
+        .await
+        .ok_or_else(|| AppError::Other("未找到 Node.js，请先安装 Node 22 或更高版本".into()))?;
+    if node.major < NODE_MIN_MAJOR {
+        return Err(AppError::Other(format!(
+            "Node 版本过低：{}（dsh 需要 v{} 及以上）",
+            node.version, NODE_MIN_MAJOR
+        )));
+    }
+    let npm = npm_for(Some(&node))
+        .ok_or_else(|| AppError::Other("未找到 npm，请确认 Node 安装完整".into()))?;
+
+    let root = dsh_root()?;
+    std::fs::create_dir_all(&root)?;
+
+    // npm 需要一个 package.json 才把这里当成安装根；没有它会一路往上找，
+    // 最坏情况把包装到用户家目录去。
+    write_atomic(
+        root.join("package.json"),
+        r#"{
+  "name": "codeshelf-dsh-root",
+  "private": true
+}
+"#,
+    )?;
+
+    log_line(&app, format!("安装 @deepseek-ai/dsh@{DSH_VERSION} …"));
+    run_npm(
+        &app,
+        &npm,
+        &node,
+        &root,
+        &[
+            "install",
+            &format!("@deepseek-ai/dsh@{DSH_VERSION}"),
+            "--no-fund",
+            "--no-audit",
+        ],
+    )
+    .await?;
+
+    log_line(&app, "完成".to_string());
+    dsh_env_status().await
+}
+
+/// 卸载：只删我们自己那一个目录。
+#[tauri::command]
+#[specta::specta]
+pub async fn dsh_uninstall() -> AppResult<DshEnvStatus> {
+    let root = dsh_root()?;
+    if root.exists() {
+        std::fs::remove_dir_all(&root)?;
+    }
+    dsh_env_status().await
+}
+
+fn log_line(app: &AppHandle, line: String) {
+    let _ = app.emit(INSTALL_LOG_EVENT, line);
+}
+
+/// 跑一条 npm 命令，stdout/stderr 都按行转发给前端。
+/// npm 把进度和警告写在 stderr，安装失败时那里才有原因，所以两条流都要收。
+async fn run_npm(
+    app: &AppHandle,
+    npm: &Path,
+    node: &NodeInfo,
+    cwd: &Path,
+    args: &[&str],
+) -> AppResult<()> {
+    let mut cmd = Command::new(npm);
+    cmd.args(args)
+        .current_dir(cwd)
+        .env("PATH", augmented_path(node.path.parent()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    crate::process_guard::configure(&mut cmd);
+
+    let mut child = cmd.spawn().map_err(|e| {
+        AppError::Other(format!("启动 npm 失败（{}）: {}", npm.to_string_lossy(), e))
+    })?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let app_out = app.clone();
+    let out_task = tokio::spawn(async move {
+        let Some(stdout) = stdout else { return };
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            log_line(&app_out, line);
+        }
+    });
+    let app_err = app.clone();
+    let err_task = tokio::spawn(async move {
+        let Some(stderr) = stderr else {
+            return String::new();
+        };
+        let mut lines = BufReader::new(stderr).lines();
+        let mut tail = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            log_line(&app_err, line.clone());
+            tail.push_str(&line);
+            tail.push('\n');
+        }
+        tail
+    });
+
+    let status = child.wait().await?;
+    let _ = out_task.await;
+    let stderr_tail = err_task.await.unwrap_or_default();
+    if !status.success() {
+        return Err(AppError::Other(format!(
+            "npm {} 失败（退出码 {}）：{}",
+            args.join(" "),
+            status.code().unwrap_or(-1),
+            stderr_tail.lines().rev().take(5).collect::<Vec<_>>().join(" / ")
+        )));
+    }
+    Ok(())
+}
+
+// ========== profile 内容 ==========
+
+#[cfg(test)]
+mod smoke {
+    use super::*;
+
+    /// 打印本机真实探测到的 node（含 nvm 各版本）。
+    /// 与 netdiag 的 smoke 测试同类：不断言环境，只把「应用眼里看到的」打出来，
+    /// 排查「我明明装了 v22，它却说只有 v20」这类问题时第一时间能看到真相。
+    ///
+    /// 打印一份按真实供应商生成的 home 补丁，方便拿去喂真 dsh 验证。
+    /// `cargo test --lib print_home_patch_sample -- --nocapture`
+    #[test]
+    fn print_home_patch_sample() {
+        let providers = vec![
+            DshProviderSpec {
+                id: "prov-moonshot".into(),
+                name: "Moonshot AI".into(),
+                base_url: "https://api.moonshot.cn/v1".into(),
+                api_key: Some("sk-moonshot".into()),
+                api: None,
+                models: vec!["moonshot-v1-8k".into(), "moonshot-v1-32k".into()],
+            },
+            DshProviderSpec {
+                id: "prov-claude".into(),
+                name: "Anthropic / Claude".into(),
+                base_url: "https://api.anthropic.com".into(),
+                api_key: Some("sk-ant".into()),
+                api: Some("anthropic-messages".into()),
+                models: vec!["claude-sonnet-4-5".into()],
+            },
+        ];
+        println!("{}", build_home_patch(&providers, "prov-moonshot", "moonshot-v1-8k"));
+    }
+
+    /// `cargo test --lib print_real_node_candidates -- --nocapture`
+    #[tokio::test]
+    async fn print_real_node_candidates() {
+        println!("nvm 根目录: {:?}", nvm_root());
+        println!("nvm 里的 node: {:?}", nvm_node_paths());
+        for c in discover_nodes().await {
+            println!(
+                "候选: {} {} [{}] usable={} pinned={}",
+                c.version, c.path, c.source, c.usable, c.pinned
+            );
+        }
+        match find_node().await {
+            Some(n) => println!("最终选中: {} {}", n.version, n.path.display()),
+            None => println!("最终选中: 无"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_node_major() {
+        assert_eq!(parse_major("v22.22.0"), Some(22));
+        assert_eq!(parse_major("20.20.0"), Some(20));
+        assert_eq!(parse_major(""), None);
+        assert_eq!(parse_major("vX.Y.Z"), None);
+    }
+
+    fn spec(id: &str, name: &str, api: Option<&str>, models: &[&str]) -> DshProviderSpec {
+        DshProviderSpec {
+            id: id.into(),
+            name: name.into(),
+            base_url: "https://api.example.com/v1".into(),
+            api_key: Some("sk-secret".into()),
+            api: api.map(|s| s.to_string()),
+            models: models.iter().map(|m| m.to_string()).collect(),
+        }
+    }
+
+    /// 每个供应商一条路由、各带各的端点与密钥引用；默认模型指向当前选中的那个。
+    #[test]
+    fn home_patch_maps_every_provider() {
+        let providers = vec![
+            spec("p1", "Moonshot AI", None, &["moonshot-v1-8k", "moonshot-v1-32k"]),
+            spec("p2", "Claude", Some("anthropic-messages"), &["claude-sonnet-4-5"]),
+        ];
+        let patch = build_home_patch(&providers, "p2", "claude-sonnet-4-5");
+        let parsed: serde_json::Value =
+            serde_json::from_str(patch.lines().skip(3).collect::<Vec<_>>().join("\n").trim())
+                .expect("补丁必须是合法 JSON（YAML 是 JSON 超集，dsh 照读）");
+
+        let routes = &parsed[0]["config"]["providers"];
+        // 带来源前缀：dsh 自带路由和我们注入的会重名，选模型时得分得出来
+        assert_eq!(routes["cs-p1"]["displayName"], "CodeShelf · Moonshot AI");
+        assert_eq!(routes["cs-p1"]["api"], "openai-completions", "缺省是 OpenAI 兼容");
+        assert_eq!(routes["cs-p1"]["models"].as_array().unwrap().len(), 2);
+        assert_eq!(routes["cs-p2"]["api"], "anthropic-messages");
+        // 默认模型必须跟着当前选中的走，否则官方界面只会显示 dsh 自带的 deepseek
+        assert_eq!(parsed[1]["config"]["provider"], "cs-p2");
+        assert_eq!(parsed[1]["config"]["model"], "claude-sonnet-4-5");
+        // 有自己的路由了就关掉 dsh 自带那条没密钥的，免得两个 DeepSeek 并排
+        assert_eq!(parsed[2]["id"], "llm-deepseek");
+        assert_eq!(parsed[2]["disabled"], true);
+    }
+
+    /// 窗口报大了 dsh 不会拦，供应商会回 400（moonshot-v1-8k 上实测过）。
+    #[test]
+    fn context_window_follows_the_model_name() {
+        assert_eq!(infer_context_window("moonshot-v1-8k"), 8 * 1024);
+        assert_eq!(infer_context_window("moonshot-v1-32k"), 32 * 1024);
+        assert_eq!(infer_context_window("moonshot-v1-128k"), 128 * 1024);
+        assert_eq!(infer_context_window("claude-sonnet-4-5"), 200_000);
+        assert_eq!(infer_context_window("gpt-4o"), 128_000);
+        assert_eq!(infer_context_window("qwen-long"), 1_000_000);
+        // 认不出来的一律给保守值，宁可浪费也不要撑爆
+        assert_eq!(infer_context_window("some-unknown-model"), FALLBACK_CONTEXT_WINDOW);
+        // 别把 k8s 这种当容量
+        assert_eq!(infer_context_window("model-k8s-tuned"), FALLBACK_CONTEXT_WINDOW);
+    }
+
+    /// 密钥只走环境变量引用，**任何情况下都不能出现在补丁文件里**
+    #[test]
+    fn home_patch_never_contains_the_key() {
+        let patch = build_home_patch(&[spec("p1", "X", None, &["m"])], "p1", "m");
+        assert!(!patch.contains("sk-secret"), "密钥不能落盘");
+        assert!(patch.contains("CODESHELF_KEY_P1"), "要留下环境变量引用");
+    }
+
+    /// 一个供应商都没配也不能让插件树加载失败
+    #[test]
+    fn home_patch_falls_back_when_no_provider() {
+        let patch = build_home_patch(&[], "", "");
+        assert!(patch.contains("deepseek-official"));
+        assert!(patch.contains("deepseek-v4-flash"));
+        // 一条自己的路由都没有时，dsh 自带的那条是唯一能跑的，不能关
+        assert!(!patch.contains("\"llm-deepseek\""));
+    }
+}

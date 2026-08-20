@@ -259,6 +259,37 @@ export interface ProxyConfig {
   target: string;
 }
 
+/**
+ * 一条访问控制规则：某个访问路径需要密码才能看。
+ *
+ * 「锁整站」= path `/` + prefix，「锁子目录」= path `/private` + prefix，
+ * 「锁单个文件」= path `/docs/salary.pdf` + exact。
+ */
+export interface AuthRule {
+  id: string;
+  /** 访问路径（URL 上的路径），不是磁盘路径 */
+  path: string;
+  /** "prefix" = 该路径及其下所有内容；"exact" = 只有这一个路径 */
+  matchKind: string;
+  /** 登录页上给用户看的说明 */
+  label?: string | null;
+  /** 只回传哈希，前端拿不到明文 */
+  passwordHash: string;
+  enabled?: boolean;
+}
+
+/** 提交给后端的规则。密码留空 = 沿用原密码（靠 id 找回哈希）。 */
+export interface AuthRuleInput {
+  /** 编辑已有规则时带上；新建时为 null */
+  id?: string | null;
+  path: string;
+  matchKind?: string | null;
+  label?: string | null;
+  /** 明文密码，只在设置/修改时传 */
+  password?: string | null;
+  enabled?: boolean | null;
+}
+
 export interface ServerConfig {
   id: string;
   name: string;
@@ -275,6 +306,8 @@ export interface ServerConfig {
   proxies: ProxyConfig[];
   /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
   exposeLan?: boolean;
+  /** 访问控制规则 */
+  authRules?: AuthRule[];
   status: "running" | "stopped";
   createdAt: string;
 }
@@ -294,6 +327,8 @@ export interface ServerConfigInput {
   proxies?: ProxyConfig[];
   /** 对局域网开放（绑 0.0.0.0）。默认 false = 只绑 127.0.0.1 */
   exposeLan?: boolean;
+  /** 访问控制规则；不传 = 不改动已有规则 */
+  authRules?: AuthRuleInput[] | null;
 }
 
 // ============== Docker 镜像 ==============

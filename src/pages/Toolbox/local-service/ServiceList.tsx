@@ -6,6 +6,7 @@ import {
   ExternalLink,
   FileCode,
   Globe,
+  Lock,
   Play,
   Square,
   Trash2,
@@ -38,9 +39,22 @@ export function ServiceList({ servers, rules, copiedId, callbacks }: ServiceList
               </div>
 
               <div>
-                <h4 className="font-medium text-gray-900 dark:text-white">
+                <h4 className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
                   {server.name}
-                  <span className="ml-2 text-xs text-gray-400">Web 服务</span>
+                  <span className="text-xs text-gray-400">Web 服务</span>
+                  {(() => {
+                    const locked = (server.authRules || []).filter((r) => r.enabled !== false);
+                    if (locked.length === 0) return null;
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-normal bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+                        title={locked.map((r) => r.path).join("\n")}
+                      >
+                        <Lock size={10} />
+                        {locked.length === 1 ? locked[0].path : `${locked.length} 条规则`}
+                      </span>
+                    );
+                  })()}
                 </h4>
                 <div className="flex items-center gap-2 mt-1">
                   {server.status === "running" ? (
@@ -75,6 +89,9 @@ export function ServiceList({ servers, rules, copiedId, callbacks }: ServiceList
                   {server.rootDir}
                 </div>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    目录浏览
+                  </span>
                   {server.cors && (
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
                       CORS
