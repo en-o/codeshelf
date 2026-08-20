@@ -182,7 +182,7 @@ export function ServiceFormDialog({
                   placeholder="如: index.html、index、home.html"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  设置默认首页文件，启动后将自动打开该页面。留空则访问根路径
+                  设置后启动时自动打开该页面；留空则打开目录文件列表（存在 index.html 时优先显示首页）
                 </p>
               </div>
 
