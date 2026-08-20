@@ -405,33 +405,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_dir_without_trailing_slash() {
-        let root = TestDirectory::new();
-        std::fs::create_dir(root.0.join("sub")).unwrap();
-        std::fs::write(root.0.join("sub/a.txt"), "hi").unwrap();
-        let listing = get(directory_listing).with_state(DirectoryListingState::new(root.0.clone()));
-        let app = Router::new().fallback_service(
-            ServeDir::new(&root.0)
-                .append_index_html_on_directories(true)
-                .fallback(listing),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap();
-        let res = client.get(format!("http://{address}/sub")).send().await.unwrap();
-        println!(
-            "PROBE GET /sub -> {} location={:?}",
-            res.status().as_u16(),
-            res.headers().get("location").and_then(|v| v.to_str().ok())
-        );
-        server.abort();
-    }
-
-    #[tokio::test]
     async fn serve_dir_uses_listing_fallback_and_keeps_file_downloads() {
         let root = TestDirectory::new();
         std::fs::create_dir(root.0.join("docs")).unwrap();
@@ -466,34 +439,3 @@ mod tests {
 }
 
 
-#[cfg(test)]
-mod probe_slash {
-    use super::*;
-    use axum::{body::Body, http::Request, routing::get, Router};
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn probe_dir_without_trailing_slash() {
-        let dir = std::env::temp_dir().join(format!("cs-probe-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("sub")).unwrap();
-        std::fs::write(dir.join("sub/a.txt"), b"hi").unwrap();
-
-        let listing = get(directory_listing).with_state(DirectoryListingState::new(&dir));
-        let app: Router = Router::new().fallback_service(
-            tower_http::services::ServeDir::new(&dir)
-                .append_index_html_on_directories(true)
-                .fallback(listing),
-        );
-
-        let res = app
-            .oneshot(Request::builder().uri("/sub").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        println!(
-            "GET /sub -> {} location={:?}",
-            res.status(),
-            res.headers().get("location").map(|v| v.to_str().unwrap())
-        );
-        std::fs::remove_dir_all(&dir).ok();
-    }
-}
