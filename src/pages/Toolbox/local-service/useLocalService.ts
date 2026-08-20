@@ -145,9 +145,13 @@ export function useLocalService() {
   }
 
   function addAuthRule() {
+    // 用当前访问前缀打底：规则匹配的是 **URL 路径**，服务挂在 /dist 下时
+    // 填 `/private` 永远命中不了（文件其实在 /dist/private），
+    // 用户会以为锁上了、实际全公开。
+    const prefix = formUrlPrefix.trim().replace(/\/+$/, "");
     setFormAuthRules([
       ...formAuthRules,
-      { id: null, path: "/", matchKind: "prefix", label: "", password: "", enabled: true },
+      { id: null, path: prefix || "/", matchKind: "prefix", label: "", password: "", enabled: true },
     ]);
   }
 

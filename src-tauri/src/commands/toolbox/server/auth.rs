@@ -37,7 +37,12 @@ const SESSION_TTL: Duration = Duration::from_secs(12 * 60 * 60);
 /// 哈希迭代轮数。写进哈希串里，改了以后老密码照样能校验。
 const HASH_ROUNDS: u32 = 10_000;
 
-const COOKIE_NAME: &str = "codeshelf_auth";
+/// Cookie 名带上端口。**Cookie 不区分端口**（RFC 6265）：两个本地服务都在 127.0.0.1 上时，
+/// 共用一个 cookie 名会互相覆盖 —— 在 :8081 登录一次，:8080 的会话就被顶掉，
+/// 两个服务之间来回点会一直要求重新登录。
+fn cookie_name(port: u16) -> String {
+    format!("codeshelf_auth_{}", port)
+}
 
 // ============== 密码哈希 ==============
 
@@ -131,6 +136,10 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
 /// **解码必须在匹配之前**：不解码的话 `/priv%61te/secret.txt` 与规则 `/private`
 /// 对不上，直接绕过密码 —— 而 ServeDir 解码之后照样能把文件发出去。
 fn normalize(path: &str) -> String {
+    // 先剥掉 query / fragment：中间件是拿 `uri().path()`（不带 query）匹配的，
+    // 而登录页拿的是 `next=/docs/a.pdf?v=1` 这种带 query 的整串。两边匹配结果不一致时，
+    // exact 规则会出现「中间件拦下 → 登录页认为不用密码 → 跳回去 → 再被拦下」的死循环。
+    let path = path.split(['?', '#']).next().unwrap_or(path);
     let decoded = urlencoding::decode(path)
         .map(|s| s.into_owned())
         .unwrap_or_else(|_| path.to_string());
@@ -269,13 +278,16 @@ struct Session {
 pub(super) struct AuthState {
     rules: Arc<Vec<AuthRule>>,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    /// 只用来拼 cookie 名，见 [`cookie_name`]
+    port: u16,
 }
 
 impl AuthState {
-    pub(super) fn new(rules: Vec<AuthRule>) -> Self {
+    pub(super) fn new(rules: Vec<AuthRule>, port: u16) -> Self {
         Self {
             rules: Arc::new(rules),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            port,
         }
     }
 
@@ -333,11 +345,12 @@ fn new_token() -> String {
 }
 
 /// 从 Cookie 头里取出会话 token。没引 tower-cookies —— 只读一个键，手写更省。
-fn cookie_token(req_headers: &axum::http::HeaderMap) -> Option<String> {
+fn cookie_token(req_headers: &axum::http::HeaderMap, port: u16) -> Option<String> {
     let raw = req_headers.get(header::COOKIE)?.to_str().ok()?;
+    let name = cookie_name(port);
     raw.split(';')
         .filter_map(|kv| kv.split_once('='))
-        .find(|(k, _)| k.trim() == COOKIE_NAME)
+        .find(|(k, _)| k.trim() == name)
         .map(|(_, v)| v.trim().to_string())
 }
 
@@ -352,8 +365,10 @@ pub(super) async fn require_auth(
 ) -> Response {
     let path = req.uri().path().to_string();
 
-    // 登录页自己不能要求登录，否则就是死循环
-    if path.starts_with(AUTH_PREFIX) {
+    // 登录页自己不能要求登录，否则就是死循环。
+    // 必须带 `/` 比较：裸 starts_with 会把 `/__codeshelf_authXXX` 也放过去，
+    // 等于给受保护目录开了一个前缀相同就免密的口子。
+    if path == AUTH_PREFIX || path.starts_with(&format!("{}/", AUTH_PREFIX)) {
         return next.run(req).await;
     }
 
@@ -361,7 +376,7 @@ pub(super) async fn require_auth(
         return next.run(req).await;
     };
 
-    let token = cookie_token(req.headers());
+    let token = cookie_token(req.headers(), state.port);
     if let Some(token) = token.as_deref() {
         if state.passed(token, &rule.id).await {
             return next.run(req).await;
@@ -457,12 +472,12 @@ async fn login_submit(
             .into_response();
     }
 
-    let token = state.grant(cookie_token(&headers), &rule.id).await;
+    let token = state.grant(cookie_token(&headers, state.port), &rule.id).await;
     // 局域网是明文 http，不能加 Secure（加了浏览器直接不存）。
     // HttpOnly + SameSite=Lax 该给的还是给上。
     let cookie = format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
-        COOKIE_NAME,
+        cookie_name(state.port),
         token,
         SESSION_TTL.as_secs()
     );
@@ -477,10 +492,13 @@ async fn login_submit(
 }
 
 async fn logout(State(state): State<AuthState>, headers: axum::http::HeaderMap) -> Response {
-    if let Some(token) = cookie_token(&headers) {
+    if let Some(token) = cookie_token(&headers, state.port) {
         state.revoke(&token).await;
     }
-    let cookie = format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", COOKIE_NAME);
+    let cookie = format!(
+        "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+        cookie_name(state.port)
+    );
     (
         StatusCode::SEE_OTHER,
         [
@@ -495,8 +513,11 @@ async fn logout(State(state): State<AuthState>, headers: axum::http::HeaderMap) 
 /// 别人把带这个参数的链接发出去，登录后直接被弹到钓鱼站。
 fn sanitize_next(next: Option<&str>) -> String {
     match next.map(str::trim).filter(|s| !s.is_empty()) {
-        // `//host` 会被浏览器当成协议相对 URL，同样要挡
-        Some(v) if v.starts_with('/') && !v.starts_with("//") => v.to_string(),
+        // `//host` 会被浏览器当成协议相对 URL；`/\host` 也一样 —— 浏览器把反斜杠
+        // 规范化成斜杠，所以两种都要挡，否则仍然是开放重定向。
+        Some(v) if v.starts_with('/') && !v.starts_with("//") && !v.starts_with("/\\") => {
+            v.to_string()
+        }
         _ => "/".to_string(),
     }
 }
@@ -647,6 +668,22 @@ mod tests {
         // 开放重定向：登录后被弹到外站
         assert_eq!(sanitize_next(Some("https://evil.example")), "/");
         assert_eq!(sanitize_next(Some("//evil.example")), "/");
+        // 浏览器会把反斜杠当斜杠，等价于 `//evil.example`
+        assert_eq!(sanitize_next(Some("/\\evil.example")), "/");
         assert_eq!(sanitize_next(None), "/");
     }
+
+    #[test]
+    fn query_string_does_not_break_matching() {
+        // 中间件按 path 匹配、登录页按带 query 的 next 匹配。两边不一致时，
+        // exact 规则会「拦下 → 登录页认为不用密码 → 跳回去 → 再拦下」无限循环。
+        let rules = vec![rule("f", "/docs/salary.pdf", "exact")];
+        assert!(match_rule(&rules, "/docs/salary.pdf?v=1").is_some());
+        assert!(match_rule(&rules, "/docs/salary.pdf#page=2").is_some());
+
+        let prefixed = vec![rule("p", "/private", "prefix")];
+        assert!(match_rule(&prefixed, "/private/x?a=b").is_some());
+        assert!(match_rule(&prefixed, "/public?next=/private").is_none());
+    }
 }
+

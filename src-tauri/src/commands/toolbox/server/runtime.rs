@@ -149,7 +149,7 @@ pub(super) async fn run_server(
 
     // 访问控制：登录路由挂在根路径（不受 urlPrefix 影响），鉴权中间件包在最外层，
     // 静态文件和 API 代理一并受保护。没有启用的规则时整段跳过，行为与以前完全一致。
-    let auth_state = auth::AuthState::new(config.auth_rules.clone());
+    let auth_state = auth::AuthState::new(config.auth_rules.clone(), config.port);
     if auth_state.has_enabled_rules() {
         log::info!(
             "访问控制已启用，{} 条规则，登录页: {}/login",

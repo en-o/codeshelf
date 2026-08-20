@@ -324,6 +324,25 @@ export function ServiceFormDialog({
                         </div>
                       </div>
                     ))}
+                    {(() => {
+                      // 规则匹配的是 URL 路径。服务挂在 /dist 下却填 /private 时，
+                      // 请求路径其实是 /dist/private —— 规则永远命不中，用户会以为锁上了。
+                      const prefix = formUrlPrefix.trim().replace(/\/+$/, "");
+                      if (!prefix || prefix === "/") return null;
+                      const outside = formAuthRules.filter(
+                        (r) =>
+                          r.path?.trim() &&
+                          r.path.trim() !== prefix &&
+                          !r.path.trim().startsWith(`${prefix}/`)
+                      );
+                      if (outside.length === 0) return null;
+                      return (
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                          {outside.map((r) => r.path).join("、")} 不在访问前缀 {prefix} 之下，
+                          这条规则不会生效。路径要写成 {prefix}/xxx
+                        </p>
+                      );
+                    })()}
                     <p className="text-xs text-gray-400">
                       命中最长的规则生效。访问时会跳到登录页，输入密码后凭会话 Cookie 继续访问；密码只存哈希，不可找回。
                     </p>
