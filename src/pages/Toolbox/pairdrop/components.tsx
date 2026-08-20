@@ -339,7 +339,8 @@ export function MessageBubble({
               />
             </div>
           ) : null}
-          {!isSelf && message.token ? (
+          {/* 领取后 token 会被清空（中转缓存已删），但已保存的真实路径要继续可见 */}
+          {!isSelf && (message.savedPath || message.token || message.taken) ? (
             message.savedPath ? (
               <div className="mt-2 space-y-1.5">
                 <div
@@ -365,7 +366,7 @@ export function MessageBubble({
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : message.token ? (
               <button
                 onClick={() =>
                   onSave?.(message.token, message.name, message.id)
@@ -375,10 +376,16 @@ export function MessageBubble({
                 <Save size={11} />
                 保存到本地
               </button>
+            ) : (
+              <div className="mt-2 text-[10px] opacity-70">
+                已领取，中转缓存已清理
+              </div>
             )
           ) : null}
-          {isSelf && !uploading && message.token ? (
-            <div className="mt-2 text-[10px] opacity-80">已发送</div>
+          {isSelf && !uploading && (message.token || message.taken) ? (
+            <div className="mt-2 text-[10px] opacity-80">
+              {message.taken ? "对方已领取，中转缓存已清理" : "已发送"}
+            </div>
           ) : null}
         </div>
         <div

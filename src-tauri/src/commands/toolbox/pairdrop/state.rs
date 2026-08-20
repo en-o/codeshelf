@@ -23,10 +23,14 @@ pub const FILE_TTL_SECS: u64 = 300; // 5 分钟
 ///
 /// 中继**边收边落盘**（见 [`CachedFile`]），内存里只留元数据，所以这个值限的是磁盘不是内存。
 /// 曾经是 256MB 的内存上限：一个 316MB 的 APK 传到 82% 就撞上 body limit 卡死不动。
-pub const MAX_FILE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
 /// 缓存里所有待领取文件的总字节上限。单文件限额挡不住"多传几个"。
-pub const MAX_TOTAL_CACHE: u64 = 8 * 1024 * 1024 * 1024;
+///
+/// 注意：这个值**不会**用来削减单文件额度。曾经是 `min(剩余额度, MAX_FILE_SIZE)`，
+/// 结果只要缓存里还有别人没取走的文件，一个 184KB 的截图也会在半路撞上 413，
+/// 表现为进度条永远停在 69%。现在只有缓存真的满了才在读 body 之前直接拒绝。
+pub const MAX_TOTAL_CACHE: u64 = 20 * 1024 * 1024 * 1024;
 
 /// 同时进行的上传数上限。每个上传都在攒内存，必须限并发而不只是限单个大小。
 pub const MAX_CONCURRENT_UPLOADS: usize = 3;
@@ -128,6 +132,10 @@ pub enum ServerMessage {
         mime: Option<String>,
         ts: i64,
     },
+    /// 文件已被领取：缓存条目和临时中转文件都已删除。
+    /// 收发两端都要据此清掉 token —— 中转副本不复存在，之后各看各的真实路径。
+    #[serde(rename_all = "camelCase")]
+    FileTaken { token: String },
     /// 心跳响应
     Pong,
     /// 错误
@@ -579,6 +587,21 @@ mod tests {
         files.retain(|_, f| !f.is_expired());
         let used: u64 = files.values().map(|f| f.size).sum();
         assert_eq!(used, 100, "过期条目不应继续占额度");
+    }
+
+    #[test]
+    fn pending_backlog_does_not_shrink_per_file_quota() {
+        // 曾经是 min(MAX_TOTAL_CACHE - used, MAX_FILE_SIZE)：缓存里躺着别人没取走的文件时，
+        // 一个几百 KB 的截图也会在传输途中被 413 掐断，进度条卡死在半路。
+        let mut files: HashMap<String, CachedFile> = HashMap::new();
+        files.insert("big".into(), cached("bob", "alice", MAX_TOTAL_CACHE - 1024));
+        let used: u64 = files.values().map(|f| f.size).sum();
+        let quota = if used >= MAX_TOTAL_CACHE {
+            0
+        } else {
+            MAX_FILE_SIZE
+        };
+        assert_eq!(quota, MAX_FILE_SIZE, "存量文件不该削减单文件额度");
     }
 
     #[test]
