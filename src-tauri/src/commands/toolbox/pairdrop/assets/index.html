@@ -372,6 +372,17 @@ function handleServerMessage(msg){
     case 'file':
       addMessage(msg.from, { kind: 'file', from: msg.from, fromName: msg.fromName, token: msg.token, name: msg.name, size: msg.size, mime: msg.mime, ts: msg.ts });
       break;
+    // 中转缓存被一次性消费掉了(条目移除 + 临时文件删除),两端一起清 token:
+    // 留着的话下载按钮点下去只会 404,发送方那条也不该再指向已经不存在的副本。
+    case 'file-taken': {
+      for (const arr of state.conversations.values()){
+        for (const m of arr){
+          if (m.kind === 'file' && m.token && m.token === msg.token){ m.token = ''; m.taken = true; }
+        }
+      }
+      renderMessages();
+      break;
+    }
     case 'error':
       toast(msg.message || '出错了', 'error');
       break;
@@ -525,8 +536,10 @@ function renderMessages(){
         `;
       } else if (!isSelf && m.token){
         actionsHtml = `<div class="msg-file-actions"><a class="msg-file-btn" href="${downloadUrl}" download="${escapeHTML(m.name)}">下载</a></div>`;
+      } else if (!isSelf && m.taken){
+        actionsHtml = `<div class="msg-file-status">已下载,中转缓存已清理</div>`;
       } else if (isSelf){
-        actionsHtml = `<div class="msg-file-status">已发送</div>`;
+        actionsHtml = `<div class="msg-file-status">${m.taken ? '对方已领取,中转缓存已清理' : '已发送'}</div>`;
       }
       div.innerHTML = `
         <div>
