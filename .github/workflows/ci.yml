@@ -64,10 +64,12 @@ jobs:
           workspaces: src-tauri
       - name: cargo check
         working-directory: src-tauri
-        run: cargo check --lib --bins
+        # --locked：Cargo.lock 被手工改坏（改版本号时误伤依赖）时立刻失败，
+        # 而不是等到发版构建重新解析依赖才炸。
+        run: cargo check --lib --bins --locked
       - name: cargo test
         working-directory: src-tauri
-        run: cargo test --lib
+        run: cargo test --lib --locked
 
       # cargo test 会重新生成 src/bindings.ts。生成结果与仓库里的不一致，
       # 说明改了 Tauri 命令签名却没提交新的 bindings —— 前端会与后端脱节
@@ -84,7 +86,7 @@ jobs:
         # 测试模块位置、常量断言改成编译期 const 断言、大 enum 变体装箱），
         # 确需保留的两条在代码里做了带理由的局部 / crate 级 allow。
         # 现在可以上 -D warnings，新引入的同类问题会直接挡在 CI 上。
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
 
   msrv:
     name: 最低工具链验证 (Rust 1.88)
@@ -114,7 +116,7 @@ jobs:
           fi
       - name: cargo check（最低版本）
         working-directory: src-tauri
-        run: cargo check --lib
+        run: cargo check --lib --locked
 
   windows-cross:
     name: Windows 交叉编译检查
@@ -139,7 +141,7 @@ jobs:
           key: windows-gnu
       - name: cargo check --target x86_64-pc-windows-gnu
         working-directory: src-tauri
-        run: cargo check --lib --target x86_64-pc-windows-gnu
+        run: cargo check --lib --locked --target x86_64-pc-windows-gnu
 
   macos:
     name: macOS 编译检查
@@ -156,4 +158,4 @@ jobs:
           key: macos
       - name: cargo check
         working-directory: src-tauri
-        run: cargo check --lib
+        run: cargo check --lib --locked
