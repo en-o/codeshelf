@@ -4,6 +4,8 @@
 // 文件上传走 HTTP multipart POST，下载走 GET。聊天元数据保存在本机 localStorage。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { pairdropUploadPath } from "@/services/toolbox";
 
 export interface Peer {
   peerId: string;
@@ -40,6 +42,8 @@ export type ConversationMessage =
       savedPath?: string;
       /** 中转缓存已被领取并删除。token 同时会被清空,两端都不该再指向中转副本。 */
       taken?: boolean;
+      /** 发送方自己的源文件路径。只有走系统文件对话框选的文件才有——拖拽进来的 File 对象没有路径。 */
+      localPath?: string;
     };
 
 export type ConnStatus = "offline" | "connecting" | "online";
@@ -620,6 +624,105 @@ export function usePairDropClient({
     [apiBase, appendMessage, selfId, send, updateEndpoint]
   );
 
+  /**
+   * 从本地真实路径发送（系统文件对话框选出来的）。
+   *
+   * 和 [`sendFile`] 的区别只在于「知不知道源文件在哪」：这条路径上传交给后端流式做，
+   * 发送方那条消息记下 `localPath`，中转缓存被领取删掉之后依然能打开自己的源文件。
+   */
+  const sendFilePath = useCallback(
+    async (to: string, path: string) => {
+      if (!apiBase) return;
+      const boundKey = endpointKeyRef.current;
+      const name = path.split(/[\\/]/).pop() || "file";
+      const localId = `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      appendMessage(
+        to,
+        {
+          kind: "file",
+          id: localId,
+          from: selfId || "self",
+          token: "",
+          name,
+          // 大小由后端第一个进度事件带回来（total），省掉前端再去 stat 一次
+          size: 0,
+          mime: null,
+          ts: Date.now(),
+          uploadProgress: 0,
+          localPath: path,
+        },
+        boundKey
+      );
+
+      const patch = (fn: (m: ConversationMessage) => ConversationMessage) =>
+        updateEndpoint((current) => {
+          const arr = current.conversations[to];
+          if (!arr) return current;
+          return {
+            ...current,
+            conversations: {
+              ...current.conversations,
+              [to]: arr.map((m) => (m.id === localId ? fn(m) : m)),
+            },
+          };
+        }, boundKey);
+
+      const unlisten = await listen<{
+        uploadId: string;
+        loaded: number;
+        total: number;
+      }>("pairdrop:upload-progress", (e) => {
+        if (e.payload.uploadId !== localId || !e.payload.total) return;
+        const pct = Math.round((e.payload.loaded / e.payload.total) * 100);
+        patch((m) =>
+          m.kind === "file"
+            ? { ...m, uploadProgress: pct, size: e.payload.total }
+            : m
+        );
+      });
+
+      try {
+        const res = await pairdropUploadPath({
+          apiBase,
+          from: selfId || "",
+          to,
+          path,
+          uploadId: localId,
+        });
+        send({
+          type: "notify-file",
+          to,
+          token: res.token,
+          name: res.name,
+          size: res.size,
+          mime: null,
+        });
+        patch((m) =>
+          m.kind === "file"
+            ? { ...m, token: res.token, size: res.size, uploadProgress: 100 }
+            : m
+        );
+      } catch (err) {
+        // 失败就把占位气泡撤掉，和 sendFile 的行为保持一致
+        updateEndpoint((current) => {
+          const arr = current.conversations[to];
+          if (!arr) return current;
+          return {
+            ...current,
+            conversations: {
+              ...current.conversations,
+              [to]: arr.filter((m) => m.id !== localId),
+            },
+          };
+        }, boundKey);
+        throw err;
+      } finally {
+        unlisten();
+      }
+    },
+    [apiBase, appendMessage, selfId, send, updateEndpoint]
+  );
+
   const updateSelfName = useCallback(
     (name: string) => {
       const trimmed = name.trim();
@@ -677,6 +780,7 @@ export function usePairDropClient({
     unread,
     sendText,
     sendFile,
+    sendFilePath,
     updateSelfName,
     markFileSaved,
     apiBase,

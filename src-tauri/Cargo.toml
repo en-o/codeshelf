@@ -50,7 +50,7 @@ tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
 # 工具箱模块依赖
 futures = "0.3"
-reqwest = { version = "0.12", features = ["stream", "json", "cookies"] }
+reqwest = { version = "0.12", features = ["stream", "json", "cookies", "multipart"] }
 url = "2.5"
 # 网页抓取的「规则提取」：regex 已在依赖树（1.12）；kuchikiki 提供 CSS 选择器，
 # 它本就被 wry/tauri-utils 引入并编译，这里精确复用同一版本，避免再编一份 html5ever。

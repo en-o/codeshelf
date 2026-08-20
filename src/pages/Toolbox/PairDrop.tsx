@@ -10,7 +10,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ToolPanelHeader } from "./index";
 import { Button, showToast } from "@/components/ui";
 import { LoadingSpinner, ErrorBoundary } from "@/components/common";

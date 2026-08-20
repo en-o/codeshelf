@@ -2128,6 +2128,23 @@ async pairdropDownloadSave(url: string, savePath: string) : Promise<Result<numbe
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * 从**本地真实路径**上传文件到中继（自身服务或已加入的对方桌面端）。
+ * 
+ * 前端的 `<input type=file>` / 拖拽拿到的 `File` 对象在 WebView 里没有磁盘路径，
+ * 发送方那条消息只能显示"已发送"、点不开源文件。走系统文件对话框选出来的路径经这里上传，
+ * 发送方就能一直指着自己的真实文件——中转缓存被领取删除之后也照样能打开。
+ * 
+ * 边读边发（`ReaderStream` + `wrap_stream`），10GB 的文件也不会进内存。
+ */
+async pairdropUploadPath(apiBase: string, from: string, to: string, path: string, uploadId: string) : Promise<Result<UploadedFile, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pairdrop_upload_path", { apiBase, from, to, path, uploadId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getChatHistoryDir() : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_chat_history_dir") };
@@ -4137,6 +4154,10 @@ export type ToolSchema = { name: string; description: string; parameters: JsonVa
 export type UiState = { recent_detail_project_ids: string[] }
 export type UiStateInput = { recent_detail_project_ids: string[] | null }
 export type UpdateProjectInput = { id: string; name: string | null; tags: string[] | null; labels: string[] | null }
+/**
+ * [`pairdrop_upload_path`] 的返回值。
+ */
+export type UploadedFile = { token: string; name: string; size: number }
 /**
  * 解释状态：对用户意味着什么。
  */

@@ -233,6 +233,111 @@ pub async fn pairdrop_download_save(url: String, save_path: String) -> AppResult
     Ok(n)
 }
 
+/// [`pairdrop_upload_path`] 的返回值。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadedFile {
+    pub token: String,
+    pub name: String,
+    pub size: u64,
+}
+
+/// 从**本地真实路径**上传文件到中继（自身服务或已加入的对方桌面端）。
+///
+/// 前端的 `<input type=file>` / 拖拽拿到的 `File` 对象在 WebView 里没有磁盘路径，
+/// 发送方那条消息只能显示"已发送"、点不开源文件。走系统文件对话框选出来的路径经这里上传，
+/// 发送方就能一直指着自己的真实文件——中转缓存被领取删除之后也照样能打开。
+///
+/// 边读边发（`ReaderStream` + `wrap_stream`），10GB 的文件也不会进内存。
+#[tauri::command]
+#[specta::specta]
+pub async fn pairdrop_upload_path(
+    app: tauri::AppHandle,
+    api_base: String,
+    from: String,
+    to: String,
+    path: String,
+    upload_id: String,
+) -> AppResult<UploadedFile> {
+    use futures::StreamExt;
+    use tauri::Emitter;
+
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("打开文件失败: {}", e)))?;
+    let size = file
+        .metadata()
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("读取文件信息失败: {}", e)))?
+        .len();
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+
+    let app_for_progress = app.clone();
+    let progress_id = upload_id.clone();
+    let mut sent: u64 = 0;
+    let mut last_pct: u64 = u64::MAX;
+    let stream = tokio_util::io::ReaderStream::new(file).map(move |chunk| {
+        if let Ok(bytes) = &chunk {
+            sent += bytes.len() as u64;
+            // 按百分比节流：8KB 一个 chunk，10GB 就是 130 万次事件，全发出去前端会被淹掉
+            let pct = if size == 0 { 100 } else { sent * 100 / size };
+            if pct != last_pct {
+                last_pct = pct;
+                let _ = app_for_progress.emit(
+                    "pairdrop:upload-progress",
+                    serde_json::json!({ "uploadId": progress_id, "loaded": sent, "total": size }),
+                );
+            }
+        }
+        chunk
+    });
+
+    // to / from 必须排在 file 之前：服务端在开始读文件内容前就要能判断这次上传是否被授权。
+    // reqwest 的 multipart 按插入顺序发送。
+    let part = reqwest::multipart::Part::stream_with_length(reqwest::Body::wrap_stream(stream), size)
+        .file_name(name.clone())
+        .mime_str("application/octet-stream")
+        .map_err(|e| crate::error::AppError::from(format!("构造上传数据失败: {}", e)))?;
+    let form = reqwest::multipart::Form::new()
+        .text("to", to)
+        .text("from", from.clone())
+        .part("file", part);
+
+    // 只设连接超时：上传大文件合法地耗时长，总超时会误杀。
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| crate::error::AppError::from(format!("创建 HTTP 客户端失败: {}", e)))?;
+    let resp = client
+        .post(format!("{}/api/upload", api_base.trim_end_matches('/')))
+        .header("x-peer-id", from)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| crate::error::AppError::from(format!("上传失败: {}", e)))?;
+
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        // 服务端 JSON 里有具体原因（无权限 / 缓存已满 / 并发已满），别吞成一句 HTTP xxx
+        let detail = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string));
+        return Err(crate::error::AppError::from(
+            detail.unwrap_or_else(|| format!("上传失败: HTTP {}", status.as_u16())),
+        ));
+    }
+    let token = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("token").and_then(|t| t.as_str()).map(str::to_string))
+        .ok_or_else(|| crate::error::AppError::from("上传成功但没拿到 token"))?;
+
+    Ok(UploadedFile { token, name, size })
+}
+
 fn build_status_urls(port: u16) -> Vec<NetworkUrl> {
     list_local_ipv4()
         .into_iter()
