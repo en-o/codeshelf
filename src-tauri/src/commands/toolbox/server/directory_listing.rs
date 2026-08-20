@@ -437,3 +437,35 @@ mod tests {
         server.abort();
     }
 }
+
+#[cfg(test)]
+mod probe_slash {
+    use super::*;
+    use axum::{body::Body, http::Request, routing::get, Router};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn probe_dir_without_trailing_slash() {
+        let dir = std::env::temp_dir().join(format!("cs-probe-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/a.txt"), b"hi").unwrap();
+
+        let listing = get(directory_listing).with_state(DirectoryListingState::new(&dir));
+        let app: Router = Router::new().fallback_service(
+            tower_http::services::ServeDir::new(&dir)
+                .append_index_html_on_directories(true)
+                .fallback(listing),
+        );
+
+        let res = app
+            .oneshot(Request::builder().uri("/sub").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        println!(
+            "GET /sub -> {} location={:?}",
+            res.status(),
+            res.headers().get("location").map(|v| v.to_str().unwrap())
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
