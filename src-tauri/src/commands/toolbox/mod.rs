@@ -590,10 +590,6 @@ fn default_stopped() -> String {
     "stopped".to_string()
 }
 
-fn default_true() -> bool {
-    true
-}
-
 // ============== 快捷键备忘相关结构 ==============
 
 /// 快捷键条目

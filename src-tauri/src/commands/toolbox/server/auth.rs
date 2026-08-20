@@ -54,7 +54,7 @@ pub fn hash_password(password: &str) -> String {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        salt.copy_from_slice(&ns.to_le_bytes()[..16.min(16)]);
+        salt.copy_from_slice(&ns.to_le_bytes()[..16]);
     }
     let hash = derive(&salt, password, HASH_ROUNDS);
     format!(
@@ -114,7 +114,7 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 fn from_hex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if s.len() % 2 == 1 {
         return None;
     }
     (0..s.len())

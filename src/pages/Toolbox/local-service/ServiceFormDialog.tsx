@@ -1,6 +1,6 @@
-import { ArrowLeftRight, FolderOpen, Globe, Plus, X } from "lucide-react";
+import { ArrowLeftRight, FolderOpen, Globe, Lock, Plus, X } from "lucide-react";
 import { Input, Button } from "@/components/ui";
-import type { ForwardRule, ProxyConfig, ServerConfig } from "@/types/toolbox";
+import type { AuthRuleInput, ForwardRule, ProxyConfig, ServerConfig } from "@/types/toolbox";
 import type { ServiceType } from "./types";
 
 interface ServiceFormDialogProps {
@@ -15,6 +15,7 @@ interface ServiceFormDialogProps {
   formCors: boolean;
   formGzip: boolean;
   formProxies: ProxyConfig[];
+  formAuthRules: AuthRuleInput[];
   formLocalPort: string;
   formRemoteHost: string;
   formRemotePort: string;
@@ -37,6 +38,9 @@ interface ServiceFormDialogProps {
   onAddProxy: () => void;
   onUpdateProxy: (index: number, field: "prefix" | "target", value: string) => void;
   onRemoveProxy: (index: number) => void;
+  onAddAuthRule: () => void;
+  onUpdateAuthRule: (index: number, patch: Partial<AuthRuleInput>) => void;
+  onRemoveAuthRule: (index: number) => void;
   onCancel: () => void;
   onSubmit: () => void;
 }
@@ -53,6 +57,7 @@ export function ServiceFormDialog({
   formCors,
   formGzip,
   formProxies,
+  formAuthRules,
   formLocalPort,
   formRemoteHost,
   formRemotePort,
@@ -75,6 +80,9 @@ export function ServiceFormDialog({
   onAddProxy,
   onUpdateProxy,
   onRemoveProxy,
+  onAddAuthRule,
+  onUpdateAuthRule,
+  onRemoveAuthRule,
   onCancel,
   onSubmit,
 }: ServiceFormDialogProps) {
@@ -239,6 +247,85 @@ export function ServiceFormDialog({
                     ))}
                     <p className="text-xs text-gray-400">
                       访问本地路径的请求将被转发到代理目标地址，如: /api/* → http://192.168.1.100:8080/api/*
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                    <Lock size={14} className="text-amber-500" />
+                    访问控制
+                  </span>
+                  <button
+                    onClick={onAddAuthRule}
+                    className="text-sm text-blue-500 hover:text-blue-600 flex items-center gap-1"
+                  >
+                    <Plus size={14} />
+                    添加规则
+                  </button>
+                </div>
+
+                {formAuthRules.length === 0 ? (
+                  <p className="text-sm text-gray-400">
+                    暂无规则，全部内容公开访问。可对整站、某个子目录或单个文件设访问密码
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {formAuthRules.map((rule, index) => (
+                      <div key={index} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={rule.path}
+                            onChange={(e) => onUpdateAuthRule(index, { path: e.target.value })}
+                            placeholder="保护的访问路径，如: / 或 /private 或 /docs/salary.pdf"
+                            className="flex-1"
+                          />
+                          <select
+                            value={rule.matchKind || "prefix"}
+                            onChange={(e) => onUpdateAuthRule(index, { matchKind: e.target.value })}
+                            className="px-2 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md outline-none dark:text-gray-100"
+                            title="prefix = 连同下级内容一起锁；exact = 只锁这一个路径"
+                          >
+                            <option value="prefix">含子路径</option>
+                            <option value="exact">仅此路径</option>
+                          </select>
+                          <button
+                            onClick={() => onRemoveAuthRule(index)}
+                            className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="password"
+                            value={rule.password || ""}
+                            onChange={(e) => onUpdateAuthRule(index, { password: e.target.value })}
+                            placeholder={rule.id ? "留空 = 不改密码" : "设置访问密码"}
+                            className="flex-1"
+                          />
+                          <Input
+                            value={rule.label || ""}
+                            onChange={(e) => onUpdateAuthRule(index, { label: e.target.value })}
+                            placeholder="登录页提示（可选）"
+                            className="flex-1"
+                          />
+                          <label className="flex items-center gap-1.5 text-xs text-gray-500 whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              checked={rule.enabled !== false}
+                              onChange={(e) => onUpdateAuthRule(index, { enabled: e.target.checked })}
+                              className="rounded text-blue-500"
+                            />
+                            启用
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-xs text-gray-400">
+                      命中最长的规则生效。访问时会跳到登录页，输入密码后凭会话 Cookie 继续访问；密码只存哈希，不可找回。
                     </p>
                   </div>
                 )}
