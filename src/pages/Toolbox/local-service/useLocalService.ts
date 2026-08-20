@@ -17,7 +17,14 @@ import {
   updateForwardRule,
   updateServer,
 } from "@/services/toolbox";
-import type { ForwardRule, ForwardRuleInput, ProxyConfig, ServerConfig, ServerConfigInput } from "@/types/toolbox";
+import type {
+  AuthRuleInput,
+  ForwardRule,
+  ForwardRuleInput,
+  ProxyConfig,
+  ServerConfig,
+  ServerConfigInput,
+} from "@/types/toolbox";
 import { NGINX_MANUAL_TEMPLATE } from "./nginxSnippets";
 import type { DeleteConfirmState, NginxPreviewState, ServiceType, TabType } from "./types";
 import { getForwardUrl, getServerUrl, nginxFileName } from "./utils";
@@ -39,6 +46,9 @@ export function useLocalService() {
   const [formCors, setFormCors] = useState(true);
   const [formGzip, setFormGzip] = useState(true);
   const [formProxies, setFormProxies] = useState<ProxyConfig[]>([]);
+  // 访问控制规则。编辑已有规则时 password 留空 = 不改密码（后端按 id 找回哈希），
+  // 所以这里存的是 AuthRuleInput 而不是 AuthRule —— 明文密码前端根本拿不到。
+  const [formAuthRules, setFormAuthRules] = useState<AuthRuleInput[]>([]);
   // 默认只监听 127.0.0.1；勾选后才绑 0.0.0.0（静态服务与端口转发共用这一个状态位）
   const [formExposeLan, setFormExposeLan] = useState(false);
 
@@ -79,6 +89,7 @@ export function useLocalService() {
     setFormCors(true);
     setFormGzip(true);
     setFormProxies([]);
+    setFormAuthRules([]);
     setFormExposeLan(false);
     setFormLocalPort("");
     setFormRemoteHost("");
@@ -133,6 +144,25 @@ export function useLocalService() {
     setFormProxies(formProxies.filter((_, i) => i !== index));
   }
 
+  function addAuthRule() {
+    // 用当前访问前缀打底：规则匹配的是 **URL 路径**，服务挂在 /dist 下时
+    // 填 `/private` 永远命中不了（文件其实在 /dist/private），
+    // 用户会以为锁上了、实际全公开。
+    const prefix = formUrlPrefix.trim().replace(/\/+$/, "");
+    setFormAuthRules([
+      ...formAuthRules,
+      { id: null, path: prefix || "/", matchKind: "prefix", label: "", password: "", enabled: true },
+    ]);
+  }
+
+  function updateAuthRule(index: number, patch: Partial<AuthRuleInput>) {
+    setFormAuthRules(formAuthRules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
+  }
+
+  function removeAuthRule(index: number) {
+    setFormAuthRules(formAuthRules.filter((_, i) => i !== index));
+  }
+
   function openEditServerDialog(server: ServerConfig) {
     setServiceType("web");
     setEditingServer(server);
@@ -144,6 +174,17 @@ export function useLocalService() {
     setFormCors(server.cors);
     setFormGzip(server.gzip);
     setFormProxies(server.proxies || []);
+    // 只回填非密码字段：后端只给哈希，password 留空表示「沿用原密码」
+    setFormAuthRules(
+      (server.authRules || []).map((rule) => ({
+        id: rule.id,
+        path: rule.path,
+        matchKind: rule.matchKind,
+        label: rule.label ?? "",
+        password: "",
+        enabled: rule.enabled !== false,
+      }))
+    );
     setFormExposeLan(server.exposeLan === true);
     setShowAddDialog(true);
   }
@@ -176,6 +217,16 @@ export function useLocalService() {
     }
 
     const validProxies = formProxies.filter((p) => p.prefix.trim() && p.target.trim());
+
+    // 新建的规则必须当场设密码：没有 id 就没有可沿用的旧哈希，
+    // 放过去只会存下一条永远进不去的规则。
+    const authRules = formAuthRules.filter((r) => r.path?.trim());
+    const missingPassword = authRules.find((r) => !r.id && !r.password?.trim());
+    if (missingPassword) {
+      alert(`访问控制规则 ${missingPassword.path} 还没设密码`);
+      return;
+    }
+
     const input: ServerConfigInput = {
       name: formName.trim(),
       port,
@@ -186,6 +237,13 @@ export function useLocalService() {
       indexPage: formIndexPage.trim() || null,
       proxies: validProxies.length > 0 ? validProxies : [],
       exposeLan: formExposeLan,
+      authRules: authRules.map((rule) => ({
+        ...rule,
+        path: rule.path.trim(),
+        label: rule.label?.trim() || null,
+        // 留空 = 沿用原密码，别把空串当成「设为空密码」
+        password: rule.password?.trim() || null,
+      })),
     };
 
     try {
@@ -444,6 +502,7 @@ export function useLocalService() {
       formCors,
       formGzip,
       formProxies,
+      formAuthRules,
       formLocalPort,
       formRemoteHost,
       formRemotePort,
@@ -466,6 +525,9 @@ export function useLocalService() {
       onAddProxy: addProxyRule,
       onUpdateProxy: updateProxyRule,
       onRemoveProxy: removeProxyRule,
+      onAddAuthRule: addAuthRule,
+      onUpdateAuthRule: updateAuthRule,
+      onRemoveAuthRule: removeAuthRule,
       onCancel: closeFormDialog,
       onSubmit: handleSubmit,
     },

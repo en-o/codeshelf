@@ -21,6 +21,7 @@
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { pathToFileURL } from "node:url";
 
 /** 发版提交只应包含这五个文件。 */
 export const VERSION_FILES = [
@@ -157,14 +158,18 @@ function verifyStaged() {
   staged.forEach((f) => process.stdout.write(`    ${f}\n`));
 }
 
-const [cmd, arg] = process.argv.slice(2);
-if (cmd === "baseline") baseline(arg);
-else if (cmd === "verify-staged") verifyStaged();
-// sh 和 bat 都需要「发完切回哪条基线」，判定只留这一份，别在两个脚本里各写一遍
-else if (cmd === "base-branch") process.stdout.write(`${baseBranchFor(arg ?? "")}\n`);
-else {
-  process.stderr.write(
-    "用法: release-precheck.mjs baseline <version> | verify-staged | base-branch <version>\n",
-  );
-  process.exit(2);
+// 只有被直接执行时才跑命令分发：rerelease.mjs 要 import 这里的 baseBranchFor，
+// 无守卫的话一 import 就会命中下面的 usage 分支直接 exit(2)。
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const [cmd, arg] = process.argv.slice(2);
+  if (cmd === "baseline") baseline(arg);
+  else if (cmd === "verify-staged") verifyStaged();
+  // sh 和 bat 都需要「发完切回哪条基线」，判定只留这一份，别在两个脚本里各写一遍
+  else if (cmd === "base-branch") process.stdout.write(`${baseBranchFor(arg ?? "")}\n`);
+  else {
+    process.stderr.write(
+      "用法: release-precheck.mjs baseline <version> | verify-staged | base-branch <version>\n",
+    );
+    process.exit(2);
+  }
 }

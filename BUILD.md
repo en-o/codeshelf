@@ -135,7 +135,7 @@ CodeShelf-Portable-vX.X.X-x64.zip
 scripts\release.bat 0.2.0
 
 # Linux/macOS
-./scripts/release.sh 0.2.0
+sh ./scripts/release.sh 0.2.0
 ```
 
 发版脚本会：
@@ -147,6 +147,21 @@ scripts\release.bat 0.2.0
 - 安装版（`.msi`、`.exe`、`.dmg`、`.deb`、`.AppImage`）
 - 便携版（`CodeShelf-Portable-vX.X.X-x64.zip`）
 - 自动更新文件（`latest.json`）
+
+#### 发版失败了要重发同一个版本
+
+**不要手工把版本号改回上一版**。曾经这么干过一次：全文替换 `0.1.46` → `0.1.45`，
+把 `Cargo.lock` 里 `num-integer` 的版本也一起按了回去，之后任何触发依赖重新解析的操作
+都报 `failed to select a version for num-integer`。用脚本：
+
+```bash
+node scripts/rerelease.mjs 0.1.46            # 清残留 + 重新发
+node scripts/rerelease.mjs 0.1.46 --dry-run  # 先看它打算做什么
+```
+
+它会依次删掉 GitHub 上的 draft release、tag、`release/<版本>` 分支（本地 + 远端），
+`git reset` 撤掉未推送的 `chore: release vX` 提交，再调 `release.sh` / `release.bat` 重发一次。
+每步幂等，没有残留就跳过；**已经 Publish 的版本会被拒绝**（用户可能已经装上了，请改用下一个版本号）。
 
 发版说明正文取自根目录的 `RELEASE_NOTES.md`（CI 会读取其内容作为 GitHub Release 的描述，发版前记得更新它）。updater 签名密钥与 GitHub Secrets 的一次性配置见[在线更新配置指南](docs/更新步骤说明.md)。
 

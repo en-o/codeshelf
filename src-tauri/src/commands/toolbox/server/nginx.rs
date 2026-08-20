@@ -1,6 +1,6 @@
 // 生成等价 nginx 配置
 
-use super::super::{NginxConfigOptions, ProxyConfig};
+use super::super::{AuthRule, NginxConfigOptions, ProxyConfig};
 use super::{ensure_servers_loaded, SERVERS};
 use crate::error::AppResult;
 
@@ -99,6 +99,95 @@ fn push_proxy_location(out: &mut String, proxy: &ProxyConfig, cors: bool) {
     push_nginx_line(out, 4, "}");
 }
 
+/// 把一条访问控制规则导出成 nginx 的 auth_basic 段。
+///
+/// 本地服务用的是登录页 + Cookie，nginx 里没有等价指令，最接近的就是 Basic。
+/// 而且我们只存密码的哈希（配置文件是明文 JSON 落盘的），拿不回原文，
+/// 所以这里只能写 `auth_basic_user_file` 的引用 + 生成命令，不能替用户把 htpasswd 填好。
+fn push_auth_location(
+    out: &mut String,
+    rule: &AuthRule,
+    service_name: &str,
+    root_dir: &str,
+    url_prefix: &str,
+) {
+    let path = rule.path.trim();
+    if path.is_empty() {
+        return;
+    }
+    let realm = rule
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Restricted");
+    let exact = rule.match_kind == "exact";
+    let location = if exact {
+        format!("= {}", path)
+    } else if path == "/" {
+        "/".to_string()
+    } else {
+        format!("{}/", path.trim_end_matches('/'))
+    };
+
+    out.push('\n');
+    push_nginx_line(out, 4, &format!("location {location} {{"));
+    push_nginx_line(
+        out,
+        8,
+        &format!("auth_basic \"{}\";", escape_nginx_string(realm)),
+    );
+    push_nginx_line(
+        out,
+        8,
+        &format!(
+            "auth_basic_user_file conf/{}.htpasswd;",
+            htpasswd_name(service_name)
+        ),
+    );
+
+    // 静态内容怎么取：无 URL 前缀时沿用 server 级的 root；有前缀时要自己 alias 回去，
+    // 因为 nginx 不会从外层 location 继承 alias。
+    let prefix = url_prefix.trim_end_matches('/');
+    if prefix.is_empty() {
+        push_nginx_line(out, 8, "try_files $uri $uri/ =404;");
+    } else if let Some(rel) = path.strip_prefix(prefix) {
+        let rel = rel.trim_matches('/');
+        let target = if rel.is_empty() {
+            format!("{}/", root_dir)
+        } else if exact {
+            format!("{}/{}", root_dir, rel)
+        } else {
+            format!("{}/{}/", root_dir, rel)
+        };
+        push_nginx_line(out, 8, &format!("alias \"{}\";", escape_nginx_string(&target)));
+        if !exact {
+            push_nginx_line(out, 8, "try_files $uri $uri/ =404;");
+        }
+    } else {
+        push_nginx_line(
+            out,
+            8,
+            &format!("# 该路径不在 {prefix}/ 之下，请自行确认 root / alias"),
+        );
+    }
+    push_nginx_line(out, 4, "}");
+}
+
+/// htpasswd 文件名：只留字母数字和 `-_`，避免服务名里的空格/中文进到路径里。
+fn htpasswd_name(service_name: &str) -> String {
+    let cleaned: String = service_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let trimmed = cleaned.trim_matches('_');
+    if trimmed.is_empty() {
+        "codeshelf".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn build_nginx_config(options: NginxConfigOptions) -> String {
     let service_name = options.service_name.trim();
     let listen_port = options.listen_port;
@@ -185,6 +274,42 @@ fn build_nginx_config(options: NginxConfigOptions) -> String {
     }
 
     push_nginx_line(&mut out, 4, "}");
+
+    // 访问控制。nginx 里没有「登录页 + Cookie」的等价指令，最接近的是 Basic；
+    // 而且这里只存了密码哈希，htpasswd 得用户自己生成 —— 都写在注释里，不假装等价。
+    let auth_rules: Vec<&AuthRule> = options
+        .auth_rules
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|r| r.enabled)
+        .collect();
+    if !auth_rules.is_empty() {
+        out.push('\n');
+        push_nginx_line(&mut out, 4, "# ---- 访问控制 ----");
+        push_nginx_line(
+            &mut out,
+            4,
+            "# 本地服务用的是登录页 + Cookie 会话，nginx 侧最接近的等价物是 HTTP Basic。",
+        );
+        push_nginx_line(
+            &mut out,
+            4,
+            "# 密码在 CodeShelf 里只存哈希，取不回原文，htpasswd 需要自己生成：",
+        );
+        push_nginx_line(
+            &mut out,
+            4,
+            &format!(
+                "#   htpasswd -c /etc/nginx/conf/{}.htpasswd <用户名>",
+                htpasswd_name(service_name)
+            ),
+        );
+        for rule in auth_rules {
+            push_auth_location(&mut out, rule, service_name, &root_dir, url_prefix);
+        }
+    }
+
     push_nginx_line(&mut out, 0, "}");
     out
 }
@@ -211,5 +336,6 @@ pub async fn generate_nginx_config(server_id: String) -> AppResult<String> {
         proxies: Some(server.proxies),
         access_log: Some(true),
         error_log: Some(true),
+        auth_rules: Some(server.auth_rules),
     }))
 }

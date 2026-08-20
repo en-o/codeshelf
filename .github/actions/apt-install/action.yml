@@ -1,0 +1,26 @@
+name: apt install
+description: 装 apt 包，绕开 GitHub runner 上时不时整段不可达的 Azure 镜像
+
+inputs:
+  packages:
+    description: 要安装的包，空格分隔
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        # runner 的 sources.list 指向 mirror+file:/etc/apt/apt-mirrors.txt，Azure 排第一。
+        # Azure 整段不可达时 apt 会一直重试（实测 apt-get update 卡了 1 小时以上，
+        # 而 job 没有 timeout，等于把 6h 额度慢慢烧光），所以直接换成官方源，
+        # 再把重试次数和超时限死：坏了就快速失败，而不是挂在那里。
+        if [ -f /etc/apt/apt-mirrors.txt ]; then
+          printf 'http://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+        fi
+        APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+        # 外层再套一层硬超时：composite action 里的步骤不吃 timeout-minutes，
+        # 光靠 workflow 上的声明拦不住卡死的 apt。
+        timeout 300 sudo apt-get update "${APT_OPTS[@]}"
+        timeout 600 sudo apt-get install -y "${APT_OPTS[@]}" ${{ inputs.packages }}

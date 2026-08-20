@@ -1,6 +1,6 @@
 [package]
 name = "codeshelf"
-version = "0.1.45"
+version = "0.1.47"
 description = "代码书架 - 本地项目管理工具"
 authors = ["tan"]
 license = " Apache License 2.0"
@@ -66,6 +66,8 @@ base64 = "0.22"
 # 生成 MCP 网关访问密钥。getrandom 已经在依赖树里（ring / rustls 都在用），
 # 这里只是把它提成直接依赖，不引入新的加密栈。
 getrandom = "0.2"
+# 本地服务的访问密码用它加盐哈希（russh 已经间接带着，不多下一个 crate）
+sha2 = "0.10"
 arboard = "3"
 # 简历 docx 导出
 docx-rs = "0.4"
