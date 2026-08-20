@@ -4,6 +4,8 @@
 // 文件上传走 HTTP multipart POST，下载走 GET。聊天元数据保存在本机 localStorage。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { pairdropUploadPath } from "@/services/toolbox";
 
 export interface Peer {
   peerId: string;
@@ -38,6 +40,10 @@ export type ConversationMessage =
       uploadProgress?: number;
       // 接收方保存到本地后的路径,设了之后按钮就不再可用
       savedPath?: string;
+      /** 中转缓存已被领取并删除。token 同时会被清空,两端都不该再指向中转副本。 */
+      taken?: boolean;
+      /** 发送方自己的源文件路径。只有走系统文件对话框选的文件才有——拖拽进来的 File 对象没有路径。 */
+      localPath?: string;
     };
 
 export type ConnStatus = "offline" | "connecting" | "online";
@@ -66,7 +72,9 @@ const HISTORY_STORAGE_KEY = "pairdrop:history:v1";
 const DEVICE_ID_STORAGE_KEY = "pairdrop:device-id";
 const MAX_MESSAGES_PER_PEER = 300;
 /** 与后端 MAX_FILE_SIZE 保持一致（服务端落盘中转，超了会直接 413）。 */
-const MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024;
+const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
+/** 多久没有新的进度事件就判定这次上传已经死了（服务端提前应答/对方掉线都表现为卡住不动）。 */
+const UPLOAD_STALL_MS = 30_000;
 
 function emptyHistory(): PairDropHistory {
   return { version: 1, endpoints: {} };
@@ -348,6 +356,28 @@ export function usePairDropClient({
             appendMessage(msg.from, m);
             break;
           }
+          // 中转缓存已被一次性消费：两端同时清掉 token。
+          // 留着 token 的话，发送方点"保存"只会拿到 404，接收方也可能重复下载已删除的副本。
+          case "file-taken": {
+            updateEndpoint((current) => {
+              const next: Record<string, ConversationMessage[]> = {};
+              let touched = false;
+              for (const [peerId, arr] of Object.entries(current.conversations)) {
+                let changed = false;
+                const updated = arr.map((m) => {
+                  if (m.kind === "file" && m.token && m.token === msg.token) {
+                    changed = true;
+                    return { ...m, token: "", taken: true };
+                  }
+                  return m;
+                });
+                next[peerId] = changed ? updated : arr;
+                touched = touched || changed;
+              }
+              return touched ? { ...current, conversations: next } : current;
+            });
+            break;
+          }
           case "error":
             console.error("PairDrop error:", msg.message);
             break;
@@ -451,6 +481,7 @@ export function usePairDropClient({
       if (file.size > MAX_FILE_SIZE) {
         throw new Error(`文件超过 ${MAX_FILE_SIZE / 1024 / 1024 / 1024}GB 上限`);
       }
+      // ponytail: 用「多久没进展」而不是总时长做超时，10GB 的慢速上传不会被误杀
       // 一次上传从开始到结束绑定同一个 endpoint 和同一个 apiBase。
       // 大文件上传可能持续很久，期间用户完全可能切到另一个房间。
       const boundKey = endpointKeyRef.current;
@@ -477,7 +508,20 @@ export function usePairDropClient({
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${boundApiBase}/api/upload`, true);
         if (selfId) xhr.setRequestHeader("x-peer-id", selfId);
+        // 服务端一旦提前应答（无权限 / 缓存已满）就不再读 body，WebView 里的表现是
+        // 进度条停在半路、onload/onerror 都不来。用停滞看门狗把它变成一条明确的失败。
+        let stallTimer: number | undefined;
+        const armStall = () => {
+          if (stallTimer) window.clearTimeout(stallTimer);
+          stallTimer = window.setTimeout(() => xhr.abort(), UPLOAD_STALL_MS);
+        };
+        const disarmStall = () => {
+          if (stallTimer) window.clearTimeout(stallTimer);
+          stallTimer = undefined;
+        };
+        armStall();
         xhr.upload.onprogress = (e) => {
+          armStall();
           if (!e.lengthComputable) return;
           const pct = Math.round((e.loaded / e.total) * 100);
           updateEndpoint((current) => {
@@ -498,6 +542,7 @@ export function usePairDropClient({
         };
         const result = await new Promise<{ token: string }>((resolve, reject) => {
           xhr.onload = () => {
+            disarmStall();
             if (xhr.status >= 200 && xhr.status < 300) {
               try {
                 resolve(JSON.parse(xhr.responseText));
@@ -507,11 +552,30 @@ export function usePairDropClient({
             } else if (xhr.status === 413) {
               reject(new Error("文件超过服务端上限"));
             } else {
-              reject(new Error("上传失败: HTTP " + xhr.status));
+              // 服务端的 JSON 里有具体原因（无权限 / 缓存已满 / 并发已满），别吞掉
+              let detail = "";
+              try {
+                detail = JSON.parse(xhr.responseText)?.error || "";
+              } catch {
+                /* 非 JSON 响应，按状态码报 */
+              }
+              reject(new Error(detail || "上传失败: HTTP " + xhr.status));
             }
           };
-          xhr.onerror = () => reject(new Error("网络中断,请检查端口是否仍然开放"));
-          xhr.ontimeout = () => reject(new Error("上传超时"));
+          xhr.onerror = () => {
+            disarmStall();
+            reject(new Error("网络中断,请检查端口是否仍然开放"));
+          };
+          xhr.onabort = () =>
+            reject(
+              new Error(
+                `上传停滞超过 ${UPLOAD_STALL_MS / 1000} 秒已中断，通常是对方已离线或服务已停止`
+              )
+            );
+          xhr.ontimeout = () => {
+            disarmStall();
+            reject(new Error("上传超时"));
+          };
           xhr.send(form);
         });
 
@@ -555,6 +619,105 @@ export function usePairDropClient({
           };
         }, boundKey);
         throw err;
+      }
+    },
+    [apiBase, appendMessage, selfId, send, updateEndpoint]
+  );
+
+  /**
+   * 从本地真实路径发送（系统文件对话框选出来的）。
+   *
+   * 和 [`sendFile`] 的区别只在于「知不知道源文件在哪」：这条路径上传交给后端流式做，
+   * 发送方那条消息记下 `localPath`，中转缓存被领取删掉之后依然能打开自己的源文件。
+   */
+  const sendFilePath = useCallback(
+    async (to: string, path: string) => {
+      if (!apiBase) return;
+      const boundKey = endpointKeyRef.current;
+      const name = path.split(/[\\/]/).pop() || "file";
+      const localId = `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      appendMessage(
+        to,
+        {
+          kind: "file",
+          id: localId,
+          from: selfId || "self",
+          token: "",
+          name,
+          // 大小由后端第一个进度事件带回来（total），省掉前端再去 stat 一次
+          size: 0,
+          mime: null,
+          ts: Date.now(),
+          uploadProgress: 0,
+          localPath: path,
+        },
+        boundKey
+      );
+
+      const patch = (fn: (m: ConversationMessage) => ConversationMessage) =>
+        updateEndpoint((current) => {
+          const arr = current.conversations[to];
+          if (!arr) return current;
+          return {
+            ...current,
+            conversations: {
+              ...current.conversations,
+              [to]: arr.map((m) => (m.id === localId ? fn(m) : m)),
+            },
+          };
+        }, boundKey);
+
+      const unlisten = await listen<{
+        uploadId: string;
+        loaded: number;
+        total: number;
+      }>("pairdrop:upload-progress", (e) => {
+        if (e.payload.uploadId !== localId || !e.payload.total) return;
+        const pct = Math.round((e.payload.loaded / e.payload.total) * 100);
+        patch((m) =>
+          m.kind === "file"
+            ? { ...m, uploadProgress: pct, size: e.payload.total }
+            : m
+        );
+      });
+
+      try {
+        const res = await pairdropUploadPath({
+          apiBase,
+          from: selfId || "",
+          to,
+          path,
+          uploadId: localId,
+        });
+        send({
+          type: "notify-file",
+          to,
+          token: res.token,
+          name: res.name,
+          size: res.size,
+          mime: null,
+        });
+        patch((m) =>
+          m.kind === "file"
+            ? { ...m, token: res.token, size: res.size, uploadProgress: 100 }
+            : m
+        );
+      } catch (err) {
+        // 失败就把占位气泡撤掉，和 sendFile 的行为保持一致
+        updateEndpoint((current) => {
+          const arr = current.conversations[to];
+          if (!arr) return current;
+          return {
+            ...current,
+            conversations: {
+              ...current.conversations,
+              [to]: arr.filter((m) => m.id !== localId),
+            },
+          };
+        }, boundKey);
+        throw err;
+      } finally {
+        unlisten();
       }
     },
     [apiBase, appendMessage, selfId, send, updateEndpoint]
@@ -617,6 +780,7 @@ export function usePairDropClient({
     unread,
     sendText,
     sendFile,
+    sendFilePath,
     updateSelfName,
     markFileSaved,
     apiBase,

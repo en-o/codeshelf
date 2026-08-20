@@ -885,6 +885,20 @@ export async function pairdropDownloadSave(url: string, savePath: string): Promi
   return invoke("pairdrop_download_save", { url, savePath });
 }
 
+/**
+ * 从本地真实路径上传（走系统文件对话框选出来的文件）。
+ * 后端边读边发，进度通过 `pairdrop:upload-progress` 事件回来（携带 uploadId）。
+ */
+export async function pairdropUploadPath(args: {
+  apiBase: string;
+  from: string;
+  to: string;
+  path: string;
+  uploadId: string;
+}): Promise<{ token: string; name: string; size: number }> {
+  return invoke("pairdrop_upload_path", args);
+}
+
 // ============== 工具函数 ==============
 
 export function formatBytes(bytes: number): string {

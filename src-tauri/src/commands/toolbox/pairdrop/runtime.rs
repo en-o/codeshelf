@@ -370,7 +370,10 @@ async fn check_upload_peers(
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<(String, String), Response> {
+    // 拒绝一定要留日志：服务端提前应答后客户端只看到进度条卡住，
+    // 没日志的话「传一半不动了」永远查不出真实原因。
     let deny = |msg: &str| {
+        log::warn!("跨设备传输：拒绝上传（{}）from={:?} to={:?}", msg, from, to);
         (StatusCode::FORBIDDEN, Json(json!({ "error": msg }))).into_response()
     };
     let from = from.map(str::to_string).filter(|s| !s.is_empty());
@@ -481,15 +484,22 @@ async fn api_upload(
                 // 先清掉过期条目，再算总量 —— 否则过期文件会一直占着额度
                 files.retain(|_, f| !f.is_expired());
                 let used: u64 = files.values().map(|f| f.size).sum();
-                MAX_TOTAL_CACHE.saturating_sub(used).min(MAX_FILE_SIZE)
+                // 单文件额度固定为 MAX_FILE_SIZE：待领取的存量文件不该把这次上传的额度削小，
+                // 否则小文件会在传输中途被 413 掐断（客户端只看到进度条卡住）。
+                // 总量超限时额度为 0 —— 在读 body 之前就拒绝，客户端能立刻拿到状态码。
+                if used >= MAX_TOTAL_CACHE {
+                    0
+                } else {
+                    MAX_FILE_SIZE
+                }
             };
             if quota == 0 {
                 return (
                     StatusCode::INSUFFICIENT_STORAGE,
                     Json(json!({
                         "error": format!(
-                            "待领取文件缓存已满（{} MB），请让接收方先取走已发送的文件",
-                            MAX_TOTAL_CACHE / 1024 / 1024
+                            "待领取文件缓存已满（{} GB），请让接收方先取走已发送的文件",
+                            MAX_TOTAL_CACHE / 1024 / 1024 / 1024
                         )
                     })),
                 )
@@ -598,7 +608,7 @@ async fn copy_field(
         if written > quota {
             return Err((
                 StatusCode::PAYLOAD_TOO_LARGE,
-                format!("文件超出上限（{} MB）", quota / 1024 / 1024),
+                format!("文件超出上限（{} GB）", quota / 1024 / 1024 / 1024),
             ));
         }
         file.write_all(&chunk).await.map_err(|e| {
@@ -658,6 +668,20 @@ async fn api_file(
                     return (StatusCode::GONE, "文件已失效").into_response();
                 }
             };
+            // 缓存到此为止：条目已从 map 移除，临时文件随 CachedFile::drop 删掉。
+            // 通知收发双方各自清掉 token —— 谁都不该再指向这份已经不存在的中转副本，
+            // 接收方之后看自己保存的路径，发送方看自己的源文件。
+            {
+                let peers = handle.state.peers.lock().await;
+                for pid in [&file.from, &file.to] {
+                    if let Some(p) = peers.get(pid) {
+                        let _ = p.sender.send(ServerMessage::FileTaken {
+                            token: token.clone(),
+                        });
+                    }
+                }
+            }
+
             let mut headers = HeaderMap::new();
             let mime = file
                 .mime

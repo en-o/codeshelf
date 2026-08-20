@@ -1,6 +1,6 @@
 [package]
 name = "codeshelf"
-version = "0.1.48-2"
+version = "0.1.49"
 description = "代码书架 - 本地项目管理工具"
 authors = ["tan"]
 license = " Apache License 2.0"
@@ -50,7 +50,7 @@ tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
 # 工具箱模块依赖
 futures = "0.3"
-reqwest = { version = "0.12", features = ["stream", "json", "cookies"] }
+reqwest = { version = "0.12", features = ["stream", "json", "cookies", "multipart"] }
 url = "2.5"
 # 网页抓取的「规则提取」：regex 已在依赖树（1.12）；kuchikiki 提供 CSS 选择器，
 # 它本就被 wry/tauri-utils 引入并编译，这里精确复用同一版本，避免再编一份 html5ever。
@@ -95,3 +95,11 @@ windows = { version = "0.61", features = [
     "Win32_System_Registry",
     "Win32_Security",
 ] }
+
+# target/debug 曾经涨到 100GB，其中 deps 65GB、incremental 21GB —— 绝大部分是**依赖的调试信息**。
+# 断点几乎只打在自己的代码里，依赖的 DWARF 纯属浪费磁盘。
+[profile.dev]
+debug = "line-tables-only" # 自己的代码保留行号（panic 回溯照常可读），去掉变量/类型的完整调试信息
+
+[profile.dev.package."*"]
+debug = false # 依赖不带调试信息 —— 体积大头在这里

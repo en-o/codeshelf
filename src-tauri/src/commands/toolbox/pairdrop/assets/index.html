@@ -372,6 +372,17 @@ function handleServerMessage(msg){
     case 'file':
       addMessage(msg.from, { kind: 'file', from: msg.from, fromName: msg.fromName, token: msg.token, name: msg.name, size: msg.size, mime: msg.mime, ts: msg.ts });
       break;
+    // 中转缓存被一次性消费掉了(条目移除 + 临时文件删除),两端一起清 token:
+    // 留着的话下载按钮点下去只会 404,发送方那条也不该再指向已经不存在的副本。
+    case 'file-taken': {
+      for (const arr of state.conversations.values()){
+        for (const m of arr){
+          if (m.kind === 'file' && m.token && m.token === msg.token){ m.token = ''; m.taken = true; }
+        }
+      }
+      renderMessages();
+      break;
+    }
     case 'error':
       toast(msg.message || '出错了', 'error');
       break;
@@ -525,8 +536,10 @@ function renderMessages(){
         `;
       } else if (!isSelf && m.token){
         actionsHtml = `<div class="msg-file-actions"><a class="msg-file-btn" href="${downloadUrl}" download="${escapeHTML(m.name)}">下载</a></div>`;
+      } else if (!isSelf && m.taken){
+        actionsHtml = `<div class="msg-file-status">已下载,中转缓存已清理</div>`;
       } else if (isSelf){
-        actionsHtml = `<div class="msg-file-status">已发送</div>`;
+        actionsHtml = `<div class="msg-file-status">${m.taken ? '对方已领取,中转缓存已清理' : '已发送'}</div>`;
       }
       div.innerHTML = `
         <div>
@@ -582,7 +595,7 @@ async function sendFiles(files){
 }
 async function sendOneFile(file){
   // 与后端 MAX_FILE_SIZE 保持一致（中继边收边落盘，限的是磁盘不是内存）
-  if (file.size > 4 * 1024 * 1024 * 1024){ toast(`${file.name} 超过 4GB 上限`, 'error'); return; }
+  if (file.size > 10 * 1024 * 1024 * 1024){ toast(`${file.name} 超过 10GB 上限`, 'error'); return; }
   const peerId = state.selected;
   const localId = genLocalId();
   // 立即插入占位气泡,uploadProgress=0 显示进度条
@@ -606,7 +619,15 @@ async function sendOneFile(file){
     form.append('file', file, file.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload', true);
+    // 服务端提前应答(无权限/缓存已满)后就不再读 body,浏览器里的表现是进度条卡死、
+    // onload/onerror 都不来。按「多久没进展」中断,而不是按总时长,慢速大文件不会被误杀。
+    const STALL_MS = 30000;
+    let stallTimer;
+    const armStall = () => { clearTimeout(stallTimer); stallTimer = setTimeout(() => xhr.abort(), STALL_MS); };
+    const disarmStall = () => { clearTimeout(stallTimer); };
+    armStall();
     xhr.upload.onprogress = (e) => {
+      armStall();
       if (!e.lengthComputable) return;
       // 上限 99 留给收到 token 后切到「已发送」状态,避免 100% 但还没拿到 token 的歧义
       const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
@@ -614,16 +635,21 @@ async function sendOneFile(file){
     };
     const tokenPromise = new Promise((resolve, reject) => {
       xhr.onload = () => {
+        disarmStall();
         if (xhr.status >= 200 && xhr.status < 300){
           try { resolve(JSON.parse(xhr.responseText)); } catch(e){ reject(e); }
         } else if (xhr.status === 413){
           reject(new Error('文件超过服务端上限'));
         } else {
-          reject(new Error('上传失败: HTTP ' + xhr.status));
+          // 服务端 JSON 里有具体原因(无权限/缓存已满/并发已满),别吞成一句 HTTP xxx
+          let detail = '';
+          try { detail = JSON.parse(xhr.responseText).error || ''; } catch(e){}
+          reject(new Error(detail || ('上传失败: HTTP ' + xhr.status)));
         }
       };
-      xhr.onerror = () => reject(new Error('网络中断,请检查 Wi-Fi / 端口是否仍然开放'));
-      xhr.ontimeout = () => reject(new Error('上传超时'));
+      xhr.onerror = () => { disarmStall(); reject(new Error('网络中断,请检查 Wi-Fi / 端口是否仍然开放')); };
+      xhr.onabort = () => reject(new Error('上传停滞超过 ' + (STALL_MS/1000) + ' 秒已中断,通常是对方已离线或服务已停止'));
+      xhr.ontimeout = () => { disarmStall(); reject(new Error('上传超时')); };
     });
     xhr.send(form);
     const res = await tokenPromise;

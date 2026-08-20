@@ -1,6 +1,6 @@
 {
   "name": "codeshelf",
-  "version": "0.1.48-2",
+  "version": "0.1.49",
   "private": true,
   "description": "代码书架 - 本地项目管理工具",
   "type": "module",
@@ -13,7 +13,6 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "verify:release": "bash scripts/verify-release.sh",
-    "dsh:smoke": "node scripts/dsh-smoke.mjs",
     "build:portable": "scripts\\build-portable.bat"
   },
   "repository": {

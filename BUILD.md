@@ -215,3 +215,8 @@ node scripts/rerelease.mjs 0.1.46 --dry-run  # 先看它打算做什么
 ```bash
 pkg-config --modversion webkit2gtk-4.1
 ```
+
+### 空间清理
+```shell
+cargo clean --manifest-path /Users/macbookpro/Desktop/tan/code/me/codeshelf/src-tauri/Cargo.toml
+```
